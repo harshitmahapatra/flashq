@@ -16,8 +16,9 @@ A lightweight, networked message queue system built in Rust with HTTP REST API. 
 
 The project follows Rust best practices with separate library and binary crates:
 
-- **Library crate** (`src/lib.rs`) - Core message queue functionality
-- **Interactive demo** (`src/main.rs`) - Menu-driven CLI for exploring functionality
+- **Library crate** (`src/lib.rs`) - Core message queue functionality + demo module
+- **Main binary** (`src/main.rs`) - Lightweight entry point (delegates to demo module)
+- **Demo module** (`src/demo.rs`) - Interactive CLI with menu-driven interface
 - **Server binary** (`src/bin/server.rs`) - HTTP API server
 - **Client binary** (`src/bin/client.rs`) - Command-line client
 - **Integration tests** (`tests/integration_tests.rs`) - End-to-end API testing

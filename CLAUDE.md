@@ -37,7 +37,8 @@ This is a Rust-based message queue implementation with HTTP API endpoints, compr
 
 Following Rust best practices with library and binary crates:
 - `src/lib.rs` - Library crate containing core message queue functionality
-- `src/main.rs` - Binary crate with application entry point  
+- `src/main.rs` - Lightweight binary entry point (delegates to demo module)
+- `src/demo.rs` - Interactive demo module with CLI functionality  
 - `src/bin/server.rs` - HTTP server implementation with REST API
 - `src/bin/client.rs` - CLI client for interacting with the server
 - `tests/integration_tests.rs` - Comprehensive integration test suite
@@ -46,16 +47,18 @@ Following Rust best practices with library and binary crates:
 ### Library Crate (`src/lib.rs`)
 - `Message` struct - Individual message with content, timestamp, and unique ID
 - `MessageQueue` struct - Main queue implementation with topic-based organization
+- `demo` module - Interactive CLI functionality (exposed publicly)
 - Thread-safe using `Arc<Mutex<>>` for concurrent access
 - All unit tests located here
 
 ### Binary Crates
-- **`src/main.rs`** - Interactive CLI demonstration with user-friendly menu system
+- **`src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
+- **`src/demo.rs`** - Interactive CLI demo module with user-friendly menu system
 - **`src/bin/server.rs`** - HTTP REST API server with endpoints for posting/polling messages
 - **`src/bin/client.rs`** - Command-line client for interacting with the HTTP server
 
-### Interactive Demo (`src/main.rs`)
-The main binary provides an educational interactive demonstration of the message queue library:
+### Interactive Demo (`src/demo.rs`)
+The demo module provides an educational interactive demonstration of the message queue library:
 
 **Features:**
 - **Menu-driven interface** - 5 clear options with emoji-based visual feedback
