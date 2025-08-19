@@ -19,6 +19,7 @@ The project follows Rust best practices with separate library and binary crates:
 - **Library crate** (`src/lib.rs`) - Core message queue functionality
 - **Server binary** (`src/bin/server.rs`) - HTTP API server
 - **Client binary** (`src/bin/client.rs`) - Command-line client
+- **Integration tests** (`tests/integration_tests.rs`) - End-to-end API testing
 
 ## Quick Start
 
@@ -158,15 +159,35 @@ cargo build --bin client
 ### Testing
 
 ```bash
-# Run unit tests
+# Run all tests (unit + integration)
 cargo test
+
+# Run only unit tests
+cargo test --lib
+
+# Run only integration tests
+cargo test --test integration_tests
 
 # Run tests with output
 cargo test -- --nocapture
 
 # Test specific function
 cargo test test_poll_messages_with_count_limit
+
+# Test end-to-end workflow
+cargo test test_end_to_end_workflow
 ```
+
+#### Integration Test Coverage
+
+The comprehensive integration test suite validates:
+
+- **End-to-end workflow** - Multi-topic message posting and polling
+- **HTTP API functionality** - All REST endpoints with real server instances  
+- **FIFO ordering verification** - Message ordering guarantees across topics
+- **Count parameter validation** - Polling limits work correctly
+- **Error handling** - Invalid requests and edge cases
+- **Health check functionality** - Server status monitoring
 
 ### Code Quality
 
