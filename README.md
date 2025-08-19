@@ -202,6 +202,122 @@ cargo clippy
 cargo fmt
 ```
 
+## Production Deployment
+
+### Building for Production
+
+Build optimized release binaries for deployment:
+
+```bash
+# Build all binaries (recommended)
+cargo build --release
+
+# Build specific binaries
+cargo build --release --bin server
+cargo build --release --bin client
+
+# Binaries will be in target/release/
+ls -la target/release/
+```
+
+### Running Production Binaries
+
+**Start the Server:**
+```bash
+# Default port (8080)
+./target/release/server
+
+# Custom port
+./target/release/server 9090
+
+# Run in background (Linux/macOS)
+./target/release/server 8080 &
+
+# Check if server is running
+curl http://127.0.0.1:8080/health
+```
+
+**Use the Client:**
+```bash
+# Basic operations
+./target/release/client post alerts "System starting up"
+./target/release/client poll alerts
+
+# With custom server port
+./target/release/client --port=9090 post news "Production message"
+./target/release/client -p 9090 poll news 10
+```
+
+### Installation Options
+
+#### Option 1: Cargo Install (Recommended)
+```bash
+# Install from local source
+cargo install --path . --bin server
+cargo install --path . --bin client
+
+# Binaries installed to ~/.cargo/bin (ensure it's in PATH)
+# Now you can run from anywhere:
+server 8080
+client post news "Hello from installed binary"
+```
+
+#### Option 2: Manual Installation
+```bash
+# Copy to system binaries directory
+sudo cp target/release/server /usr/local/bin/
+sudo cp target/release/client /usr/local/bin/
+sudo chmod +x /usr/local/bin/server
+sudo chmod +x /usr/local/bin/client
+
+# Run from anywhere
+server 8080
+client post news "System-wide installation"
+```
+
+#### Option 3: Docker (Future Enhancement)
+```bash
+# Build Docker image (Dockerfile needed)
+# docker build -t message-queue-rs .
+# docker run -p 8080:8080 message-queue-rs
+```
+
+### Production Considerations
+
+- **Performance**: Release builds are ~10x faster than debug builds
+- **Binary size**: Release binaries are optimized for size and speed
+- **Dependencies**: Binaries are statically linked (no external dependencies)
+- **Memory**: In-memory storage - data lost on restart
+- **Monitoring**: Use `/health` endpoint for health checks
+- **Ports**: Ensure firewall allows the chosen port
+
+### Systemd Service (Linux)
+
+Create `/etc/systemd/system/message-queue.service`:
+
+```ini
+[Unit]
+Description=Message Queue RS Server
+After=network.target
+
+[Service]
+Type=simple
+User=messagequeue
+ExecStart=/usr/local/bin/server 8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable message-queue
+sudo systemctl start message-queue
+sudo systemctl status message-queue
+```
+
 ## Performance Characteristics
 
 - **Memory usage** - In-memory storage with O(1) append/read operations

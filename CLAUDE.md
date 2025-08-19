@@ -9,9 +9,15 @@ This is a Rust-based message queue implementation with HTTP API endpoints, compr
 ## Development Commands
 
 ### Building and Running
-- `cargo build` - Build the project
+- `cargo build` - Build the project (debug mode)
 - `cargo run` - Build and run the application
 - `cargo build --release` - Build optimized release version
+
+### Production Binary Building
+- `cargo build --release --bin server` - Build optimized server binary
+- `cargo build --release --bin client` - Build optimized client binary
+- `cargo build --release` - Build all optimized binaries
+- Binaries located in `target/release/` directory
 
 ### Testing and Quality
 - `cargo test` - Run all tests (unit + integration)
@@ -67,3 +73,52 @@ Current implementation features:
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
 - **Production ready**: Error handling, health checks, and proper HTTP status codes
+
+## Production Deployment
+
+### Running Production Binaries
+
+After building with `cargo build --release`:
+
+**Server:**
+```bash
+# Default port (8080)
+./target/release/server
+
+# Custom port
+./target/release/server 9090
+```
+
+**Client:**
+```bash
+# Post message
+./target/release/client post news "Production message"
+
+# Poll messages
+./target/release/client poll news
+
+# Custom server port
+./target/release/client --port=9090 post news "Custom port message"
+```
+
+### Binary Installation
+
+**System-wide installation:**
+```bash
+# Install to ~/.cargo/bin (ensure it's in PATH)
+cargo install --path . --bin server
+cargo install --path . --bin client
+
+# Run from anywhere
+server 8080
+client post news "Installed binary message"
+```
+
+**Manual deployment:**
+```bash
+# Copy binaries to deployment location
+cp target/release/server /usr/local/bin/
+cp target/release/client /usr/local/bin/
+chmod +x /usr/local/bin/server
+chmod +x /usr/local/bin/client
+```
