@@ -21,6 +21,13 @@ The project follows Rust best practices with separate library and binary crates:
 - **Client binary** (`src/bin/client.rs`) - Command-line client
 - **Integration tests** (`tests/integration_tests.rs`) - End-to-end API testing
 
+## Dependencies
+
+- **axum** - HTTP server framework
+- **tokio** - Async runtime  
+- **serde** - JSON serialization
+- **reqwest** - HTTP client (rustls-tls)
+
 ## Quick Start
 
 ### Running the Server
@@ -178,30 +185,6 @@ cargo test test_poll_messages_with_count_limit
 cargo test test_end_to_end_workflow
 ```
 
-#### Integration Test Coverage
-
-The comprehensive integration test suite validates:
-
-- **End-to-end workflow** - Multi-topic message posting and polling
-- **HTTP API functionality** - All REST endpoints with real server instances  
-- **FIFO ordering verification** - Message ordering guarantees across topics
-- **Count parameter validation** - Polling limits work correctly
-- **Error handling** - Invalid requests and edge cases
-- **Health check functionality** - Server status monitoring
-
-### Code Quality
-
-```bash
-# Check code
-cargo check
-
-# Run linter
-cargo clippy
-
-# Format code
-cargo fmt
-```
-
 ## Production Deployment
 
 ### Building for Production
@@ -275,49 +258,6 @@ server 8080
 client post news "System-wide installation"
 ```
 
-#### Option 3: Docker (Future Enhancement)
-```bash
-# Build Docker image (Dockerfile needed)
-# docker build -t message-queue-rs .
-# docker run -p 8080:8080 message-queue-rs
-```
-
-### Production Considerations
-
-- **Performance**: Release builds are ~10x faster than debug builds
-- **Binary size**: Release binaries are optimized for size and speed
-- **Dependencies**: Binaries are statically linked (no external dependencies)
-- **Memory**: In-memory storage - data lost on restart
-- **Monitoring**: Use `/health` endpoint for health checks
-- **Ports**: Ensure firewall allows the chosen port
-
-### Systemd Service (Linux)
-
-Create `/etc/systemd/system/message-queue.service`:
-
-```ini
-[Unit]
-Description=Message Queue RS Server
-After=network.target
-
-[Service]
-Type=simple
-User=messagequeue
-ExecStart=/usr/local/bin/server 8080
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl enable message-queue
-sudo systemctl start message-queue
-sudo systemctl status message-queue
-```
-
 ## Performance Characteristics
 
 - **Memory usage** - In-memory storage with O(1) append/read operations
@@ -325,13 +265,6 @@ sudo systemctl status message-queue
 - **Network** - HTTP/1.1 with JSON serialization
 - **Ordering** - FIFO guarantee within topics
 - **Persistence** - Messages retained until process restart
-
-## Dependencies
-
-- **axum** - HTTP server framework
-- **tokio** - Async runtime  
-- **serde** - JSON serialization
-- **reqwest** - HTTP client (rustls-tls)
 
 ## License
 
