@@ -87,18 +87,11 @@ async fn post_message(
     }
 }
 
-// TODO(human): Implement the poll_messages endpoint
 async fn poll_messages(
     State(queue): State<AppState>,
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
 ) -> Result<Json<PollMessagesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // TODO: Call queue.poll_messages with topic and params.count
-    // TODO: Convert the Vec<Message> result to Vec<MessageResponse>
-    // TODO: Return PollMessagesResponse with messages and count
-    // TODO: Handle errors by returning appropriate HTTP status codes
-
-    // Placeholder response - replace this with actual implementation
     let _count = params.count;
     let _topic_name = topic;
     match queue.poll_messages(&_topic_name, _count) {
