@@ -153,3 +153,10 @@ cp target/release/client /usr/local/bin/
 chmod +x /usr/local/bin/server
 chmod +x /usr/local/bin/client
 ```
+
+## Important Instructions for Claude Code
+
+- **TODO(human) sections**: NEVER implement or fill in TODO(human) sections - these are specifically for human collaboration. Wait for the human to implement these sections before proceeding.
+- **File creation**: NEVER create files unless they're absolutely necessary for achieving your goal.
+- **File editing**: ALWAYS prefer editing an existing file to creating a new one.
+- **Documentation**: NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
