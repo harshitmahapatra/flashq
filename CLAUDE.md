@@ -10,7 +10,9 @@ This is a Rust-based message queue implementation with HTTP API endpoints, compr
 
 ### Building and Running
 - `cargo build` - Build the project (debug mode)
-- `cargo run` - Build and run the application
+- `cargo run --bin message-queue-rs` - Build and run the interactive demo
+- `cargo run --bin server` - Build and run the HTTP server
+- `cargo run --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
 
 ### Production Binary Building
@@ -48,9 +50,38 @@ Following Rust best practices with library and binary crates:
 - All unit tests located here
 
 ### Binary Crates
-- **`src/main.rs`** - Simple CLI demonstration of library functionality
+- **`src/main.rs`** - Interactive CLI demonstration with user-friendly menu system
 - **`src/bin/server.rs`** - HTTP REST API server with endpoints for posting/polling messages
 - **`src/bin/client.rs`** - Command-line client for interacting with the HTTP server
+
+### Interactive Demo (`src/main.rs`)
+The main binary provides an educational interactive demonstration of the message queue library:
+
+**Features:**
+- **Menu-driven interface** - 5 clear options with emoji-based visual feedback
+- **Post messages interactively** - Prompts for topic and content with input validation
+- **Poll messages with options** - Choose topic and optionally limit message count
+- **Topic management** - View all created topics with message counts from current session
+- **Quick demo mode** - Automated demonstration posting and polling multiple messages
+- **Error handling** - Graceful input validation and user-friendly error messages
+
+**Usage:**
+```bash
+# Run the interactive demo
+cargo run --bin message-queue-rs
+
+# Or after building
+./target/debug/message-queue-rs
+```
+
+**Menu Options:**
+1. Post a message - Interactive topic and content input
+2. Poll messages from a topic - Choose topic and message count limit
+3. View all topics - Show session statistics and topic overview
+4. Run quick demo - Automated demonstration of core functionality
+5. Exit - Clean program termination
+
+This provides an excellent way to understand the library API and test functionality without requiring HTTP server setup or external clients.
 
 ### Integration Tests (`tests/integration_tests.rs`)
 - **End-to-end workflow testing** - Multi-topic message posting and polling

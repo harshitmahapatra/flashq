@@ -17,6 +17,7 @@ A lightweight, networked message queue system built in Rust with HTTP REST API. 
 The project follows Rust best practices with separate library and binary crates:
 
 - **Library crate** (`src/lib.rs`) - Core message queue functionality
+- **Interactive demo** (`src/main.rs`) - Menu-driven CLI for exploring functionality
 - **Server binary** (`src/bin/server.rs`) - HTTP API server
 - **Client binary** (`src/bin/client.rs`) - Command-line client
 - **Integration tests** (`tests/integration_tests.rs`) - End-to-end API testing
@@ -29,6 +30,19 @@ The project follows Rust best practices with separate library and binary crates:
 - **reqwest** - HTTP client (rustls-tls)
 
 ## Quick Start
+
+### Try the Interactive Demo
+
+```bash
+# Explore the message queue with a user-friendly menu
+cargo run --bin message-queue-rs
+```
+
+The interactive demo provides a guided way to:
+- Post messages to topics
+- Poll messages with optional count limits  
+- View created topics
+- Run automated demonstrations
 
 ### Running the Server
 
