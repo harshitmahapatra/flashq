@@ -1,22 +1,15 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+  issue_comment:
+    types: [created]
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Only trigger on PR comments that mention @claude
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude')
     
     runs-on: ubuntu-latest
     permissions:
@@ -26,9 +19,23 @@ jobs:
       id-token: write
     
     steps:
-      - name: Checkout repository
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            return pr.data.head.sha;
+
+      - name: Checkout PR
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ steps.pr.outputs.result }}
           fetch-depth: 1
 
       - name: Run Claude Code Review
@@ -40,7 +47,7 @@ jobs:
           # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4.1)
           # model: "claude-opus-4-1-20250805"
 
-          # Direct prompt for automated review (no @claude mention needed)
+          # Triggered by @claude mention in PR comments
           direct_prompt: |
             Please review this pull request and provide feedback on:
             - Code quality and best practices
