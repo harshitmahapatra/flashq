@@ -1,5 +1,5 @@
-use clap::{Parser, Subcommand};
 use chrono::{DateTime, Utc};
+use clap::{Parser, Subcommand};
 use message_queue_rs::api::*;
 
 #[derive(Parser)]
@@ -53,13 +53,16 @@ async fn main() {
             };
 
             let url = format!("{}/api/topics/{}/messages", server_url, topic);
-            
+
             match client.post(&url).json(&request).send().await {
                 Ok(response) => {
                     if response.status().is_success() {
                         match response.json::<PostMessageResponse>().await {
                             Ok(post_response) => {
-                                println!("✓ Posted message to topic '{}' with ID: {}", topic, post_response.id);
+                                println!(
+                                    "✓ Posted message to topic '{}' with ID: {}",
+                                    topic, post_response.id
+                                );
                             }
                             Err(e) => println!("✗ Failed to parse response: {}", e),
                         }
@@ -67,7 +70,10 @@ async fn main() {
                         let status = response.status();
                         match response.json::<ErrorResponse>().await {
                             Ok(error_response) => {
-                                println!("✗ Failed to post to topic '{}': {}", topic, error_response.error);
+                                println!(
+                                    "✗ Failed to post to topic '{}': {}",
+                                    topic, error_response.error
+                                );
                             }
                             Err(_) => {
                                 println!("✗ Server error: {}", status);
@@ -90,9 +96,17 @@ async fn main() {
                     if response.status().is_success() {
                         match response.json::<PollMessagesResponse>().await {
                             Ok(poll_response) => {
-                                println!("✓ Got {} messages for topic '{}'", poll_response.count, topic);
+                                println!(
+                                    "✓ Got {} messages for topic '{}'",
+                                    poll_response.count, topic
+                                );
                                 for message in poll_response.messages {
-                                    println!("{} [{}] {}", format_timestamp(message.timestamp), message.id, message.content);
+                                    println!(
+                                        "{} [{}] {}",
+                                        format_timestamp(message.timestamp),
+                                        message.id,
+                                        message.content
+                                    );
                                 }
                             }
                             Err(e) => println!("✗ Failed to parse response: {}", e),
@@ -101,7 +115,10 @@ async fn main() {
                         let status = response.status();
                         match response.json::<ErrorResponse>().await {
                             Ok(error_response) => {
-                                println!("✗ Error retrieving messages from topic '{}': {}", topic, error_response.error);
+                                println!(
+                                    "✗ Error retrieving messages from topic '{}': {}",
+                                    topic, error_response.error
+                                );
                             }
                             Err(_) => {
                                 println!("✗ Server error: {}", status);

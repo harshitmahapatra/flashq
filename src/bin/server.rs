@@ -20,7 +20,7 @@ fn log(level: &str, message: &str) {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     // Parse port argument
     let port = if args.len() > 1 {
         match args[1].parse::<u16>() {
@@ -48,7 +48,10 @@ async fn main() {
         .await
         .expect("Failed to bind to address");
 
-    log("INFO", &format!("Message Queue Server starting on http://{}", bind_address));
+    log(
+        "INFO",
+        &format!("Message Queue Server starting on http://{}", bind_address),
+    );
 
     axum::serve(listener, app)
         .await
@@ -69,7 +72,13 @@ async fn post_message(
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
     match queue.post_message(topic.clone(), request.content.clone()) {
         Ok(id) => {
-            log("INFO", &format!("POST /api/topics/{}/messages - ID: {} - '{}'", topic, id, request.content));
+            log(
+                "INFO",
+                &format!(
+                    "POST /api/topics/{}/messages - ID: {} - '{}'",
+                    topic, id, request.content
+                ),
+            );
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -78,7 +87,10 @@ async fn post_message(
             Ok(Json(PostMessageResponse { id, timestamp }))
         }
         Err(error) => {
-            log("ERROR", &format!("POST /api/topics/{}/messages failed: {}", topic, error));
+            log(
+                "ERROR",
+                &format!("POST /api/topics/{}/messages failed: {}", topic, error),
+            );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse { error }),
@@ -96,7 +108,14 @@ async fn poll_messages(
     let _topic_name = topic;
     match queue.poll_messages(&_topic_name, _count) {
         Ok(messages) => {
-            log("INFO", &format!("GET /api/topics/{}/messages - {} messages", _topic_name, messages.len()));
+            log(
+                "INFO",
+                &format!(
+                    "GET /api/topics/{}/messages - {} messages",
+                    _topic_name,
+                    messages.len()
+                ),
+            );
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
                 .map(|message| MessageResponse {
@@ -111,7 +130,10 @@ async fn poll_messages(
             }))
         }
         Err(error) => {
-            log("ERROR", &format!("GET /api/topics/{}/messages failed: {}", _topic_name, error));
+            log(
+                "ERROR",
+                &format!("GET /api/topics/{}/messages failed: {}", _topic_name, error),
+            );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse { error }),

@@ -171,7 +171,7 @@ async fn test_end_to_end_workflow() {
     }
 
     // Verify that messages are present and have the correct ordering and content
-    
+
     // Test topic1: should have 2 messages in FIFO order
     let topic1_url = format!("{}/api/topics/topic1/messages", base_url);
     let topic1_response = client
@@ -179,21 +179,21 @@ async fn test_end_to_end_workflow() {
         .send()
         .await
         .expect("Failed to poll topic1 messages");
-    
+
     assert!(topic1_response.status().is_success());
-    
+
     let topic1_data: PollMessagesResponse = topic1_response
         .json()
         .await
         .expect("Failed to parse topic1 response");
-    
+
     assert_eq!(topic1_data.count, 2);
     assert_eq!(topic1_data.messages.len(), 2);
     assert_eq!(topic1_data.messages[0].content, "topic1 message1");
     assert_eq!(topic1_data.messages[1].content, "topic1 message2");
     assert_eq!(topic1_data.messages[0].id, 0); // First message posted
     assert_eq!(topic1_data.messages[1].id, 2); // Third message posted
-    
+
     // Test topic2: should have 1 message
     let topic2_url = format!("{}/api/topics/topic2/messages", base_url);
     let topic2_response = client
@@ -201,19 +201,19 @@ async fn test_end_to_end_workflow() {
         .send()
         .await
         .expect("Failed to poll topic2 messages");
-    
+
     assert!(topic2_response.status().is_success());
-    
+
     let topic2_data: PollMessagesResponse = topic2_response
         .json()
         .await
         .expect("Failed to parse topic2 response");
-    
+
     assert_eq!(topic2_data.count, 1);
     assert_eq!(topic2_data.messages.len(), 1);
     assert_eq!(topic2_data.messages[0].content, "topic2 message1");
     assert_eq!(topic2_data.messages[0].id, 1); // Second message posted
-    
+
     // Test count parameter: limit topic1 to 1 message
     let topic1_limited_url = format!("{}/api/topics/topic1/messages?count=1", base_url);
     let limited_response = client
@@ -221,18 +221,18 @@ async fn test_end_to_end_workflow() {
         .send()
         .await
         .expect("Failed to poll topic1 with count limit");
-    
+
     assert!(limited_response.status().is_success());
-    
+
     let limited_data: PollMessagesResponse = limited_response
         .json()
         .await
         .expect("Failed to parse limited response");
-    
+
     assert_eq!(limited_data.count, 1);
     assert_eq!(limited_data.messages.len(), 1);
     assert_eq!(limited_data.messages[0].content, "topic1 message1"); // Should get first message
-    
+
     // Verify timestamps are in ascending order (FIFO)
     assert!(topic1_data.messages[0].timestamp <= topic1_data.messages[1].timestamp);
 }
