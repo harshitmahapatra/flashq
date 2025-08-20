@@ -5,6 +5,8 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
@@ -84,10 +86,23 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build release
+    - name: Build debug (default)
+      if: github.event_name != 'release'
+      run: cargo build --verbose
+
+    - name: Build all binaries (debug)
+      if: github.event_name != 'release'
+      run: |
+        cargo build --bin server
+        cargo build --bin client
+        cargo build --bin message-queue-rs
+
+    - name: Build release (on release only)
+      if: github.event_name == 'release'
       run: cargo build --release --verbose
 
     - name: Build all binaries (release)
+      if: github.event_name == 'release'
       run: |
         cargo build --release --bin server
         cargo build --release --bin client
