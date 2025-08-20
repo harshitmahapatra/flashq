@@ -67,9 +67,6 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [debug, release]
     steps:
     - uses: actions/checkout@v4
     
@@ -87,16 +84,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build debug
-      if: matrix.target == 'debug'
-      run: cargo build --verbose
-
     - name: Build release
-      if: matrix.target == 'release'
       run: cargo build --release --verbose
 
     - name: Build all binaries (release)
-      if: matrix.target == 'release'
       run: |
         cargo build --release --bin server
         cargo build --release --bin client
