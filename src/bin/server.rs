@@ -14,7 +14,7 @@ type AppState = Arc<MessageQueue>;
 
 fn log(level: &str, message: &str) {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-    println!("{} [{}] {}", timestamp, level, message);
+    println!("{timestamp} [{level}] {message}");
 }
 
 #[tokio::main]
@@ -43,14 +43,14 @@ async fn main() {
         .route("/health", get(health_check))
         .with_state(queue);
 
-    let bind_address = format!("127.0.0.1:{}", port);
+    let bind_address = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&bind_address)
         .await
         .expect("Failed to bind to address");
 
     log(
         "INFO",
-        &format!("Message Queue Server starting on http://{}", bind_address),
+        &format!("Message Queue Server starting on http://{bind_address}"),
     );
 
     axum::serve(listener, app)
@@ -89,7 +89,7 @@ async fn post_message(
         Err(error) => {
             log(
                 "ERROR",
-                &format!("POST /api/topics/{}/messages failed: {}", topic, error),
+                &format!("POST /api/topics/{topic}/messages failed: {error}"),
             );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -132,7 +132,7 @@ async fn poll_messages(
         Err(error) => {
             log(
                 "ERROR",
-                &format!("GET /api/topics/{}/messages failed: {}", _topic_name, error),
+                &format!("GET /api/topics/{_topic_name}/messages failed: {error}"),
             );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,

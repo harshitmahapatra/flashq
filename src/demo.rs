@@ -71,11 +71,11 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
         Ok(message_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
             println!("✅ Message posted successfully!");
-            println!("   📌 Topic: {}", topic);
-            println!("   🆔 Message ID: {}", message_id);
-            println!("   📄 Content: \"{}\"", content);
+            println!("   📌 Topic: {topic}");
+            println!("   🆔 Message ID: {message_id}");
+            println!("   📄 Content: \"{content}\"");
         }
-        Err(e) => println!("❌ Failed to post message: {}", e),
+        Err(e) => println!("❌ Failed to post message: {e}"),
     }
 }
 
@@ -117,7 +117,7 @@ fn poll_messages_interactive(queue: &MessageQueue) {
     match queue.poll_messages(&topic, count) {
         Ok(messages) => {
             if messages.is_empty() {
-                println!("📭 No messages found in topic '{}'", topic);
+                println!("📭 No messages found in topic '{topic}'");
             } else {
                 println!(
                     "📬 Found {} message(s) in topic '{}':",
@@ -137,7 +137,7 @@ fn poll_messages_interactive(queue: &MessageQueue) {
                 println!("─────────────────────────────────────");
             }
         }
-        Err(e) => println!("❌ Failed to poll messages: {}", e),
+        Err(e) => println!("❌ Failed to poll messages: {e}"),
     }
 }
 
@@ -166,7 +166,7 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
     println!("─────────────────────────────────────");
 
     let demo_topic = "demo".to_string();
-    let demo_messages = vec![
+    let demo_messages = [
         "Hello, World!",
         "This is the second message",
         "Message queue is working great!",
@@ -188,7 +188,7 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
         }
     }
 
-    println!("\n📬 Polling all messages from topic '{}'...", demo_topic);
+    println!("\n📬 Polling all messages from topic '{demo_topic}'...");
     match queue.poll_messages(&demo_topic, None) {
         Ok(messages) => {
             println!("📋 Retrieved {} message(s):", messages.len());
@@ -202,7 +202,7 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
                 );
             }
         }
-        Err(e) => println!("❌ Failed to poll messages: {}", e),
+        Err(e) => println!("❌ Failed to poll messages: {e}"),
     }
 
     println!("─────────────────────────────────────");

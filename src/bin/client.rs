@@ -52,7 +52,7 @@ async fn main() {
                 content: message.clone(),
             };
 
-            let url = format!("{}/api/topics/{}/messages", server_url, topic);
+            let url = format!("{server_url}/api/topics/{topic}/messages");
 
             match client.post(&url).json(&request).send().await {
                 Ok(response) => {
@@ -64,7 +64,7 @@ async fn main() {
                                     topic, post_response.id
                                 );
                             }
-                            Err(e) => println!("✗ Failed to parse response: {}", e),
+                            Err(e) => println!("✗ Failed to parse response: {e}"),
                         }
                     } else {
                         let status = response.status();
@@ -76,19 +76,19 @@ async fn main() {
                                 );
                             }
                             Err(_) => {
-                                println!("✗ Server error: {}", status);
+                                println!("✗ Server error: {status}");
                             }
                         }
                     }
                 }
-                Err(e) => println!("✗ Failed to connect to server: {}", e),
+                Err(e) => println!("✗ Failed to connect to server: {e}"),
             }
         }
 
         Commands::Poll { topic, count } => {
-            let mut url = format!("{}/api/topics/{}/messages", server_url, topic);
+            let mut url = format!("{server_url}/api/topics/{topic}/messages");
             if let Some(c) = count {
-                url.push_str(&format!("?count={}", c));
+                url.push_str(&format!("?count={c}"));
             }
 
             match client.get(&url).send().await {
@@ -109,7 +109,7 @@ async fn main() {
                                     );
                                 }
                             }
-                            Err(e) => println!("✗ Failed to parse response: {}", e),
+                            Err(e) => println!("✗ Failed to parse response: {e}"),
                         }
                     } else {
                         let status = response.status();
@@ -121,12 +121,12 @@ async fn main() {
                                 );
                             }
                             Err(_) => {
-                                println!("✗ Server error: {}", status);
+                                println!("✗ Server error: {status}");
                             }
                         }
                     }
                 }
-                Err(e) => println!("✗ Failed to connect to server: {}", e),
+                Err(e) => println!("✗ Failed to connect to server: {e}"),
             }
         }
     }
