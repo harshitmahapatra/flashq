@@ -50,11 +50,10 @@ impl MessageQueue {
             .topics
             .lock()
             .map_err(|_| format!("Failed to acquire topics lock while posting to '{topic}"))?;
-        let mut id_counter = self.next_id.lock().map_err(|_| {
-            format!(
-                "Failed to acquire ID counter lock while posting to '{topic}'"
-            )
-        })?;
+        let mut id_counter = self
+            .next_id
+            .lock()
+            .map_err(|_| format!("Failed to acquire ID counter lock while posting to '{topic}'"))?;
 
         let message_id = *id_counter;
         *id_counter += 1;
