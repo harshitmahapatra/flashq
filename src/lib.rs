@@ -31,6 +31,12 @@ pub struct MessageQueue {
     next_id: Arc<Mutex<u64>>,
 }
 
+impl Default for MessageQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageQueue {
     pub fn new() -> Self {
         MessageQueue {
@@ -43,13 +49,11 @@ impl MessageQueue {
         let mut topics = self
             .topics
             .lock()
-            .map_err(|_| format!("Failed to acquire topics lock while posting to '{}'", topic))?;
-        let mut id_counter = self.next_id.lock().map_err(|_| {
-            format!(
-                "Failed to acquire ID counter lock while posting to '{}'",
-                topic
-            )
-        })?;
+            .map_err(|_| format!("Failed to acquire topics lock while posting to '{topic}"))?;
+        let mut id_counter = self
+            .next_id
+            .lock()
+            .map_err(|_| format!("Failed to acquire ID counter lock while posting to '{topic}'"))?;
 
         let message_id = *id_counter;
         *id_counter += 1;
@@ -68,10 +72,10 @@ impl MessageQueue {
         let topics = self
             .topics
             .lock()
-            .map_err(|_| format!("Failed to acquire lock while polling topic '{}'", topic))?;
+            .map_err(|_| format!("Failed to acquire lock while polling topic '{topic}"))?;
         if let Some(queue) = topics.get(topic) {
             if queue.is_empty() {
-                Err(format!("The topic '{}' does not have any messages.", topic))?
+                Err(format!("The topic '{topic}' does not have any messages."))?
             }
             Ok(queue
                 .iter()
@@ -79,7 +83,7 @@ impl MessageQueue {
                 .cloned()
                 .collect())
         } else {
-            Err(format!("The topic '{}' does not exist!", topic))?
+            Err(format!("The topic '{topic}' does not exist!"))
         }
     }
 }
