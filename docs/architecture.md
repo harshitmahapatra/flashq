@@ -71,16 +71,23 @@ The demo module provides an educational interactive demonstration:
 ## Data Flow
 
 1. **Message Creation**: Messages are created with unique incrementing IDs and timestamps
-2. **Topic Organization**: Messages are stored in HashMap by topic string keys
+2. **Topic Organization**: Messages are stored in TopicLog structures organized by topic string keys
 3. **Thread Safety**: All operations use Arc<Mutex<>> for safe concurrent access
-4. **FIFO Ordering**: VecDeque ensures messages are returned in posting order
+4. **FIFO Ordering**: Append-only log with offset-based access ensures messages are returned in posting order
 5. **Non-destructive Polling**: Messages remain in queue after being read
 6. **HTTP Serialization**: API structures handle JSON conversion seamlessly
 
 ## Design Decisions
 
+### Append-Only Log Architecture
+- **TopicLog Structure**: Each topic maintains an append-only log with `Vec<Message>` and offset tracking
+- **Offset Management**: Messages are assigned sequential offsets (0, 1, 2...) within each topic
+- **Consumer Groups**: Support for consumer group state with per-topic offset tracking
+- **Immutable History**: Messages are never modified or deleted, only appended
+
 ### Thread Safety
-- Uses `Arc<Mutex<HashMap<String, VecDeque<Message>>>>` for topic storage
+- Uses `Arc<Mutex<HashMap<String, TopicLog>>>` for topic storage with append-only semantics
+- Consumer groups managed with `Arc<Mutex<HashMap<String, ConsumerGroup>>>`
 - Single lock protects entire queue structure for simplicity
 - Trade-off: Coarse-grained locking for implementation simplicity
 
