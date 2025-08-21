@@ -1,10 +1,10 @@
 use message_queue_rs::api::*;
+use std::env;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, Once};
 use std::time::Duration;
 use tokio::time::sleep;
-use std::sync::{Once, Mutex};
-use std::path::PathBuf;
-use std::env;
 
 use std::net::TcpListener;
 
@@ -25,21 +25,26 @@ fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
             .args(&["build", "--bin", "server"])
             .output()
             .expect("Failed to build server binary");
-        
+
         if !output.status.success() {
-            panic!("Failed to build server binary: {}", String::from_utf8_lossy(&output.stderr));
+            panic!(
+                "Failed to build server binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
-        
+
         let binary_path = PathBuf::from("target/debug/server");
         *SERVER_BINARY_PATH.lock().unwrap() = Some(binary_path);
         eprintln!("Server binary built successfully");
     });
-    
-    let binary_path = SERVER_BINARY_PATH.lock().unwrap()
+
+    let binary_path = SERVER_BINARY_PATH
+        .lock()
+        .unwrap()
         .as_ref()
         .expect("Server binary path should be set")
         .clone();
-    
+
     Ok(binary_path)
 }
 
@@ -64,8 +69,11 @@ impl TestServer {
         let server_binary = ensure_server_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
-        eprintln!("Starting server on port {} using binary: {:?}", port, server_binary);
-        
+        eprintln!(
+            "Starting server on port {} using binary: {:?}",
+            port, server_binary
+        );
+
         let mut process = Command::new(&server_binary)
             .args(&[&port.to_string()])
             .stdout(Stdio::piped())
@@ -90,7 +98,11 @@ impl TestServer {
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
-                    eprintln!("Server started successfully on port {} after {} attempts", port, attempt + 1);
+                    eprintln!(
+                        "Server started successfully on port {} after {} attempts",
+                        port,
+                        attempt + 1
+                    );
                     return Ok(TestServer { process, port });
                 }
                 Ok(false) => continue, // Retry
@@ -105,7 +117,7 @@ impl TestServer {
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
     }
-    
+
     async fn try_health_check(
         client: &reqwest::Client,
         health_url: &str,
@@ -117,17 +129,27 @@ impl TestServer {
             if retry > 0 {
                 sleep(Duration::from_millis(backoff_ms)).await;
             }
-            
+
             match client.get(health_url).send().await {
                 Ok(response) => {
                     if response.status().is_success() {
                         return Ok(true);
                     } else {
-                        eprintln!("Health check attempt {}.{}: HTTP {}", attempt, retry + 1, response.status());
+                        eprintln!(
+                            "Health check attempt {}.{}: HTTP {}",
+                            attempt,
+                            retry + 1,
+                            response.status()
+                        );
                     }
                 }
                 Err(e) if retry < 2 => {
-                    eprintln!("Health check attempt {}.{} failed, retrying: {}", attempt, retry + 1, e);
+                    eprintln!(
+                        "Health check attempt {}.{} failed, retrying: {}",
+                        attempt,
+                        retry + 1,
+                        e
+                    );
                     continue;
                 }
                 Err(e) => {
@@ -135,7 +157,7 @@ impl TestServer {
                 }
             }
         }
-        
+
         Ok(false) // All retries failed
     }
 
