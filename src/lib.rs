@@ -32,6 +32,12 @@ pub struct TopicLog {
     next_offset: u64,
 }
 
+impl Default for TopicLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TopicLog {
     pub fn new() -> Self {
         TopicLog {
@@ -43,8 +49,8 @@ impl TopicLog {
     pub fn append(&mut self, content: String, timestamp: u64) -> u64 {
         let current_offset = self.next_offset;
         let message = Message {
-            content: content,
-            timestamp: timestamp,
+            content,
+            timestamp,
             id: current_offset,
         };
         self.messages.push(message);
@@ -69,6 +75,10 @@ impl TopicLog {
         self.messages.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+
     pub fn next_offset(&self) -> u64 {
         self.next_offset
     }
@@ -83,7 +93,7 @@ pub struct ConsumerGroup {
 impl ConsumerGroup {
     pub fn new(group_id: String) -> Self {
         ConsumerGroup {
-            group_id: group_id,
+            group_id,
             topic_offsets: HashMap::new(),
         }
     }
@@ -126,7 +136,7 @@ impl MessageQueue {
             .unwrap()
             .as_secs();
         let mut topic_log_map = self.topics.lock().unwrap();
-        let topic_log = topic_log_map.entry(topic).or_insert_with(TopicLog::new);
+        let topic_log = topic_log_map.entry(topic).or_default();
         Ok(topic_log.append(content, current_timestamp))
     }
 
