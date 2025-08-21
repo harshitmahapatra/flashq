@@ -2,14 +2,55 @@ use message_queue_rs::api::*;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
+use std::sync::{Once, Mutex};
+use std::path::PathBuf;
+use std::env;
 
 use std::net::TcpListener;
+
+static INIT: Once = Once::new();
+static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
     // Bind to port 0 to let the OS choose an available port
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     Ok(addr.port())
+}
+
+fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    INIT.call_once(|| {
+        eprintln!("Building server binary for integration tests...");
+        let output = Command::new("cargo")
+            .args(&["build", "--bin", "server"])
+            .output()
+            .expect("Failed to build server binary");
+        
+        if !output.status.success() {
+            panic!("Failed to build server binary: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        
+        let binary_path = PathBuf::from("target/debug/server");
+        *SERVER_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        eprintln!("Server binary built successfully");
+    });
+    
+    let binary_path = SERVER_BINARY_PATH.lock().unwrap()
+        .as_ref()
+        .expect("Server binary path should be set")
+        .clone();
+    
+    Ok(binary_path)
+}
+
+fn get_timeout_config() -> (u32, u64) {
+    // Returns (max_attempts, sleep_ms)
+    if env::var("CI").is_ok() {
+        eprintln!("Running in CI environment - using extended timeouts");
+        (60, 500) // 30 seconds total in CI
+    } else {
+        (30, 500) // 15 seconds locally
+    }
 }
 
 struct TestServer {
@@ -20,36 +61,82 @@ struct TestServer {
 impl TestServer {
     async fn start() -> Result<Self, Box<dyn std::error::Error>> {
         let port = find_available_port()?;
+        let server_binary = ensure_server_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
 
-        let mut process = Command::new("cargo")
-            .args(&["run", "--bin", "server", &port.to_string()])
+        eprintln!("Starting server on port {} using binary: {:?}", port, server_binary);
+        
+        let mut process = Command::new(&server_binary)
+            .args(&[&port.to_string()])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
 
         // Wait for server to start and verify it's responding
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
         let health_url = format!("http://127.0.0.1:{}/health", port);
 
-        for _ in 0..30 {
-            // Try for up to 15 seconds
-            sleep(Duration::from_millis(500)).await;
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
 
             // Check if process is still running
-            if let Ok(Some(_)) = process.try_wait() {
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                eprintln!("Server process exited with status: {}", exit_status);
                 return Err("Server process exited".into());
             }
 
-            // Try to connect to health endpoint
-            if let Ok(response) = client.get(&health_url).send().await {
-                if response.status().is_success() {
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    eprintln!("Server started successfully on port {} after {} attempts", port, attempt + 1);
                     return Ok(TestServer { process, port });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
                 }
             }
         }
 
+        eprintln!("Server failed to start within {} attempts", max_attempts);
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
+    }
+    
+    async fn try_health_check(
+        client: &reqwest::Client,
+        health_url: &str,
+        attempt: u32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        // Exponential backoff for network retries within each attempt
+        for retry in 0..3 {
+            let backoff_ms = 100 * (2_u64.pow(retry));
+            if retry > 0 {
+                sleep(Duration::from_millis(backoff_ms)).await;
+            }
+            
+            match client.get(health_url).send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(true);
+                    } else {
+                        eprintln!("Health check attempt {}.{}: HTTP {}", attempt, retry + 1, response.status());
+                    }
+                }
+                Err(e) if retry < 2 => {
+                    eprintln!("Health check attempt {}.{} failed, retrying: {}", attempt, retry + 1, e);
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+        
+        Ok(false) // All retries failed
     }
 
     fn base_url(&self) -> String {
