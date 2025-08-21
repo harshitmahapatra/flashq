@@ -191,8 +191,8 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic1_data.messages.len(), 2);
     assert_eq!(topic1_data.messages[0].content, "topic1 message1");
     assert_eq!(topic1_data.messages[1].content, "topic1 message2");
-    assert_eq!(topic1_data.messages[0].id, 0); // First message posted
-    assert_eq!(topic1_data.messages[1].id, 2); // Third message posted
+    assert_eq!(topic1_data.messages[0].id, 0); // First message in topic1 (offset 0)
+    assert_eq!(topic1_data.messages[1].id, 1); // Second message in topic1 (offset 1)
 
     // Test topic2: should have 1 message
     let topic2_url = format!("{}/api/topics/topic2/messages", base_url);
@@ -212,7 +212,7 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic2_data.count, 1);
     assert_eq!(topic2_data.messages.len(), 1);
     assert_eq!(topic2_data.messages[0].content, "topic2 message1");
-    assert_eq!(topic2_data.messages[0].id, 1); // Second message posted
+    assert_eq!(topic2_data.messages[0].id, 0); // First message in topic2 (offset 0)
 
     // Test count parameter: limit topic1 to 1 message
     let topic1_limited_url = format!("{}/api/topics/topic1/messages?count=1", base_url);
