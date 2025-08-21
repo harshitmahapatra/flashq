@@ -25,10 +25,74 @@ impl Message {
         }
     }
 }
+#[derive(Debug, Clone)]
+pub struct TopicLog {
+    messages: Vec<Message>,
+    next_offset: u64,
+}
+
+impl TopicLog {
+    pub fn new() -> Self {
+        // TODO(human): Initialize a new TopicLog with empty messages and offset 0
+        todo!()
+    }
+
+    pub fn append(&mut self, content: String, timestamp: u64) -> u64 {
+        // TODO(human): Append a new message to the log and return the offset
+        // The message should use the current next_offset as its ID
+        // Increment next_offset after creating the message
+        todo!()
+    }
+
+    pub fn get_messages_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<&Message> {
+        // TODO(human): Return messages starting from the given offset
+        // If count is Some(n), return at most n messages
+        // If offset is beyond the log, return empty vector
+        todo!()
+    }
+
+    pub fn len(&self) -> usize {
+        // TODO(human): Return the number of messages in the log
+        todo!()
+    }
+
+    pub fn next_offset(&self) -> u64 {
+        // TODO(human): Return the next offset that would be assigned
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConsumerGroup {
+    group_id: String,
+    topic_offsets: HashMap<String, u64>,
+}
+
+impl ConsumerGroup {
+    pub fn new(group_id: String) -> Self {
+        // TODO(human): Initialize a new ConsumerGroup with the given ID and empty topic offsets
+        todo!()
+    }
+
+    pub fn get_offset(&self, topic: &str) -> u64 {
+        // TODO(human): Return the current offset for the topic, or 0 if not found
+        todo!()
+    }
+
+    pub fn set_offset(&mut self, topic: String, offset: u64) {
+        // TODO(human): Update the offset for the given topic
+        todo!()
+    }
+
+    pub fn group_id(&self) -> &str {
+        // TODO(human): Return a reference to the group ID
+        todo!()
+    }
+}
 
 pub struct MessageQueue {
-    topics: Arc<Mutex<HashMap<String, VecDeque<Message>>>>,
-    next_id: Arc<Mutex<u64>>,
+    topics: Arc<Mutex<HashMap<String, TopicLog>>>,
+    consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
 }
 
 impl Default for MessageQueue {
@@ -39,52 +103,55 @@ impl Default for MessageQueue {
 
 impl MessageQueue {
     pub fn new() -> Self {
-        MessageQueue {
-            topics: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(Mutex::new(0)),
-        }
+        // TODO(human): Initialize MessageQueue with empty topics and consumer groups
+        todo!()
     }
 
     pub fn post_message(&self, topic: String, content: String) -> Result<u64, String> {
-        let mut topics = self
-            .topics
-            .lock()
-            .map_err(|_| format!("Failed to acquire topics lock while posting to '{topic}"))?;
-        let mut id_counter = self
-            .next_id
-            .lock()
-            .map_err(|_| format!("Failed to acquire ID counter lock while posting to '{topic}'"))?;
-
-        let message_id = *id_counter;
-        *id_counter += 1;
-
-        let message = Message::new(content, message_id);
-
-        topics
-            .entry(topic)
-            .or_insert_with(VecDeque::new)
-            .push_back(message);
-
-        Ok(message_id)
+        // TODO(human): Post a message to the specified topic's log
+        // Create new TopicLog if topic doesn't exist
+        // Use current timestamp and append to the topic's log
+        // Return the assigned offset
+        todo!()
     }
 
     pub fn poll_messages(&self, topic: &str, count: Option<usize>) -> Result<Vec<Message>, String> {
-        let topics = self
-            .topics
-            .lock()
-            .map_err(|_| format!("Failed to acquire lock while polling topic '{topic}"))?;
-        if let Some(queue) = topics.get(topic) {
-            if queue.is_empty() {
-                Err(format!("The topic '{topic}' does not have any messages."))?
-            }
-            Ok(queue
-                .iter()
-                .take(count.unwrap_or(usize::MAX))
-                .cloned()
-                .collect())
-        } else {
-            Err(format!("The topic '{topic}' does not exist!"))
-        }
+        // TODO(human): Poll messages from the specified topic starting from offset 0
+        // Return error if topic doesn't exist
+        // Convert Vec<&Message> to Vec<Message> for return
+        todo!()
+    }
+
+    pub fn poll_messages_from_offset(&self, topic: &str, offset: u64, count: Option<usize>) -> Result<Vec<Message>, String> {
+        // TODO(human): Poll messages from the specified topic starting from given offset
+        // Return error if topic doesn't exist
+        // Convert Vec<&Message> to Vec<Message> for return
+        todo!()
+    }
+
+    pub fn create_consumer_group(&self, group_id: String) -> Result<(), String> {
+        // TODO(human): Create a new consumer group with the given ID
+        // Return error if group already exists
+        todo!()
+    }
+
+    pub fn get_consumer_group_offset(&self, group_id: &str, topic: &str) -> Result<u64, String> {
+        // TODO(human): Get the current offset for a consumer group on a topic
+        // Return error if consumer group doesn't exist
+        todo!()
+    }
+
+    pub fn update_consumer_group_offset(&self, group_id: &str, topic: String, offset: u64) -> Result<(), String> {
+        // TODO(human): Update the offset for a consumer group on a topic
+        // Return error if consumer group doesn't exist
+        todo!()
+    }
+
+    pub fn poll_messages_for_consumer_group(&self, group_id: &str, topic: &str, count: Option<usize>) -> Result<Vec<Message>, String> {
+        // TODO(human): Poll messages for a consumer group starting from their current offset
+        // Update the consumer group's offset after successful polling
+        // Return error if topic or consumer group doesn't exist
+        todo!()
     }
 }
 
@@ -225,5 +292,142 @@ mod tests {
         assert_eq!(messages_b.len(), 1);
         assert_eq!(messages_a[0].content, "message for A");
         assert_eq!(messages_b[0].content, "message for B");
+    }
+
+    // TopicLog Tests
+    #[test]
+    fn test_topic_log_creation() {
+        let log = TopicLog::new();
+        assert_eq!(log.len(), 0);
+        assert_eq!(log.next_offset(), 0);
+    }
+
+    #[test]
+    fn test_topic_log_append_single_message() {
+        let mut log = TopicLog::new();
+        let offset = log.append("first message".to_string(), 1234567890);
+        
+        assert_eq!(offset, 0);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.next_offset(), 1);
+    }
+
+    #[test]
+    fn test_topic_log_append_multiple_messages() {
+        let mut log = TopicLog::new();
+        let offset1 = log.append("message 1".to_string(), 1234567890);
+        let offset2 = log.append("message 2".to_string(), 1234567891);
+        let offset3 = log.append("message 3".to_string(), 1234567892);
+        
+        assert_eq!(offset1, 0);
+        assert_eq!(offset2, 1);
+        assert_eq!(offset3, 2);
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.next_offset(), 3);
+    }
+
+    #[test]
+    fn test_topic_log_get_messages_from_beginning() {
+        let mut log = TopicLog::new();
+        log.append("first".to_string(), 100);
+        log.append("second".to_string(), 200);
+        log.append("third".to_string(), 300);
+        
+        let messages = log.get_messages_from_offset(0, None);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].content, "second");
+        assert_eq!(messages[2].content, "third");
+    }
+
+    #[test]
+    fn test_topic_log_get_messages_from_middle_offset() {
+        let mut log = TopicLog::new();
+        log.append("first".to_string(), 100);
+        log.append("second".to_string(), 200);
+        log.append("third".to_string(), 300);
+        
+        let messages = log.get_messages_from_offset(1, None);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "second");
+        assert_eq!(messages[1].content, "third");
+    }
+
+    #[test]
+    fn test_topic_log_get_messages_with_count_limit() {
+        let mut log = TopicLog::new();
+        log.append("first".to_string(), 100);
+        log.append("second".to_string(), 200);
+        log.append("third".to_string(), 300);
+        
+        let messages = log.get_messages_from_offset(0, Some(2));
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].content, "second");
+    }
+
+    #[test]
+    fn test_topic_log_get_messages_beyond_log() {
+        let mut log = TopicLog::new();
+        log.append("only message".to_string(), 100);
+        
+        let messages = log.get_messages_from_offset(5, None);
+        assert_eq!(messages.len(), 0);
+    }
+
+    #[test]
+    fn test_topic_log_message_ids_match_offsets() {
+        let mut log = TopicLog::new();
+        let offset1 = log.append("msg1".to_string(), 100);
+        let offset2 = log.append("msg2".to_string(), 200);
+        
+        let messages = log.get_messages_from_offset(0, None);
+        assert_eq!(messages[0].id, offset1);
+        assert_eq!(messages[1].id, offset2);
+    }
+
+    // ConsumerGroup Tests
+    #[test]
+    fn test_consumer_group_creation() {
+        let group = ConsumerGroup::new("test-group".to_string());
+        assert_eq!(group.group_id(), "test-group");
+        assert_eq!(group.get_offset("any-topic"), 0);
+    }
+
+    #[test]
+    fn test_consumer_group_set_and_get_offset() {
+        let mut group = ConsumerGroup::new("test-group".to_string());
+        
+        group.set_offset("topic1".to_string(), 5);
+        group.set_offset("topic2".to_string(), 10);
+        
+        assert_eq!(group.get_offset("topic1"), 5);
+        assert_eq!(group.get_offset("topic2"), 10);
+        assert_eq!(group.get_offset("nonexistent"), 0);
+    }
+
+    #[test]
+    fn test_consumer_group_update_offset() {
+        let mut group = ConsumerGroup::new("test-group".to_string());
+        
+        group.set_offset("topic".to_string(), 3);
+        assert_eq!(group.get_offset("topic"), 3);
+        
+        group.set_offset("topic".to_string(), 8);
+        assert_eq!(group.get_offset("topic"), 8);
+    }
+
+    #[test]
+    fn test_consumer_group_multiple_topics() {
+        let mut group = ConsumerGroup::new("multi-topic-group".to_string());
+        
+        group.set_offset("news".to_string(), 15);
+        group.set_offset("alerts".to_string(), 7);
+        group.set_offset("logs".to_string(), 42);
+        
+        assert_eq!(group.get_offset("news"), 15);
+        assert_eq!(group.get_offset("alerts"), 7);
+        assert_eq!(group.get_offset("logs"), 42);
+        assert_eq!(group.get_offset("unknown"), 0);
     }
 }
