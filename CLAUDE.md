@@ -157,8 +157,36 @@ chmod +x /usr/local/bin/server
 chmod +x /usr/local/bin/client
 ```
 
+## MCP Servers
+
+The following MCP (Model Context Protocol) servers are currently configured and active:
+
+### serena
+- **Purpose**: Professional coding agent with semantic coding tools
+- **Capabilities**: 
+  - Symbol-based code analysis and editing
+  - Intelligent code exploration with minimal token usage
+  - Memory management for codebase information
+  - Project onboarding and context management
+- **Key Tools**: 
+  - `find_symbol`, `get_symbols_overview` - Code structure analysis
+  - `search_for_pattern` - Pattern matching across codebase
+  - `replace_symbol_body`, `insert_after_symbol` - Precise code editing
+  - Memory management tools for project context
+
+### ide
+- **Purpose**: VS Code integration for diagnostics and code execution
+- **Capabilities**:
+  - Language server diagnostics integration
+  - Jupyter kernel code execution support
+- **Key Tools**:
+  - `getDiagnostics` - Retrieve VS Code language diagnostics
+  - `executeCode` - Execute Python code in Jupyter kernel
+
 ## Important Instructions for Claude Code
 
+- **Test Driven Development**: Prefer TDD when implementing changes and features. Write tests first, then implement the code to make them pass.
+- **Human Implementation Preference**: After writing tests and providing function skeletons, prefer to let the human attempt the actual implementation rather than completing it automatically.
 - **TODO(human) sections**: NEVER implement or fill in TODO(human) sections - these are specifically for human collaboration. Wait for the human to implement these sections before proceeding.
 - **File creation**: NEVER create files unless they're absolutely necessary for achieving your goal.
 - **File editing**: ALWAYS prefer editing an existing file to creating a new one.
