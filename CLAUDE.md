@@ -187,6 +187,7 @@ The following MCP (Model Context Protocol) servers are currently configured and 
 
 - **Test Driven Development**: Prefer TDD when implementing changes and features. Write tests first, then implement the code to make them pass.
 - **Human Implementation Preference**: After writing tests and providing function skeletons, prefer to let the human attempt the actual implementation rather than completing it automatically.
+- **Commit Messages**: Do not include Claude, AI, or automated generation references in commit messages. Write natural, human-style commit messages focused on the technical changes. Keep messages concise and use bullet points for multiple changes.
 - **TODO(human) sections**: NEVER implement or fill in TODO(human) sections - these are specifically for human collaboration. Wait for the human to implement these sections before proceeding.
 - **File creation**: NEVER create files unless they're absolutely necessary for achieving your goal.
 - **File editing**: ALWAYS prefer editing an existing file to creating a new one.
