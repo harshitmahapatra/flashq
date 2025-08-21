@@ -3,13 +3,24 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 
+use std::net::TcpListener;
+
+fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
+    // Bind to port 0 to let the OS choose an available port
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    Ok(addr.port())
+}
+
 struct TestServer {
     process: Child,
     port: u16,
 }
 
 impl TestServer {
-    async fn start(port: u16) -> Result<Self, Box<dyn std::error::Error>> {
+    async fn start() -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+
         let mut process = Command::new("cargo")
             .args(&["run", "--bin", "server", &port.to_string()])
             .stdout(Stdio::piped())
@@ -55,7 +66,7 @@ impl Drop for TestServer {
 
 #[tokio::test]
 async fn test_post_message_integration() {
-    let server = TestServer::start(8081)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -86,7 +97,7 @@ async fn test_post_message_integration() {
 
 #[tokio::test]
 async fn test_poll_messages_integration() {
-    let server = TestServer::start(8082)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -132,7 +143,7 @@ async fn test_poll_messages_integration() {
 
 #[tokio::test]
 async fn test_end_to_end_workflow() {
-    let server = TestServer::start(8083)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -239,7 +250,7 @@ async fn test_end_to_end_workflow() {
 
 #[tokio::test]
 async fn test_health_check() {
-    let server = TestServer::start(8084)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -265,7 +276,7 @@ async fn test_health_check() {
 
 #[tokio::test]
 async fn test_error_handling() {
-    let server = TestServer::start(8085)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
