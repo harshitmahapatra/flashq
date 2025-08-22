@@ -188,6 +188,18 @@ impl MessageQueue {
         topic: String,
         offset: u64,
     ) -> Result<(), String> {
+        let topic_log_map = self.topics.lock().unwrap();
+        let topic_next_offset = match topic_log_map.get(&topic) {
+            Some(topic_log) => topic_log.next_offset(),
+            None => Err(format!("The topic {topic} does not exist!"))?,
+        };
+
+        if offset > topic_next_offset {
+            Err(format!(
+                "Invalid offset {offset} for topic {topic} with next offset {topic_next_offset}."
+            ))?
+        }
+
         let mut consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.get_mut(group_id) {
             Some(consumer_group) => {

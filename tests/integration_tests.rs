@@ -450,7 +450,6 @@ async fn test_consumer_group_isolation() {
 }
 
 #[tokio::test]
-#[ignore] // TODO: Implement offset boundary testing
 async fn test_consumer_group_offset_boundaries() {
     let server = TestServer::start()
         .await
@@ -458,8 +457,9 @@ async fn test_consumer_group_offset_boundaries() {
     let client = reqwest::Client::new();
     let base_url = server.base_url();
     let topic = "boundary_test_topic";
+    let group = "boundary_test_group";
 
-    // Setup: Create a topic with 3 messages (offsets 0, 1, 2)
+    // Setup: Create topic with 3 messages (offsets 0, 1, 2)
     for i in 0..3 {
         let response = client
             .post(&format!("{}/api/topics/{}/messages", base_url, topic))
@@ -473,8 +473,7 @@ async fn test_consumer_group_offset_boundaries() {
     }
 
     // Create consumer group
-    let group = "boundary_test_group";
-    let response = client
+    client
         .post(&format!("{}/api/consumer-groups", base_url))
         .json(&CreateConsumerGroupRequest {
             group_id: group.to_string(),
@@ -482,13 +481,26 @@ async fn test_consumer_group_offset_boundaries() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 200);
 
-    // TODO(human): Test offset boundary conditions
-    // - Update offset beyond available messages (offset 10 when only 3 messages exist)
-    // - Test extreme values like u64::MAX
-    // - Test offset at exact boundary (offset 3 for 3 messages)
-    // - Verify behavior when polling from invalid offsets
+    let update_url = format!("{}/api/consumer-groups/{}/topics/{}/offset", base_url, group, topic);
+
+    // Test boundary conditions
+    let test_cases = [
+        (10, 404),        // Beyond available messages
+        (u64::MAX, 404),  // Extreme value
+        (3, 200),         // Valid boundary (end position)
+        (1, 200),         // Valid within bounds
+    ];
+
+    for (offset, expected_status) in test_cases {
+        let response = client
+            .post(&update_url)
+            .json(&UpdateConsumerGroupOffsetRequest { offset })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected_status, "Failed for offset {}", offset);
+    }
 }
 
 #[tokio::test]
