@@ -192,8 +192,7 @@ async fn get_consumer_group_offset(
             log(
                 "INFO",
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/offset - Offset: {}",
-                    group_id, topic, offset
+                    "GET /api/consumer-groups/{group_id}/topics/{topic}/offset - Offset: {offset}"
                 ),
             );
             Ok(Json(GetConsumerGroupOffsetResponse {
