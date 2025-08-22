@@ -41,6 +41,20 @@ async fn main() {
         .route("/api/topics/{topic}/messages", post(post_message))
         .route("/api/topics/{topic}/messages", get(poll_messages))
         .route("/health", get(health_check))
+        // Consumer Group API routes
+        .route("/api/consumer-groups", post(create_consumer_group))
+        .route(
+            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
+            get(get_consumer_group_offset),
+        )
+        .route(
+            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
+            post(update_consumer_group_offset),
+        )
+        .route(
+            "/api/consumer-groups/{group_id}/topics/{topic}/messages",
+            get(poll_messages_for_consumer_group),
+        )
         .with_state(queue);
 
     let bind_address = format!("127.0.0.1:{port}");
@@ -138,6 +152,140 @@ async fn poll_messages(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse { error }),
             ))
+        }
+    }
+}
+
+async fn create_consumer_group(
+    State(queue): State<AppState>,
+    Json(request): Json<CreateConsumerGroupRequest>,
+) -> Result<Json<CreateConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match queue.create_consumer_group(request.group_id.clone()) {
+        Ok(()) => {
+            log(
+                "INFO",
+                &format!(
+                    "POST /api/consumer-groups - Created group: {}",
+                    request.group_id
+                ),
+            );
+            Ok(Json(CreateConsumerGroupResponse {
+                group_id: request.group_id,
+            }))
+        }
+        Err(error) => {
+            log(
+                "ERROR",
+                &format!("POST /api/consumer-groups failed: {error}"),
+            );
+            Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
+        }
+    }
+}
+
+async fn get_consumer_group_offset(
+    State(queue): State<AppState>,
+    Path((group_id, topic)): Path<(String, String)>,
+) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match queue.get_consumer_group_offset(&group_id, &topic) {
+        Ok(offset) => {
+            log(
+                "INFO",
+                &format!(
+                    "GET /api/consumer-groups/{}/topics/{}/offset - Offset: {}",
+                    group_id, topic, offset
+                ),
+            );
+            Ok(Json(GetConsumerGroupOffsetResponse {
+                group_id,
+                topic,
+                offset,
+            }))
+        }
+        Err(error) => {
+            log(
+                "ERROR",
+                &format!(
+                    "GET /api/consumer-groups/{group_id}/topics/{topic}/offset failed: {error}"
+                ),
+            );
+            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
+        }
+    }
+}
+
+async fn update_consumer_group_offset(
+    State(queue): State<AppState>,
+    Path((group_id, topic)): Path<(String, String)>,
+    Json(request): Json<UpdateConsumerGroupOffsetRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    match queue.update_consumer_group_offset(&group_id, topic.clone(), request.offset) {
+        Ok(()) => {
+            log(
+                "INFO",
+                &format!(
+                    "POST /api/consumer-groups/{}/topics/{}/offset - Updated to: {}",
+                    group_id, topic, request.offset
+                ),
+            );
+            Ok(StatusCode::OK)
+        }
+        Err(error) => {
+            log(
+                "ERROR",
+                &format!(
+                    "POST /api/consumer-groups/{group_id}/topics/{topic}/offset failed: {error}"
+                ),
+            );
+            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
+        }
+    }
+}
+
+async fn poll_messages_for_consumer_group(
+    State(queue): State<AppState>,
+    Path((group_id, topic)): Path<(String, String)>,
+    Query(params): Query<ConsumerGroupPollQuery>,
+) -> Result<Json<ConsumerGroupPollResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match queue.poll_messages_for_consumer_group(&group_id, &topic, params.count) {
+        Ok(messages) => {
+            log(
+                "INFO",
+                &format!(
+                    "GET /api/consumer-groups/{}/topics/{}/messages - {} messages",
+                    group_id,
+                    topic,
+                    messages.len()
+                ),
+            );
+            let message_responses: Vec<MessageResponse> = messages
+                .into_iter()
+                .map(|message| MessageResponse {
+                    id: message.id,
+                    content: message.content,
+                    timestamp: message.timestamp,
+                })
+                .collect();
+
+            // Get the new offset after polling
+            let new_offset = queue
+                .get_consumer_group_offset(&group_id, &topic)
+                .unwrap_or(0);
+
+            Ok(Json(ConsumerGroupPollResponse {
+                count: message_responses.len(),
+                messages: message_responses,
+                new_offset,
+            }))
+        }
+        Err(error) => {
+            log(
+                "ERROR",
+                &format!(
+                    "GET /api/consumer-groups/{group_id}/topics/{topic}/messages failed: {error}"
+                ),
+            );
+            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
         }
     }
 }

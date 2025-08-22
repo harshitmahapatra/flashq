@@ -12,6 +12,10 @@ Default server runs on `http://127.0.0.1:8080`
 |--------|----------|-------------|
 | `POST` | `/api/topics/{topic}/messages` | Post a message to a topic |
 | `GET` | `/api/topics/{topic}/messages` | Poll messages from a topic |
+| `POST` | `/api/consumer-groups` | Create a new consumer group |
+| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
+| `POST` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
+| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/messages` | Poll messages for a consumer group |
 | `GET` | `/health` | Health check endpoint |
 
 ## POST Message
@@ -102,6 +106,155 @@ curl http://127.0.0.1:8080/api/topics/news/messages?count=5
 
 # Poll non-existent topic (returns empty)
 curl http://127.0.0.1:8080/api/topics/nonexistent/messages
+```
+
+## Consumer Group Operations
+
+Consumer groups enable coordinated consumption of messages with offset tracking, similar to Kafka's consumer group model.
+
+### Create Consumer Group
+
+Create a new consumer group with a unique group ID.
+
+**Endpoint:** `POST /api/consumer-groups`
+
+**Request Headers:**
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "group_id": "my-consumer-group"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "group_id": "my-consumer-group"
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "error": "A consumer group already exists for group_id my-consumer-group"
+}
+```
+
+#### Example with curl
+```bash
+curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+  -H "Content-Type: application/json" \
+  -d '{"group_id": "my-consumer-group"}'
+```
+
+### Get Consumer Group Offset
+
+Retrieve the current offset for a consumer group on a specific topic.
+
+**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/offset`
+
+**Success Response (200 OK):**
+```json
+{
+  "group_id": "my-consumer-group",
+  "topic": "news",
+  "offset": 5
+}
+```
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": "No consumer group exists for group_id nonexistent-group"
+}
+```
+
+#### Example with curl
+```bash
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset
+```
+
+### Update Consumer Group Offset
+
+Manually update the offset for a consumer group on a specific topic.
+
+**Endpoint:** `POST /api/consumer-groups/{group_id}/topics/{topic}/offset`
+
+**Request Headers:**
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "offset": 10
+}
+```
+
+**Success Response (200 OK):** *(Empty response body)*
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": "No consumer group exists for group_id nonexistent-group"
+}
+```
+
+#### Example with curl
+```bash
+curl -X POST http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset \
+  -H "Content-Type: application/json" \
+  -d '{"offset": 10}'
+```
+
+### Poll Messages for Consumer Group
+
+Poll messages for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
+
+**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/messages`
+
+**Query Parameters:**
+- `count` (optional): Maximum number of messages to return
+
+**Success Response (200 OK):**
+```json
+{
+  "messages": [
+    {
+      "id": 5,
+      "content": "Message at offset 5",
+      "timestamp": 1755635398
+    },
+    {
+      "id": 6,
+      "content": "Message at offset 6", 
+      "timestamp": 1755635399
+    }
+  ],
+  "count": 2,
+  "new_offset": 7
+}
+```
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": "No consumer group exists for group_id nonexistent-group"
+}
+```
+
+#### Examples with curl
+```bash
+# Poll all available messages
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+
+# Limit to 3 messages
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?count=3
 ```
 
 ## Health Check

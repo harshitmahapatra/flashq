@@ -107,6 +107,15 @@ Current implementation features:
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
 - **Production ready**: Error handling, health checks, and proper HTTP status codes
+- **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+- **[API Reference](docs/api.md)** - Complete HTTP REST API documentation with examples
+- **[Architecture](docs/architecture.md)** - System design and data structure details  
+- **[Development Guide](docs/development.md)** - Development workflow and contribution guidelines
 
 ## Production Deployment
 

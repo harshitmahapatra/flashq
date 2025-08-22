@@ -403,3 +403,225 @@ async fn test_error_handling() {
 
     assert!(!response.status().is_success());
 }
+
+#[tokio::test]
+#[ignore] // TODO: Implement consumer group isolation testing
+async fn test_consumer_group_isolation() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+    let topic = "isolation_test_topic";
+
+    // Setup: Create a topic with messages
+    for i in 0..5 {
+        let response = client
+            .post(&format!("{}/api/topics/{}/messages", base_url, topic))
+            .json(&PostMessageRequest {
+                content: format!("Message {}", i),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // Create consumer groups
+    let group1 = "isolation_group_1";
+    let group2 = "isolation_group_2";
+
+    for group in [group1, group2] {
+        let response = client
+            .post(&format!("{}/api/consumer-groups", base_url))
+            .json(&CreateConsumerGroupRequest {
+                group_id: group.to_string(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // TODO(human): Test that consumer groups maintain separate offsets
+    // - Have both groups poll the same topic
+    // - Verify their offsets are independent
+    // - Ensure one group's consumption doesn't affect the other
+}
+
+#[tokio::test]
+#[ignore] // TODO: Implement offset boundary testing
+async fn test_consumer_group_offset_boundaries() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+    let topic = "boundary_test_topic";
+
+    // Setup: Create a topic with 3 messages (offsets 0, 1, 2)
+    for i in 0..3 {
+        let response = client
+            .post(&format!("{}/api/topics/{}/messages", base_url, topic))
+            .json(&PostMessageRequest {
+                content: format!("Message {}", i),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // Create consumer group
+    let group = "boundary_test_group";
+    let response = client
+        .post(&format!("{}/api/consumer-groups", base_url))
+        .json(&CreateConsumerGroupRequest {
+            group_id: group.to_string(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // TODO(human): Test offset boundary conditions
+    // - Update offset beyond available messages (offset 10 when only 3 messages exist)
+    // - Test extreme values like u64::MAX
+    // - Test offset at exact boundary (offset 3 for 3 messages)
+    // - Verify behavior when polling from invalid offsets
+}
+
+#[tokio::test]
+#[ignore] // TODO: Implement error handling testing
+async fn test_consumer_group_error_handling() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+
+    // TODO(human): Test error conditions
+    // - Operations on nonexistent consumer groups (expect 404)
+    // - Operations on nonexistent topics
+    // - Duplicate consumer group creation (expect 400)
+    // - Invalid JSON payloads (expect 400)
+    // - Verify proper HTTP status codes and error messages
+}
+
+#[tokio::test]
+#[ignore] // TODO: Implement empty topic testing
+async fn test_consumer_group_empty_topics() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+
+    // Create consumer group
+    let group = "empty_topic_group";
+    let response = client
+        .post(&format!("{}/api/consumer-groups", base_url))
+        .json(&CreateConsumerGroupRequest {
+            group_id: group.to_string(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // TODO(human): Test empty topic scenarios
+    // - Poll from topics that don't exist yet
+    // - Poll from topics with no messages
+    // - Verify offset behavior for empty topics (should stay at 0)
+    // - Test offset updates on empty topics
+}
+
+#[tokio::test]
+#[ignore] // TODO: Implement offset advancement testing
+async fn test_consumer_group_offset_advancement() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+    let topic = "advancement_test_topic";
+
+    // Setup: Create topic with messages
+    for i in 0..5 {
+        let response = client
+            .post(&format!("{}/api/topics/{}/messages", base_url, topic))
+            .json(&PostMessageRequest {
+                content: format!("Message {}", i),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // Create consumer group
+    let group = "advancement_test_group";
+    let response = client
+        .post(&format!("{}/api/consumer-groups", base_url))
+        .json(&CreateConsumerGroupRequest {
+            group_id: group.to_string(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // TODO(human): Test offset advancement behavior
+    // - Poll with different count limits (1, 2, all)
+    // - Verify offset advances correctly after each poll
+    // - Test polling when at end of log (no new messages)
+    // - Verify new_offset in response matches expected values
+}
+
+#[tokio::test]
+#[ignore] // TODO: Implement concurrent operations testing
+async fn test_consumer_group_concurrent_operations() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let client = reqwest::Client::new();
+    let base_url = server.base_url();
+    let topic = "concurrent_test_topic";
+
+    // Setup: Create topic with messages
+    for i in 0..10 {
+        let response = client
+            .post(&format!("{}/api/topics/{}/messages", base_url, topic))
+            .json(&PostMessageRequest {
+                content: format!("Message {}", i),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // Create multiple consumer groups
+    let groups = [
+        "concurrent_group_1",
+        "concurrent_group_2",
+        "concurrent_group_3",
+    ];
+    for group in groups {
+        let response = client
+            .post(&format!("{}/api/consumer-groups", base_url))
+            .json(&CreateConsumerGroupRequest {
+                group_id: group.to_string(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // TODO(human): Test concurrent operations
+    // - Multiple groups polling same topic simultaneously
+    // - Concurrent offset updates and polling
+    // - Verify thread safety and data consistency
+    // - Test with high concurrency load
+}
