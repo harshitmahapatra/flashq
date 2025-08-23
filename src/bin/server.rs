@@ -68,6 +68,41 @@ fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
     }
 }
 
+fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> {
+    // Validate key length (max 1024 characters)
+    if let Some(key) = &request.key {
+        if key.len() > 1024 {
+            return Err(format!(
+                "Message key exceeds maximum length of 1024 characters (got {})",
+                key.len()
+            ));
+        }
+    }
+
+    // Validate value length (max 1MB = 1,048,576 characters)
+    if request.value.len() > 1_048_576 {
+        return Err(format!(
+            "Message value exceeds maximum length of 1MB (got {} bytes)",
+            request.value.len()
+        ));
+    }
+
+    // Validate header values (each max 1024 characters)
+    if let Some(headers) = &request.headers {
+        for (header_key, header_value) in headers {
+            if header_value.len() > 1024 {
+                return Err(format!(
+                    "Header '{}' value exceeds maximum length of 1024 characters (got {})",
+                    header_key,
+                    header_value.len()
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -154,6 +189,21 @@ async fn post_message(
     Path(topic): Path<String>,
     Json(request): Json<PostMessageRequest>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate message size limits according to OpenAPI spec
+    if let Err(validation_error) = validate_message_request(&request) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!("POST /api/topics/{topic}/messages validation failed: {validation_error}"),
+        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: validation_error,
+            }),
+        ));
+    }
+
     let value_for_log = request.value.clone();
     match app_state.queue.post_message(
         topic.clone(),
@@ -194,15 +244,28 @@ async fn poll_messages(
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
 ) -> Result<Json<PollMessagesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state.queue.poll_messages(&topic, params.count) {
+    let messages_result = match params.from_offset {
+        Some(offset) => app_state
+            .queue
+            .poll_messages_from_offset(&topic, offset, params.count),
+        None => app_state.queue.poll_messages(&topic, params.count),
+    };
+
+    match messages_result {
         Ok(messages) => {
+            let offset_info = match params.from_offset {
+                Some(offset) => format!(" from_offset: {offset}"),
+                None => String::new(),
+            };
+
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/topics/{}/messages - count: {:?} - {} messages returned",
+                    "GET /api/topics/{}/messages - count: {:?}{} - {} messages returned",
                     topic,
                     params.count,
+                    offset_info,
                     messages.len()
                 ),
             );
@@ -364,20 +427,44 @@ async fn poll_messages_for_consumer_group(
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
 ) -> Result<Json<ConsumerGroupPollResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state.queue.poll_messages_for_consumer_group(
-        &params.group_id,
-        &params.topic,
-        query.count,
-    ) {
+    let messages_result = match query.from_offset {
+        Some(offset) => {
+            // Poll from specific offset without updating consumer group offset (replay mode)
+            app_state
+                .queue
+                .poll_messages_for_consumer_group_from_offset(
+                    &params.group_id,
+                    &params.topic,
+                    offset,
+                    query.count,
+                )
+        }
+        None => {
+            // Normal polling from consumer group's current offset
+            app_state.queue.poll_messages_for_consumer_group(
+                &params.group_id,
+                &params.topic,
+                query.count,
+            )
+        }
+    };
+
+    match messages_result {
         Ok(messages) => {
+            let offset_info = match query.from_offset {
+                Some(offset) => format!(" from_offset: {offset}"),
+                None => String::new(),
+            };
+
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?} - {} messages returned",
+                    "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?}{} - {} messages returned",
                     params.group_id,
                     params.topic,
                     query.count,
+                    offset_info,
                     messages.len()
                 ),
             );
@@ -393,7 +480,7 @@ async fn poll_messages_for_consumer_group(
                 })
                 .collect();
 
-            // Get the updated offset from the consumer group
+            // Get the current offset from the consumer group (whether it was updated or not)
             let new_offset = app_state
                 .queue
                 .get_consumer_group_offset(&params.group_id, &params.topic)

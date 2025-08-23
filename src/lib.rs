@@ -308,6 +308,22 @@ impl MessageQueue {
         self.update_consumer_group_offset(group_id, topic.to_string(), new_offset)?;
         Ok(messages)
     }
+
+    /// Poll messages for a consumer group from a specific offset without updating the group's stored offset
+    /// This enables replay functionality where consumers can seek to arbitrary positions
+    pub fn poll_messages_for_consumer_group_from_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<MessageWithOffset>, MessageQueueError> {
+        // Ensure the consumer group exists
+        self.get_consumer_group_offset(group_id, topic)?;
+
+        // Poll messages from the specified offset without updating the consumer group offset
+        self.poll_messages_from_offset(topic, offset, count)
+    }
 }
 
 pub mod api;
