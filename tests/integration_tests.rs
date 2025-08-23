@@ -824,3 +824,307 @@ async fn test_consumer_group_concurrent_operations() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_message_size_and_validation_limits() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "validation_test_topic";
+
+    // Test 1: Valid message with maximum key size (1024 chars)
+    let max_key = "x".repeat(1024);
+    let response = helper
+        .post_message_with_record(
+            topic,
+            Some(max_key.clone()),
+            "Valid message with max key size",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Max key size should be accepted");
+
+    // Test 2: Key exceeding limit should be handled gracefully
+    // TODO(human): Implement key size validation in server
+    // Currently the server may not validate key size limits
+
+    // Test 3: Valid message with large value (within reasonable limits)
+    let large_value = "Message content ".repeat(1000); // ~16KB
+    let response = helper
+        .post_message_with_record(topic, None, &large_value, None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Large message should be accepted");
+
+    // Test 4: Valid headers with multiple entries
+    let mut headers = std::collections::HashMap::new();
+    for i in 0..10 {
+        headers.insert(format!("header_{i}"), format!("value_{i}"));
+    }
+    let response = helper
+        .post_message_with_record(
+            topic,
+            Some("test_key".to_string()),
+            "Message with multiple headers",
+            Some(headers),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "Multiple headers should be accepted"
+    );
+
+    // Test 5: Header with maximum value size (1024 chars)
+    let mut max_header = std::collections::HashMap::new();
+    max_header.insert("large_header".to_string(), "y".repeat(1024));
+    let response = helper
+        .post_message_with_record(
+            topic,
+            None,
+            "Message with max header size",
+            Some(max_header),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "Max header value size should be accepted"
+    );
+
+    // Verify all messages were stored correctly
+    let response = helper.poll_messages(topic, None).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let poll_data: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.count, 4, "All valid messages should be stored");
+
+    // Verify the max key message
+    let max_key_message = &poll_data.messages[0];
+    assert_eq!(max_key_message.key.as_ref().unwrap(), &max_key);
+    assert_eq!(max_key_message.value, "Valid message with max key size");
+}
+
+#[tokio::test]
+async fn test_concurrent_message_posting() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "concurrent_posting_topic";
+
+    // Test concurrent posting to same topic
+    let post_handles: Vec<_> = (0..20)
+        .map(|i| {
+            let helper = TestHelper::new(&server);
+            tokio::spawn(async move {
+                let key = if i % 2 == 0 {
+                    Some(format!("key_{i}"))
+                } else {
+                    None
+                };
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("thread".to_string(), format!("thread_{i}"));
+                headers.insert("index".to_string(), i.to_string());
+
+                let response = helper
+                    .post_message_with_record(
+                        topic,
+                        key,
+                        &format!("Concurrent message {i}"),
+                        Some(headers),
+                    )
+                    .await
+                    .unwrap();
+                (i, response.status() == 200)
+            })
+        })
+        .collect();
+
+    // Wait for all posts to complete
+    let mut results = Vec::new();
+    for handle in post_handles {
+        let (index, success) = handle.await.unwrap();
+        results.push((index, success));
+    }
+
+    // Verify all posts succeeded
+    for (index, success) in &results {
+        assert!(success, "Concurrent post {index} should succeed");
+    }
+
+    // Verify message ordering and content
+    let response = helper.poll_messages(topic, None).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let poll_data: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(
+        poll_data.count, 20,
+        "All concurrent messages should be stored"
+    );
+
+    // Verify offset sequence (should be 0-19)
+    for (i, message) in poll_data.messages.iter().enumerate() {
+        assert_eq!(message.offset, i as u64, "Offsets should be sequential");
+        assert!(
+            message.value.starts_with("Concurrent message"),
+            "Message content should be preserved"
+        );
+
+        // Verify headers were preserved
+        if let Some(ref headers) = message.headers {
+            assert!(
+                headers.contains_key("thread"),
+                "Thread header should be present"
+            );
+            assert!(
+                headers.contains_key("index"),
+                "Index header should be present"
+            );
+        }
+    }
+
+    // Test concurrent posting to different topics
+    let multi_topic_handles: Vec<_> = (0..15)
+        .map(|i| {
+            let helper = TestHelper::new(&server);
+            let topic_name = format!("concurrent_topic_{}", i % 3);
+            tokio::spawn(async move {
+                let response = helper
+                    .post_message(&topic_name, &format!("Multi-topic message {i}"))
+                    .await
+                    .unwrap();
+                (topic_name, response.status() == 200)
+            })
+        })
+        .collect();
+
+    // Verify multi-topic concurrent posting
+    for handle in multi_topic_handles {
+        let (topic_name, success) = handle.await.unwrap();
+        assert!(success, "Multi-topic post to {topic_name} should succeed");
+    }
+
+    // Verify each topic received the expected number of messages
+    for topic_index in 0..3 {
+        let topic_name = format!("concurrent_topic_{topic_index}");
+        let response = helper.poll_messages(&topic_name, None).await.unwrap();
+        assert_eq!(response.status(), 200);
+        let poll_data: PollMessagesResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.count, 5, "Each topic should have 5 messages");
+    }
+}
+
+#[tokio::test]
+async fn test_message_structure_edge_cases() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "edge_case_topic";
+
+    // Test 1: Empty key (should be treated as None)
+    let response = helper
+        .post_message_with_record(topic, Some("".to_string()), "Message with empty key", None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Empty key should be accepted");
+
+    // Test 2: Key with special characters
+    let special_key = "key-with_special.chars@domain.com:123";
+    let response = helper
+        .post_message_with_record(
+            topic,
+            Some(special_key.to_string()),
+            "Message with special chars in key",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "Special characters in key should be accepted"
+    );
+
+    // Test 3: Headers with special characters and empty values
+    let mut special_headers = std::collections::HashMap::new();
+    special_headers.insert("content-type".to_string(), "application/json".to_string());
+    special_headers.insert("x-custom-header".to_string(), "".to_string()); // Empty header value
+    special_headers.insert("unicode-header".to_string(), "测试数据".to_string()); // Unicode
+
+    let response = helper
+        .post_message_with_record(
+            topic,
+            None,
+            "Message with special headers",
+            Some(special_headers.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Special headers should be accepted");
+
+    // Test 4: Message with only value (minimal valid request)
+    let response = helper
+        .client
+        .post(format!("{}/api/topics/{}/messages", helper.base_url, topic))
+        .json(&serde_json::json!({
+            "value": "Minimal message"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Minimal message should be accepted");
+
+    // Test 5: Message with null key and headers (explicit nulls)
+    let response = helper
+        .client
+        .post(format!("{}/api/topics/{}/messages", helper.base_url, topic))
+        .json(&serde_json::json!({
+            "key": null,
+            "value": "Message with explicit nulls",
+            "headers": null
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Explicit nulls should be accepted");
+
+    // Verify all messages were stored with correct structure
+    let response = helper.poll_messages(topic, None).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let poll_data: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(
+        poll_data.count, 5,
+        "All edge case messages should be stored"
+    );
+
+    // Verify specific message structures
+    let messages = &poll_data.messages;
+
+    // First message: empty key
+    assert_eq!(messages[0].key.as_ref().map(String::as_str), Some(""));
+    assert_eq!(messages[0].value, "Message with empty key");
+
+    // Second message: special key
+    assert_eq!(messages[1].key.as_ref().unwrap(), &special_key);
+    assert_eq!(messages[1].value, "Message with special chars in key");
+
+    // Third message: special headers
+    assert_eq!(messages[2].value, "Message with special headers");
+    let headers = messages[2].headers.as_ref().unwrap();
+    assert_eq!(headers.get("content-type").unwrap(), "application/json");
+    assert_eq!(headers.get("x-custom-header").unwrap(), "");
+    assert_eq!(headers.get("unicode-header").unwrap(), "测试数据");
+
+    // Fourth and fifth messages: should have None keys and headers
+    assert!(messages[3].key.is_none());
+    assert!(messages[3].headers.is_none());
+    assert_eq!(messages[3].value, "Minimal message");
+
+    assert!(messages[4].key.is_none());
+    assert!(messages[4].headers.is_none());
+    assert_eq!(messages[4].value, "Message with explicit nulls");
+}

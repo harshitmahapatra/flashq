@@ -697,32 +697,131 @@ mod tests {
         // Note: timestamp might differ slightly due to precision, so we just check it's present
         assert!(!deserialized.timestamp.is_empty());
     }
+
+    // Error Condition Tests
+    #[test]
+    fn test_consumer_group_already_exists_error() {
+        let queue = MessageQueue::new();
+
+        // Create a consumer group
+        queue
+            .create_consumer_group("existing-group".to_string())
+            .unwrap();
+
+        // Try to create the same group again
+        let result = queue.create_consumer_group("existing-group".to_string());
+        assert!(result.is_err());
+
+        if let Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }) = result {
+            assert_eq!(group_id, "existing-group");
+        } else {
+            panic!("Expected ConsumerGroupAlreadyExists error");
+        }
+    }
+
+    #[test]
+    fn test_consumer_group_not_found_error() {
+        let queue = MessageQueue::new();
+
+        // Try to get offset from non-existent group
+        let result = queue.get_consumer_group_offset("nonexistent-group", "topic");
+        assert!(result.is_err());
+
+        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+            assert_eq!(group_id, "nonexistent-group");
+        } else {
+            panic!("Expected ConsumerGroupNotFound error");
+        }
+    }
+
+    #[test]
+    fn test_invalid_offset_error() {
+        let queue = MessageQueue::new();
+        let record = MessageRecord::new(None, "test".to_string(), None);
+
+        // Post a message to create topic with offset 0
+        queue
+            .post_message("test-topic".to_string(), record)
+            .unwrap();
+
+        // Create consumer group and try to set invalid offset (beyond available messages)
+        queue
+            .create_consumer_group("test-group".to_string())
+            .unwrap();
+        let result =
+            queue.update_consumer_group_offset("test-group", "test-topic".to_string(), 999);
+
+        assert!(result.is_err());
+        if let Err(MessageQueueError::InvalidOffset {
+            offset,
+            topic,
+            max_offset,
+        }) = result
+        {
+            assert_eq!(offset, 999);
+            assert_eq!(topic, "test-topic");
+            assert_eq!(max_offset, 1); // Next offset after one message
+        } else {
+            panic!("Expected InvalidOffset error");
+        }
+    }
+
+    #[test]
+    fn test_message_queue_error_display() {
+        let topic_error = MessageQueueError::TopicNotFound {
+            topic: "missing".to_string(),
+        };
+        assert_eq!(topic_error.to_string(), "Topic missing does not exist");
+
+        let group_error = MessageQueueError::ConsumerGroupNotFound {
+            group_id: "missing-group".to_string(),
+        };
+        assert_eq!(
+            group_error.to_string(),
+            "Consumer group missing-group does not exist"
+        );
+
+        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+            group_id: "existing-group".to_string(),
+        };
+        assert_eq!(
+            exists_error.to_string(),
+            "Consumer group existing-group already exists"
+        );
+
+        let offset_error = MessageQueueError::InvalidOffset {
+            offset: 10,
+            topic: "test".to_string(),
+            max_offset: 5,
+        };
+        assert_eq!(
+            offset_error.to_string(),
+            "Invalid offset 10 for topic test with max offset 5"
+        );
+    }
+
+    #[test]
+    fn test_message_queue_error_is_not_found() {
+        let topic_error = MessageQueueError::TopicNotFound {
+            topic: "missing".to_string(),
+        };
+        assert!(topic_error.is_not_found());
+
+        let group_error = MessageQueueError::ConsumerGroupNotFound {
+            group_id: "missing".to_string(),
+        };
+        assert!(group_error.is_not_found());
+
+        let offset_error = MessageQueueError::InvalidOffset {
+            offset: 10,
+            topic: "test".to_string(),
+            max_offset: 5,
+        };
+        assert!(offset_error.is_not_found());
+
+        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+            group_id: "existing".to_string(),
+        };
+        assert!(!exists_error.is_not_found());
+    }
 }
-// TODO(human): Update all unit tests in the tests module to work with MessageRecord/MessageWithOffset
-//
-// Changes needed for unit tests:
-//
-// 1. Message Creation Tests:
-//    - Update tests that create Message instances to use MessageRecord::new()
-//    - Test the new constructor with key, value, and headers parameters
-//    - Add tests for MessageWithOffset::from_record() method
-//
-// 2. MessageQueue Tests:
-//    - Update post_message() tests to accept MessageRecord instead of String content
-//    - Update poll_messages() tests to expect MessageWithOffset return values
-//    - Verify offset semantics work correctly (replacing id-based logic)
-//
-// 3. Field Access Tests:
-//    - Change tests accessing msg.content to msg.value (or msg.record.value for MessageWithOffset)
-//    - Change tests accessing msg.id to msg.offset
-//    - Update timestamp assertions to expect ISO 8601 String format
-//    - Add tests for new key and headers fields
-//
-// 4. TopicLog Tests:
-//    - Update any tests that directly interact with stored messages
-//    - Ensure offset-based retrieval works correctly
-//    - Test consumer group functionality with new message structure
-//
-// 5. Serialization Tests:
-//    - Add tests to verify serde compatibility with new structures
-//    - Test JSON serialization matches OpenAPI schema expectations
