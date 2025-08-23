@@ -1,0 +1,695 @@
+openapi: 3.0.3
+info:
+  title: Message Queue RS - Kafka-like Streaming API
+  description: |
+    A Kafka-inspired message queue system with offset-based consumption, consumer groups, 
+    and streaming semantics while maintaining single-server simplicity.
+
+    ## Features
+    - Topic-based message organization
+    - Offset-based consumption for message replay
+    - Consumer groups for independent consumption tracking
+    - Message keys and headers for routing and metadata
+    - FIFO ordering guarantees within topics
+
+    ## API Design Principles
+    - RESTful endpoints following Kafka conventions
+    - JSON request/response format
+    - Offset-based addressing for scalable consumption
+    - Consumer group coordination for parallel processing
+  version: 1.0.0
+  contact:
+    name: Message Queue RS
+    url: https://github.com/harshitmahapatra/message-queue-rs
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: http://localhost:9090
+    description: Alternative development server
+
+paths:
+  # Health Check
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the message queue server
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: "healthy"
+                version: "1.0.0"
+                uptime: "2h 15m 30s"
+
+  # Producer APIs
+  /topics/{topic}/records:
+    post:
+      summary: Produce messages to a topic
+      description: |
+        Publish one or more messages to the specified topic. Messages are appended 
+        to the topic log and assigned sequential offsets.
+      operationId: produceMessages
+      tags:
+        - Producer
+      parameters:
+        - $ref: "#/components/parameters/TopicName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProduceRequest"
+            examples:
+              single-message:
+                summary: Single message
+                value:
+                  records:
+                    - key: "user123"
+                      value: "User logged in"
+                      headers:
+                        source: "auth-service"
+                        timestamp: "2024-01-15T10:30:00Z"
+              multiple-messages:
+                summary: Multiple messages
+                value:
+                  records:
+                    - key: "user123"
+                      value: "User logged in"
+                      headers:
+                        source: "auth-service"
+                    - key: "user456"
+                      value: "User logged out"
+                      headers:
+                        source: "auth-service"
+      responses:
+        "200":
+          description: Messages successfully produced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProduceResponse"
+              example:
+                offsets:
+                  - offset: 142
+                    timestamp: "2024-01-15T10:30:00.123Z"
+                  - offset: 143
+                    timestamp: "2024-01-15T10:30:00.124Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: Invalid message format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "validation_error"
+                message: "Message value cannot be empty"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # Consumer Group Management
+  /consumers/{group-id}:
+    post:
+      summary: Create or join consumer group
+      description: |
+        Create a new consumer group or join an existing one. Returns the consumer 
+        group configuration and current topic subscriptions.
+      operationId: createConsumerGroup
+      tags:
+        - Consumer Groups
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerGroupRequest"
+            example:
+              auto_offset_reset: "earliest"
+              session_timeout_ms: 30000
+      responses:
+        "201":
+          description: Consumer group created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerGroupResponse"
+              example:
+                group_id: "analytics-processors"
+                state: "stable"
+                protocol: "range"
+                members: 1
+        "200":
+          description: Joined existing consumer group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerGroupResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Leave consumer group
+      description: |
+        Remove the consumer from the group and trigger rebalancing if necessary.
+        All committed offsets are preserved.
+      operationId: leaveConsumerGroup
+      tags:
+        - Consumer Groups
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+      responses:
+        "204":
+          description: Successfully left consumer group
+        "404":
+          description: Consumer group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "group_not_found"
+                message: "Consumer group 'analytics-processors' not found"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # Consumer APIs
+  /consumers/{group-id}/topics/{topic}:
+    get:
+      summary: Fetch messages from current offset
+      description: |
+        Fetch messages from the topic starting at the consumer group's current offset.
+        Automatically advances the offset after successful fetch.
+      operationId: fetchMessages
+      tags:
+        - Consumer
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
+        - name: max_records
+          in: query
+          required: false
+          description: "Maximum number of records to return (default: 100)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 100
+          example: 50
+        - name: timeout_ms
+          in: query
+          required: false
+          description: "Maximum time to wait for messages (default: 1000ms)"
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 60000
+            default: 1000
+          example: 5000
+        - name: from_offset
+          in: query
+          required: false
+          description: Seek to specific offset before fetching (overrides current offset)
+          schema:
+            type: integer
+            minimum: 0
+          example: 100
+        - name: include_headers
+          in: query
+          required: false
+          description: "Whether to include message headers in the response (default: true)"
+          schema:
+            type: boolean
+            default: true
+          example: true
+      responses:
+        "200":
+          description: Messages fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FetchResponse"
+              examples:
+                with-messages:
+                  summary: Successful fetch with messages
+                  value:
+                    records:
+                      - offset: 142
+                        key: "user123"
+                        value: "User logged in"
+                        timestamp: "2024-01-15T10:30:00.123Z"
+                        headers:
+                          source: "auth-service"
+                      - offset: 143
+                        key: "user456"
+                        value: "User logged out"
+                        timestamp: "2024-01-15T10:30:01.456Z"
+                        headers:
+                          source: "auth-service"
+                    next_offset: 144
+                    high_water_mark: 200
+                empty-fetch:
+                  summary: No new messages available
+                  value:
+                    records: []
+                    next_offset: 144
+                    high_water_mark: 144
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Consumer group or topic not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "topic_not_found"
+                message: "Topic 'user-events' not found"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # Offset Management
+  /consumers/{group-id}/topics/{topic}/offsets:
+    post:
+      summary: Commit offset
+      description: |
+        Commit the current offset for the consumer group on the specified topic.
+        This marks messages up to this offset as processed.
+      operationId: commitOffset
+      tags:
+        - Consumer
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OffsetCommitRequest"
+            example:
+              offset: 150
+              metadata: "Processed batch #42"
+      responses:
+        "200":
+          description: Offset committed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OffsetCommitResponse"
+              example:
+                topic: "user-events"
+                committed_offset: 150
+                timestamp: "2024-01-15T10:35:00.789Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Consumer group or topic not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      summary: Get committed offset
+      description: |
+        Retrieve the current committed offset for the consumer group on the specified topic.
+      operationId: getCommittedOffset
+      tags:
+        - Consumer
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
+      responses:
+        "200":
+          description: Current committed offset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OffsetResponse"
+              example:
+                topic: "user-events"
+                committed_offset: 150
+                high_water_mark: 200
+                lag: 50
+                last_commit_time: "2024-01-15T10:35:00.789Z"
+        "404":
+          description: Consumer group or topic not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  schemas:
+    # Health Response
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall health status
+        version:
+          type: string
+          description: Server version
+          example: "1.0.0"
+        uptime:
+          type: string
+          description: Server uptime
+          example: "2h 15m 30s"
+        topics_count:
+          type: integer
+          description: Number of active topics
+          minimum: 0
+        consumer_groups_count:
+          type: integer
+          description: Number of active consumer groups
+          minimum: 0
+
+    # Message Schemas
+    MessageRecord:
+      type: object
+      required:
+        - value
+      properties:
+        key:
+          type: string
+          description: Optional message key for partitioning/routing
+          maxLength: 1024
+          example: "user123"
+        value:
+          type: string
+          description: Message payload content
+          maxLength: 1048576 # 1MB limit
+          example: "User logged in"
+        headers:
+          type: object
+          description: Optional key-value metadata headers. Header names should start with a letter and contain only letters, numbers, underscores, and hyphens
+          additionalProperties:
+            type: string
+            maxLength: 1024
+          example:
+            source: "auth-service"
+            timestamp: "2024-01-15T10:30:00Z"
+            correlation_id: "abc123"
+
+    MessageWithOffset:
+      allOf:
+        - $ref: "#/components/schemas/MessageRecord"
+        - type: object
+          required:
+            - offset
+            - timestamp
+          properties:
+            offset:
+              type: integer
+              description: Sequential offset within the topic
+              minimum: 0
+              example: 142
+            timestamp:
+              type: string
+              format: date-time
+              description: Server-assigned timestamp when message was stored
+              example: "2024-01-15T10:30:00.123Z"
+
+    # Producer Request/Response
+    ProduceRequest:
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          description: |
+            Array of messages to produce. Limited to 1000 messages per batch to prevent 
+            memory exhaustion and ensure reasonable response times while supporting 
+            high-throughput scenarios.
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/MessageRecord"
+
+    ProduceResponse:
+      type: object
+      required:
+        - offsets
+      properties:
+        offsets:
+          type: array
+          description: Assigned offsets for each produced message
+          items:
+            type: object
+            required:
+              - offset
+              - timestamp
+            properties:
+              offset:
+                type: integer
+                description: Assigned offset for the message
+                minimum: 0
+                example: 142
+              timestamp:
+                type: string
+                format: date-time
+                description: Server timestamp when message was stored
+                example: "2024-01-15T10:30:00.123Z"
+
+    # Consumer Group Schemas
+    ConsumerGroupRequest:
+      type: object
+      properties:
+        auto_offset_reset:
+          type: string
+          enum: [earliest, latest]
+          default: latest
+          description: What to do when there is no initial offset
+        session_timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 300000
+          default: 30000
+          description: Session timeout in milliseconds
+        enable_auto_commit:
+          type: boolean
+          default: false
+          description: Whether to automatically commit offsets
+
+    ConsumerGroupResponse:
+      type: object
+      required:
+        - group_id
+        - state
+      properties:
+        group_id:
+          type: string
+          description: The consumer group identifier
+          example: "analytics-processors"
+        state:
+          type: string
+          enum: [preparing_rebalance, completing_rebalance, stable, dead, empty]
+          description: Current state of the consumer group
+        protocol:
+          type: string
+          enum: [range, round_robin]
+          description: Partition assignment protocol
+          default: range
+        members:
+          type: integer
+          description: Number of active members in the group
+          minimum: 0
+
+    # Fetch Response
+    FetchResponse:
+      type: object
+      required:
+        - records
+        - next_offset
+        - high_water_mark
+      properties:
+        records:
+          type: array
+          description: Fetched messages with offsets
+          items:
+            $ref: "#/components/schemas/MessageWithOffset"
+        next_offset:
+          type: integer
+          description: Next offset to fetch from
+          minimum: 0
+        high_water_mark:
+          type: integer
+          description: Highest offset in the topic
+          minimum: 0
+        lag:
+          type: integer
+          description: Number of messages behind high water mark (optional, can be calculated as high_water_mark - next_offset)
+          minimum: 0
+
+    # Offset Management
+    OffsetCommitRequest:
+      type: object
+      required:
+        - offset
+      properties:
+        offset:
+          type: integer
+          description: Offset to commit
+          minimum: 0
+          example: 150
+        metadata:
+          type: string
+          description: Optional metadata about the commit
+          maxLength: 1024
+          example: "Processed batch #42"
+
+    OffsetCommitResponse:
+      type: object
+      required:
+        - topic
+        - committed_offset
+        - timestamp
+      properties:
+        topic:
+          type: string
+          description: Topic name
+          example: "user-events"
+        committed_offset:
+          type: integer
+          description: The committed offset
+          minimum: 0
+          example: 150
+        timestamp:
+          type: string
+          format: date-time
+          description: When the offset was committed
+          example: "2024-01-15T10:35:00.789Z"
+
+    OffsetResponse:
+      type: object
+      required:
+        - topic
+        - committed_offset
+        - high_water_mark
+        - lag
+      properties:
+        topic:
+          type: string
+          description: Topic name
+          example: "user-events"
+        committed_offset:
+          type: integer
+          description: Current committed offset
+          minimum: 0
+          example: 150
+        high_water_mark:
+          type: integer
+          description: Highest available offset
+          minimum: 0
+          example: 200
+        lag:
+          type: integer
+          description: Number of messages behind
+          minimum: 0
+          example: 50
+        last_commit_time:
+          type: string
+          format: date-time
+          description: When offset was last committed
+          example: "2024-01-15T10:35:00.789Z"
+
+    # Error Response
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code identifier
+          example: "validation_error"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Message value cannot be empty"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters or request body
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "invalid_parameter"
+            message: "Topic name must contain only alphanumeric characters, dots, underscores, and hyphens"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "internal_error"
+            message: "An unexpected error occurred while processing the request"
+
+  parameters:
+    TopicName:
+      name: topic
+      in: path
+      required: true
+      description: The topic name
+      schema:
+        type: string
+        pattern: "^[a-zA-Z0-9._][a-zA-Z0-9._-]*$"
+        minLength: 1
+        maxLength: 255
+      example: "user-events"
+
+    ConsumerGroupId:
+      name: group-id
+      in: path
+      required: true
+      description: The consumer group identifier
+      schema:
+        type: string
+        pattern: "^[a-zA-Z0-9._][a-zA-Z0-9._-]*$"
+        minLength: 1
+        maxLength: 255
+      example: "analytics-processors"
+
+tags:
+  - name: Health
+    description: Health check and system status
+  - name: Producer
+    description: Message production endpoints
+  - name: Consumer Groups
+    description: Consumer group management
+  - name: Consumer
+    description: Message consumption and offset management
