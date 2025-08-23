@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, Record, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -673,15 +673,14 @@ async fn get_consumer_group_offset(
                 ),
             );
 
-            let error_response = if error.is_not_found() {
-                // Could be either group not found or topic not found
-                if error.to_string().contains("group") {
-                    ErrorResponse::group_not_found(&params.group_id)
-                } else {
-                    ErrorResponse::topic_not_found(&params.topic)
+            let error_response = match &error {
+                MessageQueueError::TopicNotFound { topic } => {
+                    ErrorResponse::topic_not_found(topic)
                 }
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
+                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                    ErrorResponse::group_not_found(group_id)
+                }
+                _ => ErrorResponse::internal_error(&error.to_string()),
             };
 
             Err((
@@ -759,14 +758,14 @@ async fn commit_consumer_group_offset(
                 ),
             );
 
-            let error_response = if error.is_not_found() {
-                if error.to_string().contains("group") {
-                    ErrorResponse::group_not_found(&params.group_id)
-                } else {
-                    ErrorResponse::topic_not_found(&params.topic)
+            let error_response = match &error {
+                MessageQueueError::TopicNotFound { topic } => {
+                    ErrorResponse::topic_not_found(topic)
                 }
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
+                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                    ErrorResponse::group_not_found(group_id)
+                }
+                _ => ErrorResponse::internal_error(&error.to_string()),
             };
 
             Err((
@@ -904,14 +903,14 @@ async fn fetch_messages_for_consumer_group(
                 ),
             );
 
-            let error_response = if error.is_not_found() {
-                if error.to_string().contains("group") {
-                    ErrorResponse::group_not_found(&params.group_id)
-                } else {
-                    ErrorResponse::topic_not_found(&params.topic)
+            let error_response = match &error {
+                MessageQueueError::TopicNotFound { topic } => {
+                    ErrorResponse::topic_not_found(topic)
                 }
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
+                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                    ErrorResponse::group_not_found(group_id)
+                }
+                _ => ErrorResponse::internal_error(&error.to_string()),
             };
 
             Err((

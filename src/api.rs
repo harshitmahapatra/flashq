@@ -92,11 +92,6 @@ pub struct ConsumerGroupResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct CreateConsumerGroupResponse {
-    pub group_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct UpdateConsumerGroupOffsetRequest {
     pub offset: u64,
 }
