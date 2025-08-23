@@ -129,15 +129,24 @@ cargo run --bin message-queue-rs
 
 ### HTTP Server
 ```bash
-# Start server on default port (8080)
+# Start server on default port (8080) with TRACE logging
 cargo run --bin server
 
-# Start server on custom port
+# Start server on custom port with TRACE logging
 cargo run --bin server 9090
+
+# Production mode with INFO logging (quieter output)
+cargo build --release
+./target/release/server 8080
 
 # Run in background (Linux/macOS)
 cargo run --bin server &
 ```
+
+**Logging Levels:**
+- **Debug builds**: TRACE level - shows detailed request/response information
+- **Release builds**: INFO level - production-appropriate minimal logging
+- Automatically detected based on compilation flags
 
 ### CLI Client
 ```bash
@@ -205,10 +214,20 @@ message-queue-rs/
 ## Debugging
 
 ### Logging
-The project currently uses simple println! for output. For debugging:
 
+The server implements automatic log level detection:
+
+- **Development** (`cargo run --bin server`): TRACE level logging
+  - Shows detailed HTTP request/response information
+  - Helpful for debugging API interactions
+- **Production** (`./target/release/server`): INFO level logging  
+  - Minimal output suitable for production deployment
+  - Shows server startup and critical events only
+
+**For debugging during development:**
 ```rust
-// Add debug prints in your development
+// The server uses a built-in logging system
+// Add debug prints in your development if needed
 println!("Debug: message count = {}", messages.len());
 ```
 

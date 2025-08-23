@@ -125,12 +125,17 @@ After building with `cargo build --release`:
 
 **Server:**
 ```bash
-# Default port (8080)
+# Default port (8080) with INFO-level logging
 ./target/release/server
 
-# Custom port
+# Custom port with INFO-level logging
 ./target/release/server 9090
 ```
+
+**Logging Behavior:**
+- **Debug builds** (`cargo run --bin server`): TRACE-level logging (verbose request/response details)
+- **Release builds** (`./target/release/server`): INFO-level logging (production-appropriate output)
+- Automatic detection based on compilation flags - no manual configuration needed
 
 **Client:**
 ```bash

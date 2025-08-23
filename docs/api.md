@@ -6,6 +6,19 @@ Complete HTTP API documentation for the message-queue-rs server.
 
 Default server runs on `http://127.0.0.1:8080`
 
+## Server Logging
+
+The server provides different logging levels based on build type:
+
+- **Debug builds** (`cargo run --bin server`): **TRACE** level logging
+  - Detailed request/response logging for development
+  - Shows all HTTP request details and internal operations
+- **Release builds** (`./target/release/server`): **INFO** level logging  
+  - Production-appropriate minimal logging
+  - Shows server startup and critical events only
+
+Logging level is automatically detected - no manual configuration needed.
+
 ## Endpoints
 
 | Method | Endpoint | Description |

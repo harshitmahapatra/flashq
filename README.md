@@ -24,11 +24,15 @@ cargo run --bin message-queue-rs
 
 **Start the server:**
 ```bash
-# Default port (8080)
+# Default port (8080) - TRACE logging in debug mode
 cargo run --bin server
 
-# Custom port
+# Custom port - TRACE logging in debug mode
 cargo run --bin server 9090
+
+# Production mode - INFO logging only
+cargo build --release
+./target/release/server 8080
 ```
 
 **Use the CLI client:**
