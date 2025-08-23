@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust-based message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes both library and binary crates with full integration test coverage.
+This is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced message structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
 
 ## Development Commands
 
@@ -48,11 +48,14 @@ Following Rust best practices with library and binary crates:
 - `Cargo.toml` - Project configuration using Rust 2024 edition
 
 ### Library Crate (`src/lib.rs`)
-- `Message` struct - Individual message with content, timestamp, and unique ID
+- `MessageRecord` struct - Message payload with optional key and headers
+- `MessageWithOffset` struct - Message with offset and ISO 8601 timestamp
 - `MessageQueue` struct - Main queue implementation with topic-based organization
+- `TopicLog` struct - Append-only log storage for messages within topics
+- Consumer group management with offset tracking
 - `demo` module - Interactive CLI functionality (exposed publicly)
 - Thread-safe using `Arc<Mutex<>>` for concurrent access
-- All unit tests located here
+- Comprehensive unit tests for all data structures
 
 ### Binary Crates
 - **`src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
@@ -65,7 +68,8 @@ The demo module provides an educational interactive demonstration of the message
 
 **Features:**
 - **Menu-driven interface** - 5 clear options with emoji-based visual feedback
-- **Post messages interactively** - Prompts for topic and content with input validation
+- **Post messages interactively** - Prompts for topic and message value with input validation
+- **Enhanced message display** - Shows keys, headers, offsets, and ISO 8601 timestamps
 - **Poll messages with options** - Choose topic and optionally limit message count
 - **Topic management** - View all created topics with message counts from current session
 - **Quick demo mode** - Automated demonstration posting and polling multiple messages
@@ -81,8 +85,8 @@ cargo run --bin message-queue-rs
 ```
 
 **Menu Options:**
-1. Post a message - Interactive topic and content input
-2. Poll messages from a topic - Choose topic and message count limit
+1. Post a message - Interactive topic and message value input (creates MessageRecord)
+2. Poll messages from a topic - Display enhanced messages with keys, headers, offsets
 3. View all topics - Show session statistics and topic overview
 4. Run quick demo - Automated demonstration of core functionality
 5. Exit - Clean program termination
@@ -90,27 +94,32 @@ cargo run --bin message-queue-rs
 This provides an excellent way to understand the library API and test functionality without requiring HTTP server setup or external clients.
 
 ### Integration Tests (`tests/integration_tests.rs`)
-- **End-to-end workflow testing** - Multi-topic message posting and polling
-- **HTTP API validation** - All REST endpoints tested with real server instances
-- **FIFO ordering verification** - Ensures message ordering guarantees
+- **End-to-end workflow testing** - Multi-topic message posting and polling with enhanced structure
+- **HTTP API validation** - All REST endpoints tested including consumer group operations
+- **FIFO ordering verification** - Ensures message ordering guarantees with offset-based positioning
 - **Count parameter testing** - Validates polling limits work correctly
+- **Consumer group testing** - Offset management and coordinated consumption
+- **Enhanced message testing** - Keys, headers, and metadata validation
 - **Error handling** - Tests invalid requests and edge cases
 - **Health check testing** - Server status endpoint validation
 
 ## Architecture Notes
 
 Current implementation features:
-- **Topic-based messaging**: Messages are organized by topic strings
+- **Kafka-style messaging**: Messages with optional keys and headers for routing/metadata
+- **Topic-based organization**: Messages organized by topic strings with separate offset counters
+- **Offset-based positioning**: Sequential offsets within topics starting from 0
 - **Non-destructive polling**: Messages remain in queue after being read
-- **FIFO ordering**: Messages are returned in the order they were posted  
+- **FIFO ordering**: Messages returned in the order they were posted with offset guarantees
 - **Thread safety**: Safe concurrent access using Arc<Mutex<>>
-- **Unique message IDs**: Each message gets an incrementing ID
+- **ISO 8601 timestamps**: Human-readable timestamp format for message creation time
 - **Count limiting**: Poll operations can limit number of messages returned
-- **HTTP REST API**: Full REST endpoints for posting and polling messages
+- **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
+- **HTTP REST API**: Full REST endpoints for posting, polling, and consumer group operations
+- **Enhanced API structures**: MessageRecord (requests) and MessageResponse (polling responses)
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
 - **Production ready**: Error handling, health checks, and proper HTTP status codes
-- **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
 
 ## Documentation
 

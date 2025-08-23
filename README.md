@@ -1,15 +1,18 @@
 # Message Queue RS
 
-A lightweight, networked message queue system built in Rust with HTTP REST API. Features topic-based messaging, FIFO ordering, and concurrent client support.
+A Kafka-inspired message queue system built in Rust with HTTP REST API. Features topic-based messaging with optional keys and headers, offset-based positioning, consumer groups, and concurrent client support.
 
 ## Features
 
-- **Topic-based messaging** - Organize messages by topics
+- **Kafka-style messaging** - Optional message keys and headers for routing/metadata
+- **Topic-based organization** - Messages organized by topic strings
+- **Offset-based positioning** - Sequential message positioning within topics
+- **Consumer groups** - Coordinated consumption with offset management
 - **HTTP REST API** - Easy integration with any HTTP client
 - **Non-destructive polling** - Messages persist after being read
 - **FIFO ordering** - Messages returned in order they were posted
 - **Thread-safe** - Concurrent posting and polling support
-- **JSON communication** - Structured request/response format
+- **ISO 8601 timestamps** - Human-readable message timestamps
 
 ## Quick Start
 
@@ -49,16 +52,34 @@ cargo run --bin client -- poll news 5
 
 ### HTTP API
 
-Post a message:
+Post a simple message:
 ```bash
 curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
   -H "Content-Type: application/json" \
-  -d '{"content": "Hello, World!"}'
+  -d '{"key": null, "value": "Hello, World!", "headers": null}'
+```
+
+Post a message with key and headers:
+```bash
+curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user123", "value": "Important update", "headers": {"priority": "high", "source": "mobile"}}'
 ```
 
 Poll messages:
 ```bash
 curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+```
+
+Consumer group operations:
+```bash
+# Create consumer group
+curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+  -H "Content-Type: application/json" \
+  -d '{"group_id": "my-group"}'
+
+# Poll messages for consumer group (automatically advances offset)
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
 ```
 
 ## Development
@@ -88,6 +109,8 @@ cargo build --release
 - **tokio** - Async runtime  
 - **serde** - JSON serialization
 - **reqwest** - HTTP client
+- **chrono** - ISO 8601 timestamp handling
+- **clap** - Command-line interface
 
 ## License
 
