@@ -4,14 +4,14 @@ info:
   description: |
     A Kafka-inspired message queue system with offset-based consumption, consumer groups, 
     and streaming semantics while maintaining single-server simplicity.
-    
+
     ## Features
     - Topic-based message organization
     - Offset-based consumption for message replay
     - Consumer groups for independent consumption tracking
     - Message keys and headers for routing and metadata
     - FIFO ordering guarantees within topics
-    
+
     ## API Design Principles
     - RESTful endpoints following Kafka conventions
     - JSON request/response format
@@ -41,12 +41,12 @@ paths:
       tags:
         - Health
       responses:
-        '200':
+        "200":
           description: Server is healthy
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                $ref: "#/components/schemas/HealthResponse"
               example:
                 status: "healthy"
                 version: "1.0.0"
@@ -63,13 +63,13 @@ paths:
       tags:
         - Producer
       parameters:
-        - $ref: '#/components/parameters/TopicName'
+        - $ref: "#/components/parameters/TopicName"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProduceRequest'
+              $ref: "#/components/schemas/ProduceRequest"
             examples:
               single-message:
                 summary: Single message
@@ -93,31 +93,31 @@ paths:
                       headers:
                         source: "auth-service"
       responses:
-        '200':
+        "200":
           description: Messages successfully produced
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProduceResponse'
+                $ref: "#/components/schemas/ProduceResponse"
               example:
                 offsets:
                   - offset: 142
                     timestamp: "2024-01-15T10:30:00.123Z"
                   - offset: 143
                     timestamp: "2024-01-15T10:30:00.124Z"
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '422':
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
           description: Invalid message format
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "validation_error"
                 message: "Message value cannot be empty"
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   # Consumer Group Management
   /consumers/{group-id}:
@@ -130,39 +130,39 @@ paths:
       tags:
         - Consumer Groups
       parameters:
-        - $ref: '#/components/parameters/ConsumerGroupId'
+        - $ref: "#/components/parameters/ConsumerGroupId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConsumerGroupRequest'
+              $ref: "#/components/schemas/ConsumerGroupRequest"
             example:
               auto_offset_reset: "earliest"
               session_timeout_ms: 30000
       responses:
-        '201':
+        "201":
           description: Consumer group created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumerGroupResponse'
+                $ref: "#/components/schemas/ConsumerGroupResponse"
               example:
                 group_id: "analytics-processors"
                 state: "stable"
                 protocol: "range"
                 members: 1
-        '200':
+        "200":
           description: Joined existing consumer group
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumerGroupResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-    
+                $ref: "#/components/schemas/ConsumerGroupResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
     delete:
       summary: Leave consumer group
       description: |
@@ -172,21 +172,21 @@ paths:
       tags:
         - Consumer Groups
       parameters:
-        - $ref: '#/components/parameters/ConsumerGroupId'
+        - $ref: "#/components/parameters/ConsumerGroupId"
       responses:
-        '204':
+        "204":
           description: Successfully left consumer group
-        '404':
+        "404":
           description: Consumer group not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "group_not_found"
                 message: "Consumer group 'analytics-processors' not found"
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   # Consumer APIs
   /consumers/{group-id}/topics/{topic}:
@@ -199,8 +199,8 @@ paths:
       tags:
         - Consumer
       parameters:
-        - $ref: '#/components/parameters/ConsumerGroupId'
-        - $ref: '#/components/parameters/TopicName'
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
         - name: max_records
           in: query
           required: false
@@ -238,12 +238,12 @@ paths:
             default: true
           example: true
       responses:
-        '200':
+        "200":
           description: Messages fetched successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FetchResponse'
+                $ref: "#/components/schemas/FetchResponse"
               examples:
                 with-messages:
                   summary: Successful fetch with messages
@@ -269,19 +269,19 @@ paths:
                     records: []
                     next_offset: 144
                     high_water_mark: 144
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
           description: Consumer group or topic not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "topic_not_found"
                 message: "Topic 'user-events' not found"
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   # Offset Management
   /consumers/{group-id}/topics/{topic}/offsets:
@@ -294,39 +294,39 @@ paths:
       tags:
         - Consumer
       parameters:
-        - $ref: '#/components/parameters/ConsumerGroupId'
-        - $ref: '#/components/parameters/TopicName'
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OffsetCommitRequest'
+              $ref: "#/components/schemas/OffsetCommitRequest"
             example:
               offset: 150
               metadata: "Processed batch #42"
       responses:
-        '200':
+        "200":
           description: Offset committed successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OffsetCommitResponse'
+                $ref: "#/components/schemas/OffsetCommitResponse"
               example:
                 topic: "user-events"
                 committed_offset: 150
                 timestamp: "2024-01-15T10:35:00.789Z"
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
           description: Consumer group or topic not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-    
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
     get:
       summary: Get committed offset
       description: |
@@ -335,29 +335,29 @@ paths:
       tags:
         - Consumer
       parameters:
-        - $ref: '#/components/parameters/ConsumerGroupId'
-        - $ref: '#/components/parameters/TopicName'
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
       responses:
-        '200':
+        "200":
           description: Current committed offset
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OffsetResponse'
+                $ref: "#/components/schemas/OffsetResponse"
               example:
                 topic: "user-events"
                 committed_offset: 150
                 high_water_mark: 200
                 lag: 50
                 last_commit_time: "2024-01-15T10:35:00.789Z"
-        '404':
+        "404":
           description: Consumer group or topic not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
 components:
   schemas:
@@ -402,7 +402,7 @@ components:
         value:
           type: string
           description: Message payload content
-          maxLength: 1048576  # 1MB limit
+          maxLength: 1048576 # 1MB limit
           example: "User logged in"
         headers:
           type: object
@@ -417,7 +417,7 @@ components:
 
     MessageWithOffset:
       allOf:
-        - $ref: '#/components/schemas/MessageRecord'
+        - $ref: "#/components/schemas/MessageRecord"
         - type: object
           required:
             - offset
@@ -449,7 +449,7 @@ components:
           minItems: 1
           maxItems: 1000
           items:
-            $ref: '#/components/schemas/MessageRecord'
+            $ref: "#/components/schemas/MessageRecord"
 
     ProduceResponse:
       type: object
@@ -532,7 +532,7 @@ components:
           type: array
           description: Fetched messages with offsets
           items:
-            $ref: '#/components/schemas/MessageWithOffset'
+            $ref: "#/components/schemas/MessageWithOffset"
         next_offset:
           type: integer
           description: Next offset to fetch from
@@ -644,7 +644,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "invalid_parameter"
             message: "Topic name must contain only alphanumeric characters, dots, underscores, and hyphens"
@@ -654,7 +654,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "internal_error"
             message: "An unexpected error occurred while processing the request"
@@ -667,7 +667,7 @@ components:
       description: The topic name
       schema:
         type: string
-        pattern: '^[a-zA-Z0-9._-][a-zA-Z0-9._-]*$'
+        pattern: "^[a-zA-Z0-9._-]+$"
         minLength: 1
         maxLength: 255
       example: "user-events"
@@ -679,7 +679,7 @@ components:
       description: The consumer group identifier
       schema:
         type: string
-        pattern: '^[a-zA-Z0-9._-][a-zA-Z0-9._-]*$'
+        pattern: "^[a-zA-Z0-9._-]+$"
         minLength: 1
         maxLength: 255
       example: "analytics-processors"
