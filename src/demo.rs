@@ -1,4 +1,4 @@
-use crate::MessageQueue;
+use crate::{MessageQueue, MessageRecord};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -67,7 +67,13 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
         return;
     }
 
-    match queue.post_message(topic.clone(), content.clone()) {
+    let record = MessageRecord {
+        key: None,
+        value: content.clone(),
+        headers: None,
+    };
+
+    match queue.post_message(topic.clone(), record) {
         Ok(message_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
             println!("✅ Message posted successfully!");
@@ -127,9 +133,26 @@ fn poll_messages_interactive(queue: &MessageQueue) {
                 println!("─────────────────────────────────────");
                 for (i, message) in messages.iter().enumerate() {
                     println!("Message {} of {}:", i + 1, messages.len());
-                    println!("  🆔 ID: {}", message.id);
+                    println!("  🏷️  Offset: {}", message.offset);
+
+                    // Display key if present
+                    if let Some(ref key) = message.record.key {
+                        println!("  🔑 Key: \"{key}\"");
+                    }
+
+                    println!("  📄 Value: \"{}\"", message.record.value);
+
+                    // Display headers if present
+                    if let Some(ref headers) = message.record.headers
+                        && !headers.is_empty()
+                    {
+                        println!("  🏷️  Headers:");
+                        for (header_key, header_value) in headers {
+                            println!("    {header_key}: \"{header_value}\"");
+                        }
+                    }
+
                     println!("  ⏰ Timestamp: {}", message.timestamp);
-                    println!("  📄 Content: \"{}\"", message.content);
                     if i < messages.len() - 1 {
                         println!();
                     }
@@ -179,7 +202,12 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
     );
 
     for (i, content) in demo_messages.iter().enumerate() {
-        match queue.post_message(demo_topic.clone(), content.to_string()) {
+        let record = MessageRecord {
+            key: None,
+            value: content.to_string(),
+            headers: None,
+        };
+        match queue.post_message(demo_topic.clone(), record) {
             Ok(message_id) => {
                 println!("  ✅ Message {} posted (ID: {})", i + 1, message_id);
                 *topics_created.entry(demo_topic.clone()).or_insert(0) += 1;
@@ -194,10 +222,10 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
             println!("📋 Retrieved {} message(s):", messages.len());
             for (i, message) in messages.iter().enumerate() {
                 println!(
-                    "  {}. \"{}\" (ID: {}, Time: {})",
+                    "  {}. \"{}\" (Offset: {}, Time: {})",
                     i + 1,
-                    message.content,
-                    message.id,
+                    message.record.value,
+                    message.offset,
                     message.timestamp
                 );
             }

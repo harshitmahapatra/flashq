@@ -45,15 +45,29 @@ Content-Type: application/json
 **Request Body:**
 ```json
 {
-  "content": "Your message content here"
+  "key": null,
+  "value": "Your message content here",
+  "headers": null
+}
+```
+
+**Request Body with Key and Headers:**
+```json
+{
+  "key": "user123",
+  "value": "Your message content here",
+  "headers": {
+    "priority": "high",
+    "source": "mobile-app"
+  }
 }
 ```
 
 **Success Response (201 Created):**
 ```json
 {
-  "id": 0,
-  "timestamp": 1755635398
+  "offset": 0,
+  "timestamp": "2024-01-15T10:30:45Z"
 }
 ```
 
@@ -67,9 +81,15 @@ Content-Type: application/json
 ### Example with curl
 
 ```bash
+# Simple message
 curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
   -H "Content-Type: application/json" \
-  -d '{"content": "Hello, World!"}'
+  -d '{"key": null, "value": "Hello, World!", "headers": null}'
+
+# Message with key and headers
+curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}}'
 ```
 
 ## Poll Messages
@@ -86,14 +106,21 @@ Retrieve messages from a specified topic.
 {
   "messages": [
     {
-      "id": 0,
-      "content": "Hello, World!",
-      "timestamp": 1755635398
+      "key": null,
+      "value": "Hello, World!",
+      "headers": null,
+      "offset": 0,
+      "timestamp": "2024-01-15T10:30:45Z"
     },
     {
-      "id": 1, 
-      "content": "Second message",
-      "timestamp": 1755635399
+      "key": "user123",
+      "value": "Second message with metadata",
+      "headers": {
+        "priority": "high",
+        "source": "mobile-app"
+      },
+      "offset": 1,
+      "timestamp": "2024-01-15T10:30:46Z"
     }
   ],
   "count": 2
@@ -239,14 +266,20 @@ Poll messages for a consumer group starting from its current offset. The offset 
 {
   "messages": [
     {
-      "id": 5,
-      "content": "Message at offset 5",
-      "timestamp": 1755635398
+      "key": null,
+      "value": "Message at offset 5",
+      "headers": null,
+      "offset": 5,
+      "timestamp": "2024-01-15T10:35:20Z"
     },
     {
-      "id": 6,
-      "content": "Message at offset 6", 
-      "timestamp": 1755635399
+      "key": "user456",
+      "value": "Message at offset 6",
+      "headers": {
+        "priority": "medium"
+      },
+      "offset": 6,
+      "timestamp": "2024-01-15T10:35:21Z"
     }
   ],
   "count": 2,
@@ -291,15 +324,35 @@ curl http://127.0.0.1:8080/health
 
 ## Data Types
 
-### Message
+### Message Record (Request)
 
-Individual message structure returned in poll responses:
+Structure for posting new messages:
 
 ```json
 {
-  "id": 0,                    // Unique message ID (auto-increment)
-  "content": "Message text",  // User-provided message content
-  "timestamp": 1755635398     // Unix timestamp when message was created
+  "key": "user123",                      // Optional: message key for routing/partitioning (max 1024 chars)
+  "value": "Your message content here",  // Required: message payload (max 1MB)
+  "headers": {                           // Optional: key-value metadata headers
+    "priority": "high",                  // Each header value max 1024 chars
+    "source": "mobile-app"
+  }
+}
+```
+
+### Message Response (Polling)
+
+Structure returned when polling messages:
+
+```json
+{
+  "key": "user123",                      // Optional message key
+  "value": "Your message content here",  // Message payload content
+  "headers": {                           // Optional metadata headers
+    "priority": "high",
+    "source": "mobile-app"
+  },
+  "offset": 0,                           // Sequential offset within topic (replaces 'id')
+  "timestamp": "2024-01-15T10:30:45Z"    // ISO 8601 timestamp when message was created
 }
 ```
 
@@ -320,13 +373,26 @@ Common HTTP status codes:
 ## Message Ordering
 
 - Messages within a topic are returned in FIFO (First In, First Out) order
-- Message IDs are globally unique and increment across all topics
-- Timestamps represent message creation time in Unix epoch seconds
+- Message offsets are sequential within each topic, starting from 0
+- Offsets are topic-specific (not globally unique across topics)
+- Timestamps are ISO 8601 formatted strings representing message creation time
 - No ordering guarantees exist between different topics
+
+## Message Features
+
+- **Keys**: Optional message keys enable routing and partitioning logic
+- **Headers**: Key-value metadata for application-specific information
+- **Offsets**: Sequential positioning within topics for precise message tracking
+- **ISO 8601 Timestamps**: Human-readable timestamp format for better debugging
 
 ## Limitations
 
 - **Persistence**: Messages are stored in memory only and lost on server restart
 - **Topic Management**: Topics are created automatically when first message is posted
-- **Message Limits**: No built-in limits on message count or content size
+- **Message Limits**: 
+  - Message value: Maximum 1MB per message
+  - Message key: Maximum 1024 characters 
+  - Header values: Maximum 1024 characters each
+  - No limit on message count per topic
 - **Concurrency**: Thread-safe but may have contention under high load
+- **Validation**: Limited validation on key/header content formats

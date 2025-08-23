@@ -1,21 +1,27 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct PostMessageRequest {
-    pub content: String,
+    pub key: Option<String>,
+    pub value: String,
+    pub headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PostMessageResponse {
-    pub id: u64,
-    pub timestamp: u64,
+    pub offset: u64,       // replaces 'id'
+    pub timestamp: String, // ISO 8601 format, replaces u64
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct MessageResponse {
-    pub id: u64,
-    pub content: String,
-    pub timestamp: u64,
+    pub key: Option<String>,
+    pub value: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub offset: u64,       // replaces 'id'
+    pub timestamp: String, // ISO 8601 format, replaces u64
 }
 
 #[derive(Serialize, Deserialize)]

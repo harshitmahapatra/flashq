@@ -183,16 +183,30 @@ impl TestHelper {
         }
     }
 
-    // Message operations
+    // Message operations - updated for new MessageRecord structure
     pub async fn post_message(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
+        // Legacy helper - converts content to new MessageRecord format
+        self.post_message_with_record(topic, None, content, None)
+            .await
+    }
+
+    pub async fn post_message_with_record(
+        &self,
+        topic: &str,
+        key: Option<String>,
+        value: &str,
+        headers: Option<std::collections::HashMap<String, String>>,
+    ) -> reqwest::Result<reqwest::Response> {
         self.client
             .post(format!("{}/api/topics/{}/messages", self.base_url, topic))
             .json(&PostMessageRequest {
-                content: content.to_string(),
+                key,
+                value: value.to_string(),
+                headers,
             })
             .send()
             .await
@@ -272,21 +286,23 @@ impl TestHelper {
             .await
     }
 
-    // Assertion helpers
+    // Updated assertion helpers for new MessageWithOffset structure
     pub async fn assert_consumer_group_poll_response(
         &self,
         response: reqwest::Response,
         expected_count: usize,
-        expected_messages: Option<&[&str]>,
+        expected_values: Option<&[&str]>,
     ) -> ConsumerGroupPollResponse {
         assert_eq!(response.status(), 200);
         let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
         assert_eq!(poll_data.count, expected_count);
         assert_eq!(poll_data.messages.len(), expected_count);
 
-        if let Some(expected) = expected_messages {
-            for (i, expected_content) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].content, *expected_content);
+        if let Some(expected) = expected_values {
+            for (i, expected_value) in expected.iter().enumerate() {
+                assert_eq!(poll_data.messages[i].value, *expected_value);
+                // Verify timestamp is in ISO 8601 format
+                assert!(poll_data.messages[i].timestamp.contains("T"));
             }
         }
 
@@ -297,23 +313,27 @@ impl TestHelper {
         &self,
         response: reqwest::Response,
         expected_count: usize,
-        expected_messages: Option<&[&str]>,
+        expected_values: Option<&[&str]>,
     ) -> PollMessagesResponse {
         assert_eq!(response.status(), 200);
         let poll_data: PollMessagesResponse = response.json().await.unwrap();
         assert_eq!(poll_data.count, expected_count);
         assert_eq!(poll_data.messages.len(), expected_count);
 
-        if let Some(expected) = expected_messages {
-            for (i, expected_content) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].content, *expected_content);
+        if let Some(expected) = expected_values {
+            for (i, expected_value) in expected.iter().enumerate() {
+                assert_eq!(poll_data.messages[i].value, *expected_value);
+                // Verify timestamp is in ISO 8601 format
+                assert!(poll_data.messages[i].timestamp.contains("T"));
+                // Verify offset sequence
+                assert_eq!(poll_data.messages[i].offset, i as u64);
             }
         }
 
         poll_data
     }
 
-    // Setup helpers
+    // Setup helpers - updated for new message structure
     pub async fn setup_topic_with_messages(&self, topic: &str, message_count: usize) {
         for i in 0..message_count {
             let response = self

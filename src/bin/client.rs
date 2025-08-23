@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+// chrono imports removed since we now use ISO 8601 strings directly
 use clap::{Parser, Subcommand};
 use message_queue_rs::api::*;
 
@@ -34,12 +34,6 @@ enum Commands {
     },
 }
 
-fn format_timestamp(timestamp: u64) -> String {
-    DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
-        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-        .unwrap_or_else(|| timestamp.to_string())
-}
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -49,7 +43,9 @@ async fn main() {
     match cli.command {
         Commands::Post { topic, message } => {
             let request = PostMessageRequest {
-                content: message.clone(),
+                key: None,
+                value: message.clone(),
+                headers: None,
             };
 
             let url = format!("{server_url}/api/topics/{topic}/messages");
@@ -60,8 +56,8 @@ async fn main() {
                         match response.json::<PostMessageResponse>().await {
                             Ok(post_response) => {
                                 println!(
-                                    "✓ Posted message to topic '{}' with ID: {}",
-                                    topic, post_response.id
+                                    "✓ Posted message to topic '{}' with offset: {}",
+                                    topic, post_response.offset
                                 );
                             }
                             Err(e) => println!("✗ Failed to parse response: {e}"),
@@ -101,12 +97,24 @@ async fn main() {
                                     poll_response.count, topic
                                 );
                                 for message in poll_response.messages {
-                                    println!(
+                                    print!(
                                         "{} [{}] {}",
-                                        format_timestamp(message.timestamp),
-                                        message.id,
-                                        message.content
+                                        message.timestamp, message.offset, message.value
                                     );
+
+                                    // Display key if present
+                                    if let Some(ref key) = message.key {
+                                        print!(" (key: {key})");
+                                    }
+
+                                    // Display headers if present
+                                    if let Some(ref headers) = message.headers {
+                                        if !headers.is_empty() {
+                                            print!(" (headers: {headers:?})");
+                                        }
+                                    }
+
+                                    println!();
                                 }
                             }
                             Err(e) => println!("✗ Failed to parse response: {e}"),
