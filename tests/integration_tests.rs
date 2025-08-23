@@ -11,9 +11,9 @@ async fn test_post_message_integration() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
 
-    // Test basic message posting with new structure
+    // Test basic record posting with new structure
     let response = helper
-        .post_message_with_record("test", None, "Integration test message", None)
+        .post_message_with_record("test", None, "Integration test record", None)
         .await
         .unwrap();
     assert!(response.status().is_success());
@@ -22,10 +22,10 @@ async fn test_post_message_integration() {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offset, 0); // First message should have offset 0
+    assert_eq!(response_data.offset, 0); // First record should have offset 0
     assert!(response_data.timestamp.contains("T")); // ISO 8601 format check
 
-    // Test message with key and headers
+    // Test record with key and headers
     let mut headers = std::collections::HashMap::new();
     headers.insert("source".to_string(), "integration-test".to_string());
     headers.insert("priority".to_string(), "high".to_string());
@@ -34,7 +34,7 @@ async fn test_post_message_integration() {
         .post_message_with_record(
             "test",
             Some("user123".to_string()),
-            "Message with metadata",
+            "Record with metadata",
             Some(headers),
         )
         .await
@@ -45,7 +45,7 @@ async fn test_post_message_integration() {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offset, 1); // Second message should have offset 1
+    assert_eq!(response_data.offset, 1); // Second record should have offset 1
 }
 
 #[tokio::test]
@@ -55,26 +55,26 @@ async fn test_poll_messages_integration() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
 
-    // Post a message
+    // Post a record
     helper
-        .post_message("test", "Message for polling test")
+        .post_message("test", "Record for polling test")
         .await
-        .expect("Failed to post message");
+        .expect("Failed to post record");
 
-    // Poll for messages
+    // Poll for records
     let response = helper
         .poll_messages("test", None)
         .await
         .expect("Failed to send GET request");
     let poll_data = helper
-        .assert_poll_response(response, 1, Some(&["Message for polling test"]))
+        .assert_poll_response(response, 1, Some(&["Record for polling test"]))
         .await;
 
     // Verify MessageWithOffset structure
     assert_eq!(poll_data.records[0].offset, 0); // Changed from id to offset
-    assert_eq!(poll_data.records[0].value, "Message for polling test"); // Changed from content to value
-    assert!(poll_data.records[0].key.is_none()); // Key should be None for basic message
-    assert!(poll_data.records[0].headers.is_none()); // Headers should be None for basic message
+    assert_eq!(poll_data.records[0].value, "Record for polling test"); // Changed from content to value
+    assert!(poll_data.records[0].key.is_none()); // Key should be None for basic record
+    assert!(poll_data.records[0].headers.is_none()); // Headers should be None for basic record
     assert!(poll_data.records[0].timestamp.contains("T")); // ISO 8601 timestamp format
 }
 
@@ -92,7 +92,7 @@ async fn test_end_to_end_workflow() {
             "topic1".to_string(),
             PostMessageRequest {
                 key: None,
-                value: "topic1 message1".to_string(),
+                value: "topic1 record1".to_string(),
                 headers: None,
             },
         ),
@@ -100,7 +100,7 @@ async fn test_end_to_end_workflow() {
             "topic2".to_string(),
             PostMessageRequest {
                 key: Some("user456".to_string()),
-                value: "topic2 message1".to_string(),
+                value: "topic2 record1".to_string(),
                 headers: {
                     let mut headers = std::collections::HashMap::new();
                     headers.insert("source".to_string(), "workflow-test".to_string());
@@ -112,31 +112,31 @@ async fn test_end_to_end_workflow() {
             "topic1".to_string(),
             PostMessageRequest {
                 key: Some("user123".to_string()),
-                value: "topic1 message2".to_string(),
+                value: "topic1 record2".to_string(),
                 headers: None,
             },
         ),
     ];
 
-    // Post all messages sequentially
+    // Post all records sequentially
     for (topic, post_message_request) in &post_message_requests {
         client
             .post(format!("{base_url}/topics/{topic}/records"))
             .json(&post_message_request)
             .send()
             .await
-            .expect("Failed to post message");
+            .expect("Failed to post record");
     }
 
-    // Verify that messages are present and have the correct ordering and content
+    // Verify that records are present and have the correct ordering and content
 
-    // Test topic1: should have 2 messages in FIFO order
+    // Test topic1: should have 2 records in FIFO order
     let topic1_url = format!("{base_url}/topics/topic1/messages");
     let topic1_response = client
         .get(&topic1_url)
         .send()
         .await
-        .expect("Failed to poll topic1 messages");
+        .expect("Failed to poll topic1 records");
 
     assert!(topic1_response.status().is_success());
 
@@ -148,20 +148,20 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic1_data.records.len(), 2);
 
     // Verify MessageWithOffset structure for topic1
-    assert_eq!(topic1_data.records[0].value, "topic1 message1");
-    assert_eq!(topic1_data.records[1].value, "topic1 message2");
-    assert_eq!(topic1_data.records[0].offset, 0); // First message in topic1 (offset 0)
-    assert_eq!(topic1_data.records[1].offset, 1); // Second message in topic1 (offset 1)
-    assert!(topic1_data.records[0].key.is_none()); // First message has no key
-    assert_eq!(topic1_data.records[1].key.as_ref().unwrap(), "user123"); // Second message has key
+    assert_eq!(topic1_data.records[0].value, "topic1 record1");
+    assert_eq!(topic1_data.records[1].value, "topic1 record2");
+    assert_eq!(topic1_data.records[0].offset, 0); // First record in topic1 (offset 0)
+    assert_eq!(topic1_data.records[1].offset, 1); // Second record in topic1 (offset 1)
+    assert!(topic1_data.records[0].key.is_none()); // First record has no key
+    assert_eq!(topic1_data.records[1].key.as_ref().unwrap(), "user123"); // Second record has key
 
-    // Test topic2: should have 1 message with metadata
+    // Test topic2: should have 1 record with metadata
     let topic2_url = format!("{base_url}/topics/topic2/messages");
     let topic2_response = client
         .get(&topic2_url)
         .send()
         .await
-        .expect("Failed to poll topic2 messages");
+        .expect("Failed to poll topic2 records");
 
     assert!(topic2_response.status().is_success());
 
@@ -171,15 +171,15 @@ async fn test_end_to_end_workflow() {
         .expect("Failed to parse topic2 response");
 
     assert_eq!(topic2_data.records.len(), 1);
-    assert_eq!(topic2_data.records[0].value, "topic2 message1");
-    assert_eq!(topic2_data.records[0].offset, 0); // First message in topic2 (offset 0)
+    assert_eq!(topic2_data.records[0].value, "topic2 record1");
+    assert_eq!(topic2_data.records[0].offset, 0); // First record in topic2 (offset 0)
     assert_eq!(topic2_data.records[0].key.as_ref().unwrap(), "user456");
 
     // Verify headers
     let headers = topic2_data.records[0].headers.as_ref().unwrap();
     assert_eq!(headers.get("source").unwrap(), "workflow-test");
 
-    // Test count parameter: limit topic1 to 1 message
+    // Test count parameter: limit topic1 to 1 record
     let topic1_limited_url = format!("{base_url}/topics/topic1/messages?count=1");
     let limited_response = client
         .get(&topic1_limited_url)
@@ -195,7 +195,7 @@ async fn test_end_to_end_workflow() {
         .expect("Failed to parse limited response");
 
     assert_eq!(limited_data.records.len(), 1);
-    assert_eq!(limited_data.records[0].value, "topic1 message1"); // Should get first message
+    assert_eq!(limited_data.records[0].value, "topic1 record1"); // Should get first record
 
     // Verify timestamps are in ascending order (FIFO) and in ISO 8601 format
     assert!(topic1_data.records[0].timestamp <= topic1_data.records[1].timestamp);
@@ -260,7 +260,7 @@ async fn test_error_handling() {
     let response = client
         .post(&url)
         .json(&serde_json::json!({
-            "value": "test message"
+            "value": "test record"
         }))
         .send()
         .await
@@ -277,8 +277,8 @@ async fn test_consumer_group_isolation() {
     let helper = TestHelper::new(&server);
     let topic = "isolation_test_topic";
 
-    // Setup: Create a topic with messages
-    helper.setup_topic_with_messages(topic, 5).await;
+    // Setup: Create a topic with records
+    helper.setup_topic_with_records(topic, 5).await;
 
     // Create consumer groups
     let group1 = "isolation_group_1";
@@ -287,7 +287,7 @@ async fn test_consumer_group_isolation() {
     helper.setup_consumer_group(group2).await;
 
     // Test that consumer groups maintain separate offsets
-    // Group 1 polls all messages (no count limit)
+    // Group 1 polls all records (no count limit)
     let response = helper
         .poll_consumer_group_messages(group1, topic, None)
         .await
@@ -297,25 +297,25 @@ async fn test_consumer_group_isolation() {
             response,
             5,
             Some(&[
-                "Message 0",
-                "Message 1",
-                "Message 2",
-                "Message 3",
-                "Message 4",
+                "Record 0",
+                "Record 1",
+                "Record 2",
+                "Record 3",
+                "Record 4",
             ]),
         )
         .await;
 
-    // Group 2 polls only 1 message
+    // Group 2 polls only 1 record
     let response = helper
         .poll_consumer_group_messages(group2, topic, Some(1))
         .await
         .unwrap();
     let _group2_data_first = helper
-        .assert_consumer_group_poll_response(response, 1, Some(&["Message 0"]))
+        .assert_consumer_group_poll_response(response, 1, Some(&["Record 0"]))
         .await;
 
-    // Verify offsets are independent: Group 2 should still be able to get remaining messages
+    // Verify offsets are independent: Group 2 should still be able to get remaining records
     let response = helper
         .poll_consumer_group_messages(group2, topic, Some(4))
         .await
@@ -324,11 +324,11 @@ async fn test_consumer_group_isolation() {
         .assert_consumer_group_poll_response(
             response,
             4,
-            Some(&["Message 1", "Message 2", "Message 3", "Message 4"]),
+            Some(&["Record 1", "Record 2", "Record 3", "Record 4"]),
         )
         .await;
 
-    // Group 1 should have no new messages since it already consumed everything
+    // Group 1 should have no new records since it already consumed everything
     let response = helper
         .poll_consumer_group_messages(group1, topic, None)
         .await
@@ -347,13 +347,13 @@ async fn test_consumer_group_offset_boundaries() {
     let topic = "boundary_test_topic";
     let group = "boundary_test_group";
 
-    // Setup: Create topic with 3 messages (offsets 0, 1, 2)
-    helper.setup_topic_with_messages(topic, 3).await;
+    // Setup: Create topic with 3 records (offsets 0, 1, 2)
+    helper.setup_topic_with_records(topic, 3).await;
     helper.setup_consumer_group(group).await;
 
     // Test boundary conditions
     let test_cases = [
-        (10, 404),       // Beyond available messages
+        (10, 404),       // Beyond available records
         (u64::MAX, 404), // Extreme value
         (3, 200),        // Valid boundary (end position)
         (1, 200),        // Valid within bounds
@@ -383,7 +383,7 @@ async fn test_consumer_group_error_handling() {
     let nonexistent_group = "nonexistent_group";
     let test_topic = "test_topic";
 
-    // Try to poll messages from nonexistent consumer group
+    // Try to poll records from nonexistent consumer group
     let response = helper
         .poll_consumer_group_messages(nonexistent_group, test_topic, None)
         .await
@@ -531,12 +531,12 @@ async fn test_consumer_group_empty_topics() {
         assert_eq!(response.status(), 404);
     }
 
-    // Test 2: Poll from topic with no messages (create topic by posting then ensure it exists)
+    // Test 2: Poll from topic with no records (create topic by posting then ensure it exists)
     let empty_topic = "empty_topic";
     // First, create the topic by posting and then immediately create a new consumer group
     // to test empty topic behavior
     let response = helper
-        .post_message(empty_topic, "temp message")
+        .post_message(empty_topic, "temp record")
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -556,10 +556,10 @@ async fn test_consumer_group_empty_topics() {
     assert_eq!(poll_data.records.len(), 1);
     assert_eq!(
         poll_data.next_offset, 1,
-        "Offset should advance to 1 after consuming message"
+        "Offset should advance to 1 after consuming record"
     );
 
-    // Test 3: Now poll again - should get no messages (empty state)
+    // Test 3: Now poll again - should get no records (empty state)
     let response = helper
         .poll_consumer_group_messages(empty_group, empty_topic, None)
         .await
@@ -570,7 +570,7 @@ async fn test_consumer_group_empty_topics() {
     assert_eq!(poll_data.records.len(), 0);
     assert_eq!(
         poll_data.next_offset, 1,
-        "Offset should remain at 1 when no new messages"
+        "Offset should remain at 1 when no new records"
     );
 
     // Test 4: Poll multiple times to ensure offset doesn't change when empty
@@ -609,7 +609,7 @@ async fn test_consumer_group_empty_topics() {
         "Setting offset to valid position should succeed"
     );
 
-    // Try to update offset beyond available messages (should fail)
+    // Try to update offset beyond available records (should fail)
     let response = helper
         .update_consumer_group_offset(empty_group, empty_topic, 10)
         .await
@@ -617,7 +617,7 @@ async fn test_consumer_group_empty_topics() {
     assert_eq!(
         response.status(),
         404,
-        "Setting offset beyond available messages should fail with 404"
+        "Setting offset beyond available records should fail with 404"
     );
 }
 
@@ -629,14 +629,14 @@ async fn test_consumer_group_offset_advancement() {
     let helper = TestHelper::new(&server);
     let topic = "advancement_test_topic";
 
-    // Setup: Create topic with 5 messages
-    helper.setup_topic_with_messages(topic, 5).await;
+    // Setup: Create topic with 5 records
+    helper.setup_topic_with_records(topic, 5).await;
 
     // Create consumer group
     let group = "advancement_test_group";
     helper.setup_consumer_group(group).await;
 
-    // Test 1: Poll 1 message, verify offset advances to 1
+    // Test 1: Poll 1 record, verify offset advances to 1
     let response = helper
         .poll_consumer_group_messages(group, topic, Some(1))
         .await
@@ -644,13 +644,13 @@ async fn test_consumer_group_offset_advancement() {
     let poll_data: FetchResponse = response.json().await.unwrap();
 
     assert_eq!(poll_data.records.len(), 1);
-    assert_eq!(poll_data.records[0].value, "Message 0");
+    assert_eq!(poll_data.records[0].value, "Record 0");
     assert_eq!(
         poll_data.next_offset, 1,
-        "Offset should advance to 1 after consuming 1 message"
+        "Offset should advance to 1 after consuming 1 record"
     );
 
-    // Test 2: Poll 2 more messages, verify offset advances to 3
+    // Test 2: Poll 2 more records, verify offset advances to 3
     let response = helper
         .poll_consumer_group_messages(group, topic, Some(2))
         .await
@@ -658,14 +658,14 @@ async fn test_consumer_group_offset_advancement() {
     let poll_data: FetchResponse = response.json().await.unwrap();
 
     assert_eq!(poll_data.records.len(), 2);
-    assert_eq!(poll_data.records[0].value, "Message 1");
-    assert_eq!(poll_data.records[1].value, "Message 2");
+    assert_eq!(poll_data.records[0].value, "Record 1");
+    assert_eq!(poll_data.records[1].value, "Record 2");
     assert_eq!(
         poll_data.next_offset, 3,
-        "Offset should advance to 3 after consuming 2 more messages"
+        "Offset should advance to 3 after consuming 2 more records"
     );
 
-    // Test 3: Poll remaining messages (no count limit), verify offset advances to 5
+    // Test 3: Poll remaining records (no count limit), verify offset advances to 5
     let response = helper
         .poll_consumer_group_messages(group, topic, None)
         .await
@@ -673,14 +673,14 @@ async fn test_consumer_group_offset_advancement() {
     let poll_data: FetchResponse = response.json().await.unwrap();
 
     assert_eq!(poll_data.records.len(), 2);
-    assert_eq!(poll_data.records[0].value, "Message 3");
-    assert_eq!(poll_data.records[1].value, "Message 4");
+    assert_eq!(poll_data.records[0].value, "Record 3");
+    assert_eq!(poll_data.records[1].value, "Record 4");
     assert_eq!(
         poll_data.next_offset, 5,
-        "Offset should advance to 5 after consuming all remaining messages"
+        "Offset should advance to 5 after consuming all remaining records"
     );
 
-    // Test 4: Poll when at end of log (no new messages)
+    // Test 4: Poll when at end of log (no new records)
     let response = helper
         .poll_consumer_group_messages(group, topic, None)
         .await
@@ -690,13 +690,13 @@ async fn test_consumer_group_offset_advancement() {
     assert_eq!(poll_data.records.len(), 0);
     assert_eq!(
         poll_data.next_offset, 5,
-        "Offset should remain at 5 when no new messages"
+        "Offset should remain at 5 when no new records"
     );
 
-    // Test 5: Add new messages and verify offset continues from where it left off
+    // Test 5: Add new records and verify offset continues from where it left off
     for i in 5..7 {
         helper
-            .post_message(topic, &format!("Message {i}"))
+            .post_message(topic, &format!("Record {i}"))
             .await
             .unwrap();
     }
@@ -708,11 +708,11 @@ async fn test_consumer_group_offset_advancement() {
     let poll_data: FetchResponse = response.json().await.unwrap();
 
     assert_eq!(poll_data.records.len(), 2);
-    assert_eq!(poll_data.records[0].value, "Message 5");
-    assert_eq!(poll_data.records[1].value, "Message 6");
+    assert_eq!(poll_data.records[0].value, "Record 5");
+    assert_eq!(poll_data.records[1].value, "Record 6");
     assert_eq!(
         poll_data.next_offset, 7,
-        "Offset should advance to 7 after consuming new messages"
+        "Offset should advance to 7 after consuming new records"
     );
 }
 
@@ -724,8 +724,8 @@ async fn test_consumer_group_concurrent_operations() {
     let helper = TestHelper::new(&server);
     let topic = "concurrent_test_topic";
 
-    // Setup: Create topic with 10 messages
-    helper.setup_topic_with_messages(topic, 10).await;
+    // Setup: Create topic with 10 records
+    helper.setup_topic_with_records(topic, 10).await;
 
     // Create 3 consumer groups
     let groups = [
@@ -737,54 +737,54 @@ async fn test_consumer_group_concurrent_operations() {
         helper.setup_consumer_group(group).await;
     }
 
-    // Test concurrent polling: each group polls all messages in 3 rounds
+    // Test concurrent polling: each group polls all records in 3 rounds
     let handles: Vec<_> = groups
         .iter()
         .map(|&group| {
             let helper = TestHelper::new(&server);
             tokio::spawn(async move {
-                let mut all_messages = Vec::new();
+                let mut all_records = Vec::new();
                 for _ in 0..3 {
                     let response = helper
                         .poll_consumer_group_messages(group, topic, Some(4))
                         .await
                         .unwrap();
                     let poll_data: FetchResponse = response.json().await.unwrap();
-                    let messages = poll_data.records;
+                    let records = poll_data.records;
 
                     // Verify FIFO ordering within each poll
-                    for i in 1..messages.len() {
+                    for i in 1..records.len() {
                         assert!(
-                            messages[i - 1].offset < messages[i].offset,
-                            "Messages should maintain FIFO order"
+                            records[i - 1].offset < records[i].offset,
+                            "Records should maintain FIFO order"
                         );
                     }
-                    all_messages.extend(messages);
+                    all_records.extend(records);
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-                (group, all_messages)
+                (group, all_records)
             })
         })
         .collect();
 
-    // Verify each group consumed all messages correctly
+    // Verify each group consumed all records correctly
     for handle in handles {
-        let (group, messages) = handle.await.unwrap();
+        let (group, records) = handle.await.unwrap();
         assert_eq!(
-            messages.len(),
+            records.len(),
             10,
-            "Group {group} should consume all messages"
+            "Group {group} should consume all records"
         );
 
         // Verify content and uniqueness
-        for (i, msg) in messages.iter().enumerate() {
-            assert_eq!(msg.value, format!("Message {i}"));
+        for (i, msg) in records.iter().enumerate() {
+            assert_eq!(msg.value, format!("Record {i}"));
         }
-        let ids: std::collections::HashSet<_> = messages.iter().map(|m| m.offset).collect();
+        let ids: std::collections::HashSet<_> = records.iter().map(|m| m.offset).collect();
         assert_eq!(
             ids.len(),
             10,
-            "Group {group} should have unique message IDs"
+            "Group {group} should have unique record IDs"
         );
     }
 
@@ -821,13 +821,13 @@ async fn test_message_size_and_validation_limits() {
     let helper = TestHelper::new(&server);
     let topic = "validation_test_topic";
 
-    // Test 1: Valid message with maximum key size (1024 chars)
+    // Test 1: Valid record with maximum key size (1024 chars)
     let max_key = "x".repeat(1024);
     let response = helper
         .post_message_with_record(
             topic,
             Some(max_key.clone()),
-            "Valid message with max key size",
+            "Valid record with max key size",
             None,
         )
         .await
@@ -840,7 +840,7 @@ async fn test_message_size_and_validation_limits() {
         .post_message_with_record(
             topic,
             Some(oversized_key),
-            "Message with oversized key",
+            "Record with oversized key",
             None,
         )
         .await
@@ -862,7 +862,7 @@ async fn test_message_size_and_validation_limits() {
         .post_message_with_record(
             topic,
             None,
-            "Message with oversized header",
+            "Record with oversized header",
             Some(oversized_header),
         )
         .await
@@ -873,13 +873,13 @@ async fn test_message_size_and_validation_limits() {
         "Oversized header should be rejected"
     );
 
-    // Test 3: Valid message with large value (within reasonable limits)
-    let large_value = "Message content ".repeat(1000); // ~16KB
+    // Test 3: Valid record with large value (within reasonable limits)
+    let large_value = "Record content ".repeat(1000); // ~16KB
     let response = helper
         .post_message_with_record(topic, None, &large_value, None)
         .await
         .unwrap();
-    assert_eq!(response.status(), 200, "Large message should be accepted");
+    assert_eq!(response.status(), 200, "Large record should be accepted");
 
     // Test 4: Valid headers with multiple entries
     let mut headers = std::collections::HashMap::new();
@@ -890,7 +890,7 @@ async fn test_message_size_and_validation_limits() {
         .post_message_with_record(
             topic,
             Some("test_key".to_string()),
-            "Message with multiple headers",
+            "Record with multiple headers",
             Some(headers),
         )
         .await
@@ -908,7 +908,7 @@ async fn test_message_size_and_validation_limits() {
         .post_message_with_record(
             topic,
             None,
-            "Message with max header size",
+            "Record with max header size",
             Some(max_header),
         )
         .await
@@ -919,20 +919,20 @@ async fn test_message_size_and_validation_limits() {
         "Max header value size should be accepted"
     );
 
-    // Verify all messages were stored correctly
+    // Verify all records were stored correctly
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
         poll_data.records.len(),
         4,
-        "All valid messages should be stored"
+        "All valid records should be stored"
     );
 
-    // Verify the max key message
-    let max_key_message = &poll_data.records[0];
-    assert_eq!(max_key_message.key.as_ref().unwrap(), &max_key);
-    assert_eq!(max_key_message.value, "Valid message with max key size");
+    // Verify the max key record
+    let max_key_record = &poll_data.records[0];
+    assert_eq!(max_key_record.key.as_ref().unwrap(), &max_key);
+    assert_eq!(max_key_record.value, "Valid record with max key size");
 }
 
 #[tokio::test]
@@ -961,7 +961,7 @@ async fn test_concurrent_message_posting() {
                     .post_message_with_record(
                         topic,
                         key,
-                        &format!("Concurrent message {i}"),
+                        &format!("Concurrent record {i}"),
                         Some(headers),
                     )
                     .await
@@ -983,26 +983,26 @@ async fn test_concurrent_message_posting() {
         assert!(success, "Concurrent post {index} should succeed");
     }
 
-    // Verify message ordering and content
+    // Verify record ordering and content
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
         poll_data.records.len(),
         20,
-        "All concurrent messages should be stored"
+        "All concurrent records should be stored"
     );
 
     // Verify offset sequence (should be 0-19)
-    for (i, message) in poll_data.records.iter().enumerate() {
-        assert_eq!(message.offset, i as u64, "Offsets should be sequential");
+    for (i, record) in poll_data.records.iter().enumerate() {
+        assert_eq!(record.offset, i as u64, "Offsets should be sequential");
         assert!(
-            message.value.starts_with("Concurrent message"),
-            "Message content should be preserved"
+            record.value.starts_with("Concurrent record"),
+            "Record content should be preserved"
         );
 
         // Verify headers were preserved
-        if let Some(ref headers) = message.headers {
+        if let Some(ref headers) = record.headers {
             assert!(
                 headers.contains_key("thread"),
                 "Thread header should be present"
@@ -1021,7 +1021,7 @@ async fn test_concurrent_message_posting() {
             let topic_name = format!("concurrent_topic_{}", i % 3);
             tokio::spawn(async move {
                 let response = helper
-                    .post_message(&topic_name, &format!("Multi-topic message {i}"))
+                    .post_message(&topic_name, &format!("Multi-topic record {i}"))
                     .await
                     .unwrap();
                 (topic_name, response.status() == 200)
@@ -1035,7 +1035,7 @@ async fn test_concurrent_message_posting() {
         assert!(success, "Multi-topic post to {topic_name} should succeed");
     }
 
-    // Verify each topic received the expected number of messages
+    // Verify each topic received the expected number of records
     for topic_index in 0..3 {
         let topic_name = format!("concurrent_topic_{topic_index}");
         let response = helper.poll_messages(&topic_name, None).await.unwrap();
@@ -1044,7 +1044,7 @@ async fn test_concurrent_message_posting() {
         assert_eq!(
             poll_data.records.len(),
             5,
-            "Each topic should have 5 messages"
+            "Each topic should have 5 records"
         );
     }
 }
@@ -1059,7 +1059,7 @@ async fn test_message_structure_edge_cases() {
 
     // Test 1: Empty key (should be treated as None)
     let response = helper
-        .post_message_with_record(topic, Some("".to_string()), "Message with empty key", None)
+        .post_message_with_record(topic, Some("".to_string()), "Record with empty key", None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200, "Empty key should be accepted");
@@ -1070,7 +1070,7 @@ async fn test_message_structure_edge_cases() {
         .post_message_with_record(
             topic,
             Some(special_key.to_string()),
-            "Message with special chars in key",
+            "Record with special chars in key",
             None,
         )
         .await
@@ -1091,32 +1091,32 @@ async fn test_message_structure_edge_cases() {
         .post_message_with_record(
             topic,
             None,
-            "Message with special headers",
+            "Record with special headers",
             Some(special_headers.clone()),
         )
         .await
         .unwrap();
     assert_eq!(response.status(), 200, "Special headers should be accepted");
 
-    // Test 4: Message with only value (minimal valid request)
+    // Test 4: Record with only value (minimal valid request)
     let response = helper
         .client
         .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
-            "value": "Minimal message"
+            "value": "Minimal record"
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 200, "Minimal message should be accepted");
+    assert_eq!(response.status(), 200, "Minimal record should be accepted");
 
-    // Test 5: Message with null key and headers (explicit nulls)
+    // Test 5: Record with null key and headers (explicit nulls)
     let response = helper
         .client
         .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
             "key": null,
-            "value": "Message with explicit nulls",
+            "value": "Record with explicit nulls",
             "headers": null
         }))
         .send()
@@ -1124,42 +1124,42 @@ async fn test_message_structure_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 200, "Explicit nulls should be accepted");
 
-    // Verify all messages were stored with correct structure
+    // Verify all records were stored with correct structure
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
         poll_data.records.len(),
         5,
-        "All edge case messages should be stored"
+        "All edge case records should be stored"
     );
 
-    // Verify specific message structures
-    let messages = &poll_data.records;
+    // Verify specific record structures
+    let records = &poll_data.records;
 
-    // First message: empty key
-    assert_eq!(messages[0].key.as_deref(), Some(""));
-    assert_eq!(messages[0].value, "Message with empty key");
+    // First record: empty key
+    assert_eq!(records[0].key.as_deref(), Some(""));
+    assert_eq!(records[0].value, "Record with empty key");
 
-    // Second message: special key
-    assert_eq!(messages[1].key.as_ref().unwrap(), &special_key);
-    assert_eq!(messages[1].value, "Message with special chars in key");
+    // Second record: special key
+    assert_eq!(records[1].key.as_ref().unwrap(), &special_key);
+    assert_eq!(records[1].value, "Record with special chars in key");
 
-    // Third message: special headers
-    assert_eq!(messages[2].value, "Message with special headers");
-    let headers = messages[2].headers.as_ref().unwrap();
+    // Third record: special headers
+    assert_eq!(records[2].value, "Record with special headers");
+    let headers = records[2].headers.as_ref().unwrap();
     assert_eq!(headers.get("content-type").unwrap(), "application/json");
     assert_eq!(headers.get("x-custom-header").unwrap(), "");
     assert_eq!(headers.get("unicode-header").unwrap(), "测试数据");
 
-    // Fourth and fifth messages: should have None keys and headers
-    assert!(messages[3].key.is_none());
-    assert!(messages[3].headers.is_none());
-    assert_eq!(messages[3].value, "Minimal message");
+    // Fourth and fifth records: should have None keys and headers
+    assert!(records[3].key.is_none());
+    assert!(records[3].headers.is_none());
+    assert_eq!(records[3].value, "Minimal record");
 
-    assert!(messages[4].key.is_none());
-    assert!(messages[4].headers.is_none());
-    assert_eq!(messages[4].value, "Message with explicit nulls");
+    assert!(records[4].key.is_none());
+    assert!(records[4].headers.is_none());
+    assert_eq!(records[4].value, "Record with explicit nulls");
 }
 
 #[tokio::test]
@@ -1169,10 +1169,10 @@ async fn test_replay_functionality_basic_polling() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
 
-    // Post several messages
+    // Post several records
     for i in 0..5 {
         let response = helper
-            .post_message_with_record("replay-test", None, &format!("message {i}"), None)
+            .post_message_with_record("replay-test", None, &format!("record {i}"), None)
             .await
             .unwrap();
         assert!(response.status().is_success());
@@ -1192,9 +1192,9 @@ async fn test_replay_functionality_basic_polling() {
 
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 5);
-    assert_eq!(poll_response.records[0].value, "message 0");
+    assert_eq!(poll_response.records[0].value, "record 0");
     assert_eq!(poll_response.records[0].offset, 0);
-    assert_eq!(poll_response.records[4].value, "message 4");
+    assert_eq!(poll_response.records[4].value, "record 4");
     assert_eq!(poll_response.records[4].offset, 4);
 
     // Test polling from offset 2 (middle)
@@ -1211,9 +1211,9 @@ async fn test_replay_functionality_basic_polling() {
 
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 3);
-    assert_eq!(poll_response.records[0].value, "message 2");
+    assert_eq!(poll_response.records[0].value, "record 2");
     assert_eq!(poll_response.records[0].offset, 2);
-    assert_eq!(poll_response.records[2].value, "message 4");
+    assert_eq!(poll_response.records[2].value, "record 4");
     assert_eq!(poll_response.records[2].offset, 4);
 
     // Test polling with count limit from offset
@@ -1230,9 +1230,9 @@ async fn test_replay_functionality_basic_polling() {
 
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 2);
-    assert_eq!(poll_response.records[0].value, "message 1");
+    assert_eq!(poll_response.records[0].value, "record 1");
     assert_eq!(poll_response.records[0].offset, 1);
-    assert_eq!(poll_response.records[1].value, "message 2");
+    assert_eq!(poll_response.records[1].value, "record 2");
     assert_eq!(poll_response.records[1].offset, 2);
 }
 
@@ -1247,10 +1247,10 @@ async fn test_consumer_group_replay_functionality() {
     let response = helper.create_consumer_group("replay-group").await.unwrap();
     assert_eq!(response.status(), 200);
 
-    // Post several messages
+    // Post several records
     for i in 0..4 {
         let response = helper
-            .post_message_with_record("consumer-replay-test", None, &format!("message {i}"), None)
+            .post_message_with_record("consumer-replay-test", None, &format!("record {i}"), None)
             .await
             .unwrap();
         assert!(response.status().is_success());
@@ -1266,8 +1266,8 @@ async fn test_consumer_group_replay_functionality() {
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 2);
     assert_eq!(poll_response.next_offset, 2); // Offset advanced
-    assert_eq!(poll_response.records[0].value, "message 0");
-    assert_eq!(poll_response.records[1].value, "message 1");
+    assert_eq!(poll_response.records[0].value, "record 0");
+    assert_eq!(poll_response.records[1].value, "record 1");
 
     // Replay from offset 0 (should NOT advance the consumer group offset)
     let response = helper
@@ -1284,9 +1284,9 @@ async fn test_consumer_group_replay_functionality() {
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 3);
     assert_eq!(poll_response.next_offset, 2); // Offset should remain unchanged
-    assert_eq!(poll_response.records[0].value, "message 0");
-    assert_eq!(poll_response.records[1].value, "message 1");
-    assert_eq!(poll_response.records[2].value, "message 2");
+    assert_eq!(poll_response.records[0].value, "record 0");
+    assert_eq!(poll_response.records[1].value, "record 1");
+    assert_eq!(poll_response.records[2].value, "record 2");
 
     // Verify consumer group offset is still at 2 by doing normal polling
     let response = helper
@@ -1298,8 +1298,8 @@ async fn test_consumer_group_replay_functionality() {
     let poll_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_response.records.len(), 2);
     assert_eq!(poll_response.next_offset, 4); // Now advanced to end
-    assert_eq!(poll_response.records[0].value, "message 2");
-    assert_eq!(poll_response.records[1].value, "message 3");
+    assert_eq!(poll_response.records[0].value, "record 2");
+    assert_eq!(poll_response.records[1].value, "record 3");
 }
 
 #[tokio::test]
@@ -1309,9 +1309,9 @@ async fn test_replay_from_invalid_offset() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
 
-    // Post one message
+    // Post one record
     let response = helper
-        .post_message_with_record("invalid-offset-test", None, "single message", None)
+        .post_message_with_record("invalid-offset-test", None, "single record", None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);

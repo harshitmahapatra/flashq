@@ -345,11 +345,11 @@ impl TestHelper {
         poll_data
     }
 
-    // Setup helpers - updated for new message structure
-    pub async fn setup_topic_with_messages(&self, topic: &str, message_count: usize) {
-        for i in 0..message_count {
+    // Setup helpers - updated for new record structure
+    pub async fn setup_topic_with_records(&self, topic: &str, record_count: usize) {
+        for i in 0..record_count {
             let response = self
-                .post_message(topic, &format!("Message {i}"))
+                .post_message(topic, &format!("Record {i}"))
                 .await
                 .unwrap();
             assert_eq!(response.status(), 200);
