@@ -846,9 +846,44 @@ async fn test_message_size_and_validation_limits() {
         .unwrap();
     assert_eq!(response.status(), 200, "Max key size should be accepted");
 
-    // Test 2: Key exceeding limit should be handled gracefully
-    // TODO(human): Implement key size validation in server
-    // Currently the server may not validate key size limits
+    // Test 2: Key exceeding limit should return 400 Bad Request
+    let oversized_key = "x".repeat(1025); // 1025 chars, exceeds 1024 limit
+    let response = helper
+        .post_message_with_record(
+            topic,
+            Some(oversized_key),
+            "Message with oversized key",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400, "Oversized key should be rejected");
+
+    // Test 2b: Value exceeding limit should return 400 Bad Request
+    let oversized_value = "x".repeat(1_048_577); // Exceeds 1MB limit
+    let response = helper
+        .post_message_with_record(topic, None, &oversized_value, None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400, "Oversized value should be rejected");
+
+    // Test 2c: Header value exceeding limit should return 400 Bad Request
+    let mut oversized_header = std::collections::HashMap::new();
+    oversized_header.insert("large_header".to_string(), "z".repeat(1025)); // Exceeds 1024 limit
+    let response = helper
+        .post_message_with_record(
+            topic,
+            None,
+            "Message with oversized header",
+            Some(oversized_header),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        400,
+        "Oversized header should be rejected"
+    );
 
     // Test 3: Valid message with large value (within reasonable limits)
     let large_value = "Message content ".repeat(1000); // ~16KB
@@ -1105,7 +1140,7 @@ async fn test_message_structure_edge_cases() {
     let messages = &poll_data.messages;
 
     // First message: empty key
-    assert_eq!(messages[0].key.as_ref().map(String::as_str), Some(""));
+    assert_eq!(messages[0].key.as_deref(), Some(""));
     assert_eq!(messages[0].value, "Message with empty key");
 
     // Second message: special key
@@ -1127,4 +1162,194 @@ async fn test_message_structure_edge_cases() {
     assert!(messages[4].key.is_none());
     assert!(messages[4].headers.is_none());
     assert_eq!(messages[4].value, "Message with explicit nulls");
+}
+
+#[tokio::test]
+async fn test_replay_functionality_basic_polling() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Post several messages
+    for i in 0..5 {
+        let response = helper
+            .post_message_with_record("replay-test", None, &format!("message {i}"), None)
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+    }
+
+    // Test polling from offset 0 (beginning)
+    let response = helper
+        .client
+        .get(format!(
+            "{}/api/topics/replay-test/messages?from_offset=0",
+            helper.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+
+    let poll_response: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 5);
+    assert_eq!(poll_response.messages[0].value, "message 0");
+    assert_eq!(poll_response.messages[0].offset, 0);
+    assert_eq!(poll_response.messages[4].value, "message 4");
+    assert_eq!(poll_response.messages[4].offset, 4);
+
+    // Test polling from offset 2 (middle)
+    let response = helper
+        .client
+        .get(format!(
+            "{}/api/topics/replay-test/messages?from_offset=2",
+            helper.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+
+    let poll_response: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 3);
+    assert_eq!(poll_response.messages[0].value, "message 2");
+    assert_eq!(poll_response.messages[0].offset, 2);
+    assert_eq!(poll_response.messages[2].value, "message 4");
+    assert_eq!(poll_response.messages[2].offset, 4);
+
+    // Test polling with count limit from offset
+    let response = helper
+        .client
+        .get(format!(
+            "{}/api/topics/replay-test/messages?from_offset=1&count=2",
+            helper.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+
+    let poll_response: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 2);
+    assert_eq!(poll_response.messages[0].value, "message 1");
+    assert_eq!(poll_response.messages[0].offset, 1);
+    assert_eq!(poll_response.messages[1].value, "message 2");
+    assert_eq!(poll_response.messages[1].offset, 2);
+}
+
+#[tokio::test]
+async fn test_consumer_group_replay_functionality() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Create consumer group
+    let response = helper.create_consumer_group("replay-group").await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    // Post several messages
+    for i in 0..4 {
+        let response = helper
+            .post_message_with_record("consumer-replay-test", None, &format!("message {i}"), None)
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+    }
+
+    // Normal consumer group polling (should advance offset)
+    let response = helper
+        .poll_consumer_group_messages("replay-group", "consumer-replay-test", Some(2))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 2);
+    assert_eq!(poll_response.new_offset, 2); // Offset advanced
+    assert_eq!(poll_response.messages[0].value, "message 0");
+    assert_eq!(poll_response.messages[1].value, "message 1");
+
+    // Replay from offset 0 (should NOT advance the consumer group offset)
+    let response = helper
+        .client
+        .get(format!("{}/api/consumer-groups/replay-group/topics/consumer-replay-test/messages?from_offset=0&count=3", helper.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 3);
+    assert_eq!(poll_response.new_offset, 2); // Offset should remain unchanged
+    assert_eq!(poll_response.messages[0].value, "message 0");
+    assert_eq!(poll_response.messages[1].value, "message 1");
+    assert_eq!(poll_response.messages[2].value, "message 2");
+
+    // Verify consumer group offset is still at 2 by doing normal polling
+    let response = helper
+        .poll_consumer_group_messages("replay-group", "consumer-replay-test", None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 2);
+    assert_eq!(poll_response.new_offset, 4); // Now advanced to end
+    assert_eq!(poll_response.messages[0].value, "message 2");
+    assert_eq!(poll_response.messages[1].value, "message 3");
+}
+
+#[tokio::test]
+async fn test_replay_from_invalid_offset() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Post one message
+    let response = helper
+        .post_message_with_record("invalid-offset-test", None, "single message", None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // Try to replay from offset beyond available messages
+    let response = helper
+        .client
+        .get(format!(
+            "{}/api/topics/invalid-offset-test/messages?from_offset=5",
+            helper.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_response: PollMessagesResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.count, 0); // Should return empty result, not error
+    assert!(poll_response.messages.is_empty());
+}
+
+#[tokio::test]
+async fn test_replay_nonexistent_topic() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Try to replay from nonexistent topic
+    let response = helper
+        .client
+        .get(format!(
+            "{}/api/topics/nonexistent/messages?from_offset=0",
+            helper.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    // The important test: TopicNotFound should map to 404 status code
+    assert_eq!(response.status(), 404);
 }

@@ -100,6 +100,8 @@ This provides an excellent way to understand the library API and test functional
 - **Count parameter testing** - Validates polling limits work correctly
 - **Consumer group testing** - Offset management and coordinated consumption
 - **Enhanced message testing** - Keys, headers, and metadata validation
+- **Replay functionality testing** - from_offset parameter for both basic and consumer group polling
+- **Message size validation testing** - Comprehensive validation of size limits per OpenAPI spec
 - **Error handling** - Tests invalid requests and edge cases
 - **Health check testing** - Server status endpoint validation
 
@@ -115,6 +117,8 @@ Current implementation features:
 - **ISO 8601 timestamps**: Human-readable timestamp format for message creation time
 - **Count limiting**: Poll operations can limit number of messages returned
 - **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
+- **Replay functionality**: Seek to specific offsets with `from_offset` parameter for both basic and consumer group polling
+- **Message size validation**: OpenAPI-compliant validation (key: 1024 chars, value: 1MB, headers: 1024 chars each)
 - **HTTP REST API**: Full REST endpoints for posting, polling, and consumer group operations
 - **Enhanced API structures**: MessageRecord (requests) and MessageResponse (polling responses)
 - **JSON serialization**: All data structures support serde for API communication

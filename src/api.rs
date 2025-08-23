@@ -33,6 +33,7 @@ pub struct PollMessagesResponse {
 #[derive(Serialize, Deserialize)]
 pub struct PollQuery {
     pub count: Option<usize>,
+    pub from_offset: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,11 +62,6 @@ pub struct GetConsumerGroupOffsetResponse {
 #[derive(Serialize, Deserialize)]
 pub struct UpdateConsumerGroupOffsetRequest {
     pub offset: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ConsumerGroupPollQuery {
-    pub count: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]

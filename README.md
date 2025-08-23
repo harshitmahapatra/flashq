@@ -7,6 +7,7 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 - **Kafka-style messaging** - Optional message keys and headers for routing/metadata
 - **Topic-based organization** - Messages organized by topic strings
 - **Offset-based positioning** - Sequential message positioning within topics
+- **Replay functionality** - Seek to specific offsets for message replay
 - **Consumer groups** - Coordinated consumption with offset management
 - **HTTP REST API** - Easy integration with any HTTP client
 - **Non-destructive polling** - Messages persist after being read
@@ -68,7 +69,14 @@ curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
 
 Poll messages:
 ```bash
+# Get all messages from topic
+curl http://127.0.0.1:8080/api/topics/news/messages
+
+# Limit to 5 messages
 curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+
+# Replay from specific offset (seek functionality)
+curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10&count=5
 ```
 
 Consumer group operations:
@@ -80,6 +88,9 @@ curl -X POST http://127.0.0.1:8080/api/consumer-groups \
 
 # Poll messages for consumer group (automatically advances offset)
 curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+
+# Replay from specific offset for consumer group (doesn't advance group offset)  
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5&count=3
 ```
 
 ## Development

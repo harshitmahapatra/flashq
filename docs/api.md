@@ -78,6 +78,13 @@ Content-Type: application/json
 }
 ```
 
+**Size Limit Error Response (400 Bad Request):**
+```json
+{
+  "error": "Message key exceeds maximum length of 1024 characters (got 1025)"
+}
+```
+
 ### Example with curl
 
 ```bash
@@ -100,6 +107,7 @@ Retrieve messages from a specified topic.
 
 **Query Parameters:**
 - `count` (optional): Maximum number of messages to return
+- `from_offset` (optional): Start polling from a specific offset (enables replay functionality)
 
 **Success Response (200 OK):**
 ```json
@@ -143,6 +151,12 @@ curl http://127.0.0.1:8080/api/topics/news/messages
 
 # Limit to 5 messages
 curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+
+# Replay from offset 10 (seek functionality)
+curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10
+
+# Replay from offset 5 with limit of 3 messages
+curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=5&count=3
 
 # Poll non-existent topic (returns empty)
 curl http://127.0.0.1:8080/api/topics/nonexistent/messages
@@ -260,6 +274,7 @@ Poll messages for a consumer group starting from its current offset. The offset 
 
 **Query Parameters:**
 - `count` (optional): Maximum number of messages to return
+- `from_offset` (optional): Start polling from a specific offset without updating the group's stored offset (replay mode)
 
 **Success Response (200 OK):**
 ```json
@@ -301,6 +316,12 @@ curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
 
 # Limit to 3 messages
 curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?count=3
+
+# Replay from offset 5 (doesn't update group offset)
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5
+
+# Replay from offset 10 with limit of 2 messages
+curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=10&count=2
 ```
 
 ## Health Check
@@ -384,6 +405,7 @@ Common HTTP status codes:
 - **Headers**: Key-value metadata for application-specific information
 - **Offsets**: Sequential positioning within topics for precise message tracking
 - **ISO 8601 Timestamps**: Human-readable timestamp format for better debugging
+- **Replay Functionality**: Seek to specific offsets using `from_offset` parameter for both basic and consumer group polling
 
 ## Limitations
 
