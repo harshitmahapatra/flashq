@@ -58,6 +58,10 @@ impl MessageQueueError {
     }
 }
 
+// =============================================================================
+// CORE DATA STRUCTURES
+// =============================================================================
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MessageRecord {
     pub key: Option<String>,
@@ -97,6 +101,10 @@ impl MessageWithOffset {
         }
     }
 }
+
+// =============================================================================
+// QUEUE COMPONENTS
+// =============================================================================
 
 #[derive(Debug, Clone)]
 pub struct TopicLog {
@@ -319,8 +327,6 @@ impl MessageQueue {
         Ok(messages)
     }
 
-    /// Poll messages for a consumer group from a specific offset without updating the group's stored offset
-    /// This enables replay functionality where consumers can seek to arbitrary positions
     pub fn poll_messages_for_consumer_group_from_offset(
         &self,
         group_id: &str,
@@ -328,20 +334,15 @@ impl MessageQueue {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<MessageWithOffset>, MessageQueueError> {
-        // Ensure the consumer group exists
         self.get_consumer_group_offset(group_id, topic)?;
-
-        // Poll messages from the specified offset without updating the consumer group offset
         self.poll_messages_from_offset(topic, offset, count)
     }
 
-    /// Get the high water mark (highest offset + 1) for a topic
-    /// Returns the next offset that would be assigned to a new message
     pub fn get_high_water_mark(&self, topic: &str) -> u64 {
         let topics = self.topics.lock().unwrap();
         match topics.get(topic) {
             Some(topic_log) => topic_log.next_offset(),
-            None => 0, // Topic doesn't exist, so high water mark is 0
+            None => 0,
         }
     }
 }
@@ -387,6 +388,10 @@ mod tests {
         assert_eq!(message_with_offset.offset, 42);
         assert!(message_with_offset.timestamp.contains("T")); // ISO 8601 format
     }
+
+    // =============================================================================
+    // MESSAGE QUEUE TESTS
+    // =============================================================================
 
     #[test]
     fn test_queue_creation() {
@@ -543,6 +548,10 @@ mod tests {
         assert_eq!(msg.offset, 0);
     }
 
+    // =============================================================================
+    // TOPIC LOG TESTS
+    // =============================================================================
+
     // TopicLog Tests
     #[test]
     fn test_topic_log_creation() {
@@ -656,6 +665,10 @@ mod tests {
         assert_eq!(messages[1].offset, offset2);
     }
 
+    // =============================================================================
+    // CONSUMER GROUP TESTS
+    // =============================================================================
+
     // ConsumerGroup Tests
     #[test]
     fn test_consumer_group_creation() {
@@ -701,6 +714,10 @@ mod tests {
         assert_eq!(group.get_offset("unknown"), 0);
     }
 
+    // =============================================================================
+    // SERIALIZATION TESTS
+    // =============================================================================
+
     // Serialization Tests
     #[test]
     fn test_message_record_serialization() {
@@ -733,6 +750,10 @@ mod tests {
         // Note: timestamp might differ slightly due to precision, so we just check it's present
         assert!(!deserialized.timestamp.is_empty());
     }
+
+    // =============================================================================
+    // ERROR CONDITION TESTS
+    // =============================================================================
 
     // Error Condition Tests
     #[test]
@@ -968,3 +989,6 @@ mod tests {
         assert!(!exists_error.is_not_found());
     }
 }
+// =============================================================================
+// MESSAGE RECORD TESTS
+// =============================================================================

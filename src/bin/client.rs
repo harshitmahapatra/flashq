@@ -111,11 +111,8 @@ async fn poll_messages(
                     Err(e) => println!("✗ Failed to parse response: {e}"),
                 }
             } else {
-                handle_error_response(
-                    response,
-                    &format!("retrieve messages from topic '{topic}'"),
-                )
-                .await;
+                handle_error_response(response, &format!("retrieve messages from topic '{topic}'"))
+                    .await;
             }
         }
         Err(e) => println!("✗ Failed to connect to server: {e}"),

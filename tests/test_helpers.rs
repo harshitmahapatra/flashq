@@ -238,7 +238,6 @@ impl TestHelper {
             .await
     }
 
-
     pub async fn update_consumer_group_offset(
         &self,
         group_id: &str,
@@ -314,7 +313,6 @@ impl TestHelper {
             .await
     }
 
-
     pub async fn assert_poll_response(
         &self,
         response: reqwest::Response,
@@ -345,7 +343,6 @@ impl TestHelper {
 
         poll_data
     }
-
 
     pub async fn health_check(&self) -> reqwest::Result<reqwest::Response> {
         self.client

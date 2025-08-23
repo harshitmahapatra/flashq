@@ -165,10 +165,7 @@ async fn test_multi_topic_polling() {
         let poll_data = helper.assert_poll_response(response, 3, None).await;
 
         for (msg_idx, record) in poll_data.records.iter().enumerate() {
-            assert_eq!(
-                record.value,
-                format!("Topic {topic_idx} Message {msg_idx}")
-            );
+            assert_eq!(record.value, format!("Topic {topic_idx} Message {msg_idx}"));
             assert_eq!(record.offset, msg_idx as u64);
         }
     }
