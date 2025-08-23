@@ -389,13 +389,10 @@ async fn poll_messages_for_consumer_group(
                 .collect();
 
             // Get the updated offset from the consumer group
-            let new_offset = match app_state
+            let new_offset = app_state
                 .queue
                 .get_consumer_group_offset(&params.group_id, &params.topic)
-            {
-                Ok(offset) => offset,
-                Err(_) => 0, // Default to 0 if we can't get the offset
-            };
+                .unwrap_or_default();
 
             Ok(Json(ConsumerGroupPollResponse {
                 messages: message_responses,
