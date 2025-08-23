@@ -78,11 +78,11 @@ cargo test -- --ignored
 ### Test Coverage
 
 Current test coverage includes:
-- Message creation and ID assignment
+- Record creation and offset assignment
 - FIFO ordering within topics
-- Topic isolation (messages don't leak between topics)
+- Topic isolation (records don't leak between topics)
 - Polling with count limits
-- Non-destructive polling (messages persist)
+- Non-destructive polling (records persist)
 - HTTP API endpoints (POST/GET)
 - Error handling for invalid requests
 - Health check endpoint
@@ -150,10 +150,10 @@ cargo run --bin server &
 
 ### CLI Client
 ```bash
-# Post a message
-cargo run --bin client -- post news "Development message"
+# Post a record
+cargo run --bin client -- post news "Development record"
 
-# Poll messages
+# Poll records
 cargo run --bin client -- poll news
 
 # Poll with count limit
@@ -168,7 +168,7 @@ cargo run --bin client -- --port=9090 post test "Custom port"
 ```
 message-queue-rs/
 ├── src/
-│   ├── lib.rs              # Core library with MessageQueue and Message
+│   ├── lib.rs              # Core library with MessageQueue and Record types
 │   ├── main.rs             # Main binary entry point  
 │   ├── demo.rs             # Interactive demo module
 │   ├── api.rs              # HTTP API data structures
@@ -228,7 +228,7 @@ The server implements automatic log level detection:
 ```rust
 // The server uses a built-in logging system
 // Add debug prints in your development if needed
-println!("Debug: message count = {}", messages.len());
+println!("Debug: record count = {}", records.len());
 ```
 
 ### Common Issues
@@ -260,10 +260,10 @@ cargo run --bin server &
 
 # Use curl in loop for basic testing
 for i in {1..100}; do
-  cargo run --bin client -- post test "Message $i"
+  cargo run --bin client -- post test "Record $i"
 done
 
-# Poll to verify all messages received
+# Poll to verify all records received
 cargo run --bin client -- poll test
 ```
 

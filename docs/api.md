@@ -23,18 +23,18 @@ Logging level is automatically detected - no manual configuration needed.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/topics/{topic}/records` | Post a message to a topic |
-| `GET` | `/topics/{topic}/messages` | Poll messages from a topic |
+| `POST` | `/topics/{topic}/records` | Post a record to a topic |
+| `GET` | `/topics/{topic}/messages` | Poll records from a topic |
 | `POST` | `/consumer/{group_id}` | Create a new consumer group |
 | `DELETE` | `/consumer/{group_id}` | Leave/delete a consumer group |
 | `GET` | `/consumer/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
 | `POST` | `/consumer/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
-| `GET` | `/consumer/{group_id}/topics/{topic}` | Poll messages for a consumer group |
+| `GET` | `/consumer/{group_id}/topics/{topic}` | Poll records for a consumer group |
 | `GET` | `/health` | Health check endpoint |
 
-## POST Message
+## POST Record
 
-Post a new message to a specified topic.
+Post a new record to a specified topic.
 
 **Endpoint:** `POST /topics/{topic}/records`
 
@@ -82,38 +82,38 @@ Content-Type: application/json
 **Size Limit Error Response (400 Bad Request):**
 ```json
 {
-  "error": "Message key exceeds maximum length of 1024 characters (got 1025)"
+  "error": "Record key exceeds maximum length of 1024 characters (got 1025)"
 }
 ```
 
 ### Example with curl
 
 ```bash
-# Simple message
+# Simple record
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": null, "value": "Hello, World!", "headers": null}'
 
-# Message with key and headers
+# Record with key and headers
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}}'
 ```
 
-## Poll Messages
+## Poll Records
 
-Retrieve messages from a specified topic.
+Retrieve records from a specified topic.
 
 **Endpoint:** `GET /topics/{topic}/messages`
 
 **Query Parameters:**
-- `count` (optional): Maximum number of messages to return
+- `count` (optional): Maximum number of records to return
 - `from_offset` (optional): Start polling from a specific offset (enables replay functionality)
 
 **Success Response (200 OK):**
 ```json
 {
-  "messages": [
+  "records": [
     {
       "key": null,
       "value": "Hello, World!",
@@ -123,7 +123,7 @@ Retrieve messages from a specified topic.
     },
     {
       "key": "user123",
-      "value": "Second message with metadata",
+      "value": "Second record with metadata",
       "headers": {
         "priority": "high",
         "source": "mobile-app"
@@ -139,7 +139,7 @@ Retrieve messages from a specified topic.
 **Empty Topic Response (200 OK):**
 ```json
 {
-  "messages": [],
+  "records": [],
   "count": 0
 }
 ```
@@ -147,16 +147,16 @@ Retrieve messages from a specified topic.
 ### Examples with curl
 
 ```bash
-# Get all messages from topic
+# Get all records from topic
 curl http://127.0.0.1:8080/topics/news/messages
 
-# Limit to 5 messages
+# Limit to 5 records
 curl http://127.0.0.1:8080/topics/news/messages?count=5
 
 # Replay from offset 10 (seek functionality)
 curl http://127.0.0.1:8080/topics/news/messages?from_offset=10
 
-# Replay from offset 5 with limit of 3 messages
+# Replay from offset 5 with limit of 3 records
 curl http://127.0.0.1:8080/topics/news/messages?from_offset=5&count=3
 
 # Poll non-existent topic (returns empty)
@@ -165,7 +165,7 @@ curl http://127.0.0.1:8080/topics/nonexistent/messages
 
 ## Consumer Group Operations
 
-Consumer groups enable coordinated consumption of messages with offset tracking, similar to Kafka's consumer group model.
+Consumer groups enable coordinated consumption of records with offset tracking, similar to Kafka's consumer group model.
 
 ### Create Consumer Group
 
@@ -287,30 +287,30 @@ curl -X POST http://127.0.0.1:8080/consumer/my-group/topics/news/offset \
   -d '{"offset": 10}'
 ```
 
-### Poll Messages for Consumer Group
+### Poll Records for Consumer Group
 
-Poll messages for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
+Poll records for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
 
 **Endpoint:** `GET /consumer/{group_id}/topics/{topic}`
 
 **Query Parameters:**
-- `count` (optional): Maximum number of messages to return
+- `count` (optional): Maximum number of records to return
 - `from_offset` (optional): Start polling from a specific offset without updating the group's stored offset (replay mode)
 
 **Success Response (200 OK):**
 ```json
 {
-  "messages": [
+  "records": [
     {
       "key": null,
-      "value": "Message at offset 5",
+      "value": "Record at offset 5",
       "headers": null,
       "offset": 5,
       "timestamp": "2024-01-15T10:35:20Z"
     },
     {
       "key": "user456",
-      "value": "Message at offset 6",
+      "value": "Record at offset 6",
       "headers": {
         "priority": "medium"
       },
@@ -332,16 +332,16 @@ Poll messages for a consumer group starting from its current offset. The offset 
 
 #### Examples with curl
 ```bash
-# Poll all available messages
+# Poll all available records
 curl http://127.0.0.1:8080/consumer/my-group/topics/news
 
-# Limit to 3 messages
+# Limit to 3 records
 curl http://127.0.0.1:8080/consumer/my-group/topics/news?count=3
 
 # Replay from offset 5 (doesn't update group offset)
 curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5
 
-# Replay from offset 10 with limit of 2 messages
+# Replay from offset 10 with limit of 2 records
 curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=10&count=2
 ```
 
