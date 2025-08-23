@@ -202,9 +202,7 @@ impl ErrorResponse {
     pub fn record_size_error(field: &str, max_size: usize, actual_size: usize) -> Self {
         Self::with_details(
             "validation_error",
-            &format!(
-                "{field} exceeds maximum length of {max_size} (got {actual_size})"
-            ),
+            &format!("{field} exceeds maximum length of {max_size} (got {actual_size})"),
             serde_json::json!({
                 "field": field,
                 "max_size": max_size,

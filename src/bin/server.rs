@@ -86,7 +86,7 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
         "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
 
         "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
-        
+
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -350,9 +350,7 @@ async fn post_message(
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!(
-                    "POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"
-                ),
+                &format!("POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"),
             );
             let timestamp = chrono::Utc::now().to_rfc3339();
 
