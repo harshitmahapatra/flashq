@@ -1,30 +1,47 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::fmt;
 
 pub mod demo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageQueueError {
-    TopicNotFound { topic: String },
-    ConsumerGroupNotFound { group_id: String },
-    ConsumerGroupAlreadyExists { group_id: String },
-    InvalidOffset { offset: u64, topic: String, max_offset: u64 },
+    TopicNotFound {
+        topic: String,
+    },
+    ConsumerGroupNotFound {
+        group_id: String,
+    },
+    ConsumerGroupAlreadyExists {
+        group_id: String,
+    },
+    InvalidOffset {
+        offset: u64,
+        topic: String,
+        max_offset: u64,
+    },
 }
 
 impl fmt::Display for MessageQueueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageQueueError::TopicNotFound { topic } => 
-                write!(f, "Topic {topic} does not exist"),
-            MessageQueueError::ConsumerGroupNotFound { group_id } => 
-                write!(f, "Consumer group {group_id} does not exist"),
-            MessageQueueError::ConsumerGroupAlreadyExists { group_id } => 
-                write!(f, "Consumer group {group_id} already exists"),
-            MessageQueueError::InvalidOffset { offset, topic, max_offset } => 
-                write!(f, "Invalid offset {offset} for topic {topic} with max offset {max_offset}"),
+            MessageQueueError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
+            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                write!(f, "Consumer group {group_id} does not exist")
+            }
+            MessageQueueError::ConsumerGroupAlreadyExists { group_id } => {
+                write!(f, "Consumer group {group_id} already exists")
+            }
+            MessageQueueError::InvalidOffset {
+                offset,
+                topic,
+                max_offset,
+            } => write!(
+                f,
+                "Invalid offset {offset} for topic {topic} with max offset {max_offset}"
+            ),
         }
     }
 }
@@ -35,9 +52,9 @@ impl MessageQueueError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            MessageQueueError::TopicNotFound { .. } 
-            | MessageQueueError::ConsumerGroupNotFound { .. }
-            | MessageQueueError::InvalidOffset { .. }
+            MessageQueueError::TopicNotFound { .. }
+                | MessageQueueError::ConsumerGroupNotFound { .. }
+                | MessageQueueError::InvalidOffset { .. }
         )
     }
 }
@@ -177,7 +194,11 @@ impl MessageQueue {
         Ok(topic_log.append(content, current_timestamp))
     }
 
-    pub fn poll_messages(&self, topic: &str, count: Option<usize>) -> Result<Vec<Message>, MessageQueueError> {
+    pub fn poll_messages(
+        &self,
+        topic: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<Message>, MessageQueueError> {
         self.poll_messages_from_offset(topic, 0, count)
     }
 
@@ -194,8 +215,8 @@ impl MessageQueue {
                 .into_iter()
                 .cloned()
                 .collect()),
-            None => Err(MessageQueueError::TopicNotFound { 
-                topic: topic.to_string() 
+            None => Err(MessageQueueError::TopicNotFound {
+                topic: topic.to_string(),
             }),
         }
     }
@@ -207,18 +228,20 @@ impl MessageQueue {
                 entry.insert(ConsumerGroup::new(group_id));
                 Ok(())
             }
-            Occupied(_) => Err(MessageQueueError::ConsumerGroupAlreadyExists { 
-                group_id 
-            }),
+            Occupied(_) => Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }),
         }
     }
 
-    pub fn get_consumer_group_offset(&self, group_id: &str, topic: &str) -> Result<u64, MessageQueueError> {
+    pub fn get_consumer_group_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+    ) -> Result<u64, MessageQueueError> {
         let consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.get(group_id) {
             Some(consumer_group) => Ok(consumer_group.get_offset(topic)),
-            None => Err(MessageQueueError::ConsumerGroupNotFound { 
-                group_id: group_id.to_string() 
+            None => Err(MessageQueueError::ConsumerGroupNotFound {
+                group_id: group_id.to_string(),
             }),
         }
     }
@@ -232,9 +255,11 @@ impl MessageQueue {
         let topic_log_map = self.topics.lock().unwrap();
         let topic_next_offset = match topic_log_map.get(&topic) {
             Some(topic_log) => topic_log.next_offset(),
-            None => return Err(MessageQueueError::TopicNotFound { 
-                topic: topic.clone() 
-            }),
+            None => {
+                return Err(MessageQueueError::TopicNotFound {
+                    topic: topic.clone(),
+                });
+            }
         };
 
         if offset > topic_next_offset {
@@ -251,8 +276,8 @@ impl MessageQueue {
                 consumer_group.set_offset(topic, offset);
                 Ok(())
             }
-            None => Err(MessageQueueError::ConsumerGroupNotFound { 
-                group_id: group_id.to_string() 
+            None => Err(MessageQueueError::ConsumerGroupNotFound {
+                group_id: group_id.to_string(),
             }),
         }
     }

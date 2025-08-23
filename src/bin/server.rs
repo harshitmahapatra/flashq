@@ -138,11 +138,7 @@ async fn main() {
 async fn health_check(
     State(app_state): State<AppState>,
 ) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
-    log(
-        app_state.config.log_level,
-        LogLevel::Trace,
-        "GET /health",
-    );
+    log(app_state.config.log_level, LogLevel::Trace, "GET /health");
     Ok(Json(HealthCheckResponse {
         status: "healthy".to_string(),
         service: "message-queue-rs".to_string(),
@@ -158,7 +154,10 @@ async fn post_message(
     Path(topic): Path<String>,
     Json(request): Json<PostMessageRequest>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state.queue.post_message(topic.clone(), request.content.clone()) {
+    match app_state
+        .queue
+        .post_message(topic.clone(), request.content.clone())
+    {
         Ok(id) => {
             log(
                 app_state.config.log_level,
@@ -215,7 +214,7 @@ async fn poll_messages(
                     timestamp: msg.timestamp,
                 })
                 .collect();
-            
+
             Ok(Json(PollMessagesResponse {
                 messages: message_responses,
                 count,
@@ -229,7 +228,9 @@ async fn poll_messages(
             );
             Err((
                 error_to_status_code(&error),
-                Json(ErrorResponse { error: error.to_string() }),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
             ))
         }
     }
@@ -239,7 +240,10 @@ async fn create_consumer_group(
     State(app_state): State<AppState>,
     Json(request): Json<CreateConsumerGroupRequest>,
 ) -> Result<Json<CreateConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state.queue.create_consumer_group(request.group_id.clone()) {
+    match app_state
+        .queue
+        .create_consumer_group(request.group_id.clone())
+    {
         Ok(_) => {
             log(
                 app_state.config.log_level,
@@ -258,7 +262,9 @@ async fn create_consumer_group(
             );
             Err((
                 error_to_status_code(&error),
-                Json(ErrorResponse { error: error.to_string() }),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
             ))
         }
     }
@@ -281,7 +287,7 @@ async fn get_consumer_group_offset(
                     params.group_id, params.topic, offset
                 ),
             );
-            Ok(Json(GetConsumerGroupOffsetResponse { 
+            Ok(Json(GetConsumerGroupOffsetResponse {
                 group_id: params.group_id.clone(),
                 topic: params.topic.clone(),
                 offset,
@@ -298,7 +304,9 @@ async fn get_consumer_group_offset(
             );
             Err((
                 error_to_status_code(&error),
-                Json(ErrorResponse { error: error.to_string() }),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
             ))
         }
     }
@@ -309,10 +317,11 @@ async fn update_consumer_group_offset(
     Path(params): Path<ConsumerGroupParams>,
     Json(request): Json<UpdateConsumerGroupOffsetRequest>,
 ) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state
-        .queue
-        .update_consumer_group_offset(&params.group_id, params.topic.clone(), request.offset)
-    {
+    match app_state.queue.update_consumer_group_offset(
+        &params.group_id,
+        params.topic.clone(),
+        request.offset,
+    ) {
         Ok(_) => {
             log(
                 app_state.config.log_level,
@@ -339,7 +348,9 @@ async fn update_consumer_group_offset(
             );
             Err((
                 error_to_status_code(&error),
-                Json(ErrorResponse { error: error.to_string() }),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
             ))
         }
     }
@@ -350,17 +361,21 @@ async fn poll_messages_for_consumer_group(
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
 ) -> Result<Json<ConsumerGroupPollResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state
-        .queue
-        .poll_messages_for_consumer_group(&params.group_id, &params.topic, query.count)
-    {
+    match app_state.queue.poll_messages_for_consumer_group(
+        &params.group_id,
+        &params.topic,
+        query.count,
+    ) {
         Ok(messages) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
                     "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?} - {} messages returned",
-                    params.group_id, params.topic, query.count, messages.len()
+                    params.group_id,
+                    params.topic,
+                    query.count,
+                    messages.len()
                 ),
             );
             let count = messages.len();
@@ -372,13 +387,16 @@ async fn poll_messages_for_consumer_group(
                     timestamp: msg.timestamp,
                 })
                 .collect();
-            
+
             // Get the updated offset from the consumer group
-            let new_offset = match app_state.queue.get_consumer_group_offset(&params.group_id, &params.topic) {
+            let new_offset = match app_state
+                .queue
+                .get_consumer_group_offset(&params.group_id, &params.topic)
+            {
                 Ok(offset) => offset,
                 Err(_) => 0, // Default to 0 if we can't get the offset
             };
-            
+
             Ok(Json(ConsumerGroupPollResponse {
                 messages: message_responses,
                 count,
@@ -396,7 +414,9 @@ async fn poll_messages_for_consumer_group(
             );
             Err((
                 error_to_status_code(&error),
-                Json(ErrorResponse { error: error.to_string() }),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
             ))
         }
     }
