@@ -144,7 +144,8 @@ fn poll_messages_interactive(queue: &MessageQueue) {
 
                     // Display headers if present
                     if let Some(ref headers) = message.record.headers
-                        && !headers.is_empty() {
+                        && !headers.is_empty()
+                    {
                         println!("  🏷️  Headers:");
                         for (header_key, header_value) in headers {
                             println!("    {header_key}: \"{header_value}\"");
