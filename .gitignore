@@ -21,7 +21,8 @@ target
 #.idea/
 
 # Claude
-.claude 
+.claude
+CLAUDE.local.md
 
 # Serena
 .serena

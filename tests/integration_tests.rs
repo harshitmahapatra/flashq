@@ -1,138 +1,57 @@
+mod test_helpers;
+
 use message_queue_rs::api::*;
-use std::process::{Child, Command, Stdio};
 use std::time::Duration;
-use tokio::time::sleep;
-
-struct TestServer {
-    process: Child,
-    port: u16,
-}
-
-impl TestServer {
-    async fn start(port: u16) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut process = Command::new("cargo")
-            .args(&["run", "--bin", "server", &port.to_string()])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        // Wait for server to start and verify it's responding
-        let client = reqwest::Client::new();
-        let health_url = format!("http://127.0.0.1:{}/health", port);
-
-        for _ in 0..30 {
-            // Try for up to 15 seconds
-            sleep(Duration::from_millis(500)).await;
-
-            // Check if process is still running
-            if let Ok(Some(_)) = process.try_wait() {
-                return Err("Server process exited".into());
-            }
-
-            // Try to connect to health endpoint
-            if let Ok(response) = client.get(&health_url).send().await {
-                if response.status().is_success() {
-                    return Ok(TestServer { process, port });
-                }
-            }
-        }
-
-        let _ = process.kill();
-        Err("Server failed to start within timeout".into())
-    }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        let _ = self.process.kill();
-        let _ = self.process.wait();
-    }
-}
+use test_helpers::{TestHelper, TestServer};
 
 #[tokio::test]
 async fn test_post_message_integration() {
-    let server = TestServer::start(8081)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
 
-    let client = reqwest::Client::new();
-    let url = format!("{}/api/topics/test/messages", server.base_url());
-
-    let request_body = PostMessageRequest {
-        content: "Integration test message".to_string(),
-    };
-
-    let response = client
-        .post(&url)
-        .json(&request_body)
-        .send()
+    let response = helper
+        .post_message("test", "Integration test message")
         .await
-        .expect("Failed to send POST request");
-
+        .unwrap();
     assert!(response.status().is_success());
 
     let response_data: PostMessageResponse = response
         .json()
         .await
         .expect("Failed to parse response JSON");
-
     assert_eq!(response_data.id, 0); // First message should have ID 0
     assert!(response_data.timestamp > 0);
 }
 
 #[tokio::test]
 async fn test_poll_messages_integration() {
-    let server = TestServer::start(8082)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
 
-    let client = reqwest::Client::new();
-    let base_url = server.base_url();
-
-    // First post a message
-    let post_url = format!("{}/api/topics/test/messages", base_url);
-    let request_body = PostMessageRequest {
-        content: "Message for polling test".to_string(),
-    };
-
-    client
-        .post(&post_url)
-        .json(&request_body)
-        .send()
+    // Post a message
+    helper
+        .post_message("test", "Message for polling test")
         .await
         .expect("Failed to post message");
 
-    // Then poll for messages
-    let poll_url = format!("{}/api/topics/test/messages", base_url);
-    let response = client
-        .get(&poll_url)
-        .send()
+    // Poll for messages
+    let response = helper
+        .poll_messages("test", None)
         .await
         .expect("Failed to send GET request");
-
-    assert!(response.status().is_success());
-
-    let response_data: PollMessagesResponse = response
-        .json()
-        .await
-        .expect("Failed to parse response JSON");
-
-    assert_eq!(response_data.count, 1);
-    assert_eq!(response_data.messages.len(), 1);
-    assert_eq!(
-        response_data.messages[0].content,
-        "Message for polling test"
-    );
-    assert_eq!(response_data.messages[0].id, 0);
+    let poll_data = helper
+        .assert_poll_response(response, 1, Some(&["Message for polling test"]))
+        .await;
+    assert_eq!(poll_data.messages[0].id, 0);
 }
 
 #[tokio::test]
 async fn test_end_to_end_workflow() {
-    let server = TestServer::start(8083)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -163,7 +82,7 @@ async fn test_end_to_end_workflow() {
     // Post all messages sequentially
     for (topic, post_message_request) in &post_message_requests {
         client
-            .post(format!("{}/api/topics/{}/messages", base_url, topic))
+            .post(format!("{base_url}/api/topics/{topic}/messages"))
             .json(&post_message_request)
             .send()
             .await
@@ -173,7 +92,7 @@ async fn test_end_to_end_workflow() {
     // Verify that messages are present and have the correct ordering and content
 
     // Test topic1: should have 2 messages in FIFO order
-    let topic1_url = format!("{}/api/topics/topic1/messages", base_url);
+    let topic1_url = format!("{base_url}/api/topics/topic1/messages");
     let topic1_response = client
         .get(&topic1_url)
         .send()
@@ -191,11 +110,11 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic1_data.messages.len(), 2);
     assert_eq!(topic1_data.messages[0].content, "topic1 message1");
     assert_eq!(topic1_data.messages[1].content, "topic1 message2");
-    assert_eq!(topic1_data.messages[0].id, 0); // First message posted
-    assert_eq!(topic1_data.messages[1].id, 2); // Third message posted
+    assert_eq!(topic1_data.messages[0].id, 0); // First message in topic1 (offset 0)
+    assert_eq!(topic1_data.messages[1].id, 1); // Second message in topic1 (offset 1)
 
     // Test topic2: should have 1 message
-    let topic2_url = format!("{}/api/topics/topic2/messages", base_url);
+    let topic2_url = format!("{base_url}/api/topics/topic2/messages");
     let topic2_response = client
         .get(&topic2_url)
         .send()
@@ -212,10 +131,10 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic2_data.count, 1);
     assert_eq!(topic2_data.messages.len(), 1);
     assert_eq!(topic2_data.messages[0].content, "topic2 message1");
-    assert_eq!(topic2_data.messages[0].id, 1); // Second message posted
+    assert_eq!(topic2_data.messages[0].id, 0); // First message in topic2 (offset 0)
 
     // Test count parameter: limit topic1 to 1 message
-    let topic1_limited_url = format!("{}/api/topics/topic1/messages?count=1", base_url);
+    let topic1_limited_url = format!("{base_url}/api/topics/topic1/messages?count=1");
     let limited_response = client
         .get(&topic1_limited_url)
         .send()
@@ -239,33 +158,28 @@ async fn test_end_to_end_workflow() {
 
 #[tokio::test]
 async fn test_health_check() {
-    let server = TestServer::start(8084)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
 
-    let client = reqwest::Client::new();
-    let url = format!("{}/health", server.base_url());
-
-    let response = client
-        .get(&url)
-        .send()
+    let response = helper
+        .health_check()
         .await
         .expect("Failed to send health check request");
-
     assert!(response.status().is_success());
 
     let response_json: serde_json::Value = response
         .json()
         .await
         .expect("Failed to parse health check response");
-
     assert_eq!(response_json["status"], "healthy");
     assert_eq!(response_json["service"], "message-queue-rs");
 }
 
 #[tokio::test]
 async fn test_error_handling() {
-    let server = TestServer::start(8085)
+    let server = TestServer::start()
         .await
         .expect("Failed to start test server");
 
@@ -282,4 +196,557 @@ async fn test_error_handling() {
         .expect("Failed to send invalid request");
 
     assert!(!response.status().is_success());
+}
+
+#[tokio::test]
+async fn test_consumer_group_isolation() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "isolation_test_topic";
+
+    // Setup: Create a topic with messages
+    helper.setup_topic_with_messages(topic, 5).await;
+
+    // Create consumer groups
+    let group1 = "isolation_group_1";
+    let group2 = "isolation_group_2";
+    helper.setup_consumer_group(group1).await;
+    helper.setup_consumer_group(group2).await;
+
+    // Test that consumer groups maintain separate offsets
+    // Group 1 polls all messages (no count limit)
+    let response = helper
+        .poll_consumer_group_messages(group1, topic, None)
+        .await
+        .unwrap();
+    let _group1_data = helper
+        .assert_consumer_group_poll_response(
+            response,
+            5,
+            Some(&[
+                "Message 0",
+                "Message 1",
+                "Message 2",
+                "Message 3",
+                "Message 4",
+            ]),
+        )
+        .await;
+
+    // Group 2 polls only 1 message
+    let response = helper
+        .poll_consumer_group_messages(group2, topic, Some(1))
+        .await
+        .unwrap();
+    let _group2_data_first = helper
+        .assert_consumer_group_poll_response(response, 1, Some(&["Message 0"]))
+        .await;
+
+    // Verify offsets are independent: Group 2 should still be able to get remaining messages
+    let response = helper
+        .poll_consumer_group_messages(group2, topic, Some(4))
+        .await
+        .unwrap();
+    let _group2_data_remaining = helper
+        .assert_consumer_group_poll_response(
+            response,
+            4,
+            Some(&["Message 1", "Message 2", "Message 3", "Message 4"]),
+        )
+        .await;
+
+    // Group 1 should have no new messages since it already consumed everything
+    let response = helper
+        .poll_consumer_group_messages(group1, topic, None)
+        .await
+        .unwrap();
+    helper
+        .assert_consumer_group_poll_response(response, 0, None)
+        .await;
+}
+
+#[tokio::test]
+async fn test_consumer_group_offset_boundaries() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "boundary_test_topic";
+    let group = "boundary_test_group";
+
+    // Setup: Create topic with 3 messages (offsets 0, 1, 2)
+    helper.setup_topic_with_messages(topic, 3).await;
+    helper.setup_consumer_group(group).await;
+
+    // Test boundary conditions
+    let test_cases = [
+        (10, 404),       // Beyond available messages
+        (u64::MAX, 404), // Extreme value
+        (3, 200),        // Valid boundary (end position)
+        (1, 200),        // Valid within bounds
+    ];
+
+    for (offset, expected_status) in test_cases {
+        let response = helper
+            .update_consumer_group_offset(group, topic, offset)
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            expected_status,
+            "Failed for offset {offset}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_consumer_group_error_handling() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Test 1: Operations on nonexistent consumer groups (expect 404)
+    let nonexistent_group = "nonexistent_group";
+    let test_topic = "test_topic";
+
+    // Try to poll messages from nonexistent consumer group
+    let response = helper
+        .poll_consumer_group_messages(nonexistent_group, test_topic, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        404,
+        "Polling from nonexistent consumer group should return 404"
+    );
+
+    // Try to update offset for nonexistent consumer group
+    let response = helper
+        .update_consumer_group_offset(nonexistent_group, test_topic, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        404,
+        "Updating offset for nonexistent consumer group should return 404"
+    );
+
+    // Test 2: Duplicate consumer group creation (expect 400)
+    let duplicate_group = "duplicate_test_group";
+
+    // Create the group first time (should succeed)
+    helper.setup_consumer_group(duplicate_group).await;
+
+    // Try to create the same group again (should fail with 400)
+    let response = helper.create_consumer_group(duplicate_group).await.unwrap();
+    assert_eq!(
+        response.status(),
+        400,
+        "Duplicate consumer group creation should return 400"
+    );
+
+    // Test 3: Invalid JSON payloads (expect 400 or 422)
+
+    // Invalid JSON for consumer group creation (expect 400)
+    let response = helper
+        .client
+        .post(format!("{}/api/consumer-groups", helper.base_url))
+        .header("Content-Type", "application/json")
+        .body("invalid json")
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        response.status() == 400 || response.status() == 422,
+        "Invalid JSON for consumer group creation should return 400 or 422"
+    );
+
+    // Invalid JSON for offset update (expect 422 based on axum's deserialization behavior)
+    let response = helper
+        .client
+        .post(format!(
+            "{}/api/consumer-groups/{}/topics/{}/offset",
+            helper.base_url, duplicate_group, test_topic
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"invalid\": \"json\"}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        422,
+        "Invalid JSON for offset update should return 422"
+    );
+
+    // Missing required fields in consumer group creation (expect 422)
+    let response = helper
+        .client
+        .post(format!("{}/api/consumer-groups", helper.base_url))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        422,
+        "Missing group_id field should return 422"
+    );
+
+    // Test 4: Invalid offset values
+    let valid_group = "valid_error_test_group";
+
+    // Create a valid group for offset testing
+    helper.setup_consumer_group(valid_group).await;
+
+    // Test negative offset (serde deserializes i64 as u64, may cause 422)
+    let response = helper
+        .client
+        .post(format!(
+            "{}/api/consumer-groups/{}/topics/{}/offset",
+            helper.base_url, valid_group, test_topic
+        ))
+        .json(&serde_json::json!({"offset": -1}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 422, "Negative offset should return 422");
+
+    // Test 5: Valid operations that should succeed for comparison
+
+    // Test getting offset for valid group (should return 404 for nonexistent topic or 200 with offset 0)
+    let response = helper
+        .get_consumer_group_offset(valid_group, test_topic)
+        .await
+        .unwrap();
+    // Could be 404 if topic doesn't exist yet, or 200 if it does
+    assert!(
+        response.status() == 404 || response.status() == 200,
+        "Getting offset should return 404 or 200"
+    );
+}
+
+#[tokio::test]
+async fn test_consumer_group_empty_topics() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+
+    // Create consumer group
+    let group = "empty_topic_group";
+    helper.setup_consumer_group(group).await;
+
+    // Test 1: Poll from topic that doesn't exist yet
+    let nonexistent_topic = "nonexistent_topic";
+    let response = helper
+        .poll_consumer_group_messages(group, nonexistent_topic, None)
+        .await
+        .unwrap();
+    // Server returns 404 for nonexistent consumer group + topic combination initially
+    // But since we created the consumer group, it should succeed and return empty results
+    if response.status() == 200 {
+        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.count, 0);
+        assert_eq!(poll_data.messages.len(), 0);
+        assert_eq!(
+            poll_data.new_offset, 0,
+            "Offset should remain 0 for nonexistent topic"
+        );
+    } else {
+        // If server returns 404, that's also acceptable behavior for nonexistent topic
+        assert_eq!(response.status(), 404);
+    }
+
+    // Test 2: Poll from topic with no messages (create topic by posting then ensure it exists)
+    let empty_topic = "empty_topic";
+    // First, create the topic by posting and then immediately create a new consumer group
+    // to test empty topic behavior
+    let response = helper
+        .post_message(empty_topic, "temp message")
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // Now create a new consumer group for testing empty behavior
+    let empty_group = "empty_test_group";
+    helper.setup_consumer_group(empty_group).await;
+
+    // Test polling from the topic - should get the message and advance offset
+    let response = helper
+        .poll_consumer_group_messages(empty_group, empty_topic, None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.count, 1);
+    assert_eq!(poll_data.messages.len(), 1);
+    assert_eq!(
+        poll_data.new_offset, 1,
+        "Offset should advance to 1 after consuming message"
+    );
+
+    // Test 3: Now poll again - should get no messages (empty state)
+    let response = helper
+        .poll_consumer_group_messages(empty_group, empty_topic, None)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.count, 0);
+    assert_eq!(poll_data.messages.len(), 0);
+    assert_eq!(
+        poll_data.new_offset, 1,
+        "Offset should remain at 1 when no new messages"
+    );
+
+    // Test 4: Poll multiple times to ensure offset doesn't change when empty
+    for _ in 0..3 {
+        let response = helper
+            .poll_consumer_group_messages(empty_group, empty_topic, Some(5))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.count, 0);
+        assert_eq!(poll_data.messages.len(), 0);
+        assert_eq!(
+            poll_data.new_offset, 1,
+            "Offset should consistently remain at 1"
+        );
+    }
+
+    // Test 5: Test offset updates on empty topics
+
+    // Try to update offset to 0 (should succeed)
+    let response = helper
+        .update_consumer_group_offset(empty_group, empty_topic, 0)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "Setting offset to 0 should succeed");
+
+    // Try to update offset to valid position (should succeed)
+    let response = helper
+        .update_consumer_group_offset(empty_group, empty_topic, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "Setting offset to valid position should succeed"
+    );
+
+    // Try to update offset beyond available messages (should fail)
+    let response = helper
+        .update_consumer_group_offset(empty_group, empty_topic, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        404,
+        "Setting offset beyond available messages should fail with 404"
+    );
+}
+
+#[tokio::test]
+async fn test_consumer_group_offset_advancement() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "advancement_test_topic";
+
+    // Setup: Create topic with 5 messages
+    helper.setup_topic_with_messages(topic, 5).await;
+
+    // Create consumer group
+    let group = "advancement_test_group";
+    helper.setup_consumer_group(group).await;
+
+    // Test 1: Poll 1 message, verify offset advances to 1
+    let response = helper
+        .poll_consumer_group_messages(group, topic, Some(1))
+        .await
+        .unwrap();
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+
+    assert_eq!(poll_data.count, 1);
+    assert_eq!(poll_data.messages.len(), 1);
+    assert_eq!(poll_data.messages[0].content, "Message 0");
+    assert_eq!(
+        poll_data.new_offset, 1,
+        "Offset should advance to 1 after consuming 1 message"
+    );
+
+    // Test 2: Poll 2 more messages, verify offset advances to 3
+    let response = helper
+        .poll_consumer_group_messages(group, topic, Some(2))
+        .await
+        .unwrap();
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+
+    assert_eq!(poll_data.count, 2);
+    assert_eq!(poll_data.messages.len(), 2);
+    assert_eq!(poll_data.messages[0].content, "Message 1");
+    assert_eq!(poll_data.messages[1].content, "Message 2");
+    assert_eq!(
+        poll_data.new_offset, 3,
+        "Offset should advance to 3 after consuming 2 more messages"
+    );
+
+    // Test 3: Poll remaining messages (no count limit), verify offset advances to 5
+    let response = helper
+        .poll_consumer_group_messages(group, topic, None)
+        .await
+        .unwrap();
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+
+    assert_eq!(poll_data.count, 2);
+    assert_eq!(poll_data.messages.len(), 2);
+    assert_eq!(poll_data.messages[0].content, "Message 3");
+    assert_eq!(poll_data.messages[1].content, "Message 4");
+    assert_eq!(
+        poll_data.new_offset, 5,
+        "Offset should advance to 5 after consuming all remaining messages"
+    );
+
+    // Test 4: Poll when at end of log (no new messages)
+    let response = helper
+        .poll_consumer_group_messages(group, topic, None)
+        .await
+        .unwrap();
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+
+    assert_eq!(poll_data.count, 0);
+    assert_eq!(poll_data.messages.len(), 0);
+    assert_eq!(
+        poll_data.new_offset, 5,
+        "Offset should remain at 5 when no new messages"
+    );
+
+    // Test 5: Add new messages and verify offset continues from where it left off
+    for i in 5..7 {
+        helper
+            .post_message(topic, &format!("Message {i}"))
+            .await
+            .unwrap();
+    }
+
+    let response = helper
+        .poll_consumer_group_messages(group, topic, None)
+        .await
+        .unwrap();
+    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+
+    assert_eq!(poll_data.count, 2);
+    assert_eq!(poll_data.messages.len(), 2);
+    assert_eq!(poll_data.messages[0].content, "Message 5");
+    assert_eq!(poll_data.messages[1].content, "Message 6");
+    assert_eq!(
+        poll_data.new_offset, 7,
+        "Offset should advance to 7 after consuming new messages"
+    );
+}
+
+#[tokio::test]
+async fn test_consumer_group_concurrent_operations() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "concurrent_test_topic";
+
+    // Setup: Create topic with 10 messages
+    helper.setup_topic_with_messages(topic, 10).await;
+
+    // Create 3 consumer groups
+    let groups = [
+        "concurrent_group_1",
+        "concurrent_group_2",
+        "concurrent_group_3",
+    ];
+    for group in groups {
+        helper.setup_consumer_group(group).await;
+    }
+
+    // Test concurrent polling: each group polls all messages in 3 rounds
+    let handles: Vec<_> = groups
+        .iter()
+        .map(|&group| {
+            let helper = TestHelper::new(&server);
+            tokio::spawn(async move {
+                let mut all_messages = Vec::new();
+                for _ in 0..3 {
+                    let response = helper
+                        .poll_consumer_group_messages(group, topic, Some(4))
+                        .await
+                        .unwrap();
+                    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+                    let messages = poll_data.messages;
+
+                    // Verify FIFO ordering within each poll
+                    for i in 1..messages.len() {
+                        assert!(
+                            messages[i - 1].id < messages[i].id,
+                            "Messages should maintain FIFO order"
+                        );
+                    }
+                    all_messages.extend(messages);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                (group, all_messages)
+            })
+        })
+        .collect();
+
+    // Verify each group consumed all messages correctly
+    for handle in handles {
+        let (group, messages) = handle.await.unwrap();
+        assert_eq!(
+            messages.len(),
+            10,
+            "Group {group} should consume all messages"
+        );
+
+        // Verify content and uniqueness
+        for (i, msg) in messages.iter().enumerate() {
+            assert_eq!(msg.content, format!("Message {i}"));
+        }
+        let ids: std::collections::HashSet<_> = messages.iter().map(|m| m.id).collect();
+        assert_eq!(
+            ids.len(),
+            10,
+            "Group {group} should have unique message IDs"
+        );
+    }
+
+    // Stress test: 20 concurrent operations across the groups
+    let stress_handles: Vec<_> = (0..20)
+        .map(|i| {
+            let helper = TestHelper::new(&server);
+            let group = format!("concurrent_group_{}", (i % 3) + 1);
+            tokio::spawn(async move {
+                helper
+                    .poll_consumer_group_messages(&group, topic, Some(1))
+                    .await
+                    .unwrap()
+                    .status()
+                    == 200
+            })
+        })
+        .collect();
+
+    // All stress operations should succeed
+    for handle in stress_handles {
+        assert!(
+            handle.await.unwrap(),
+            "High-concurrency operation should succeed"
+        );
+    }
 }

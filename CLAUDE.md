@@ -107,6 +107,15 @@ Current implementation features:
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
 - **Production ready**: Error handling, health checks, and proper HTTP status codes
+- **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+- **[API Reference](docs/api.md)** - Complete HTTP REST API documentation with examples
+- **[Architecture](docs/architecture.md)** - System design and data structure details  
+- **[Development Guide](docs/development.md)** - Development workflow and contribution guidelines
 
 ## Production Deployment
 
@@ -116,12 +125,17 @@ After building with `cargo build --release`:
 
 **Server:**
 ```bash
-# Default port (8080)
+# Default port (8080) with INFO-level logging
 ./target/release/server
 
-# Custom port
+# Custom port with INFO-level logging
 ./target/release/server 9090
 ```
+
+**Logging Behavior:**
+- **Debug builds** (`cargo run --bin server`): TRACE-level logging (verbose request/response details)
+- **Release builds** (`./target/release/server`): INFO-level logging (production-appropriate output)
+- Automatic detection based on compilation flags - no manual configuration needed
 
 **Client:**
 ```bash
@@ -157,8 +171,38 @@ chmod +x /usr/local/bin/server
 chmod +x /usr/local/bin/client
 ```
 
+## MCP Servers
+
+The following MCP (Model Context Protocol) servers are currently configured and active:
+
+### serena
+- **Purpose**: Professional coding agent with semantic coding tools
+- **Capabilities**: 
+  - Symbol-based code analysis and editing
+  - Intelligent code exploration with minimal token usage
+  - Memory management for codebase information
+  - Project onboarding and context management
+- **Key Tools**: 
+  - `find_symbol`, `get_symbols_overview` - Code structure analysis
+  - `search_for_pattern` - Pattern matching across codebase
+  - `replace_symbol_body`, `insert_after_symbol` - Precise code editing
+  - Memory management tools for project context
+
+### ide
+- **Purpose**: VS Code integration for diagnostics and code execution
+- **Capabilities**:
+  - Language server diagnostics integration
+  - Jupyter kernel code execution support
+- **Key Tools**:
+  - `getDiagnostics` - Retrieve VS Code language diagnostics
+  - `executeCode` - Execute Python code in Jupyter kernel
+
 ## Important Instructions for Claude Code
 
+- **Test Driven Development**: Prefer TDD when implementing changes and features. Write tests first, then implement the code to make them pass.
+- **Human Implementation Preference**: After writing tests and providing function skeletons, prefer to let the human attempt the actual implementation rather than completing it automatically.
+- **Commit Messages**: Do not include Claude, AI, or automated generation references in commit messages. Write natural, human-style commit messages focused on the technical changes. Keep messages concise (1-2 lines preferred) and use bullet points only for multiple distinct changes. Avoid verbose explanations.
+- **GitHub Communication**: Keep all GitHub PR comments, issue comments, and descriptions concise and focused. Avoid verbose explanations - aim for clarity and brevity.
 - **TODO(human) sections**: NEVER implement or fill in TODO(human) sections - these are specifically for human collaboration. Wait for the human to implement these sections before proceeding.
 - **File creation**: NEVER create files unless they're absolutely necessary for achieving your goal.
 - **File editing**: ALWAYS prefer editing an existing file to creating a new one.

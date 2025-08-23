@@ -57,6 +57,10 @@ jobs:
             - Test coverage
             
             Be constructive and helpful in your feedback.
+            Please avoid ex exaggerating but have a positive tone.
+            Please have a consistent PR review output structure, always check for previous PR reviews in the same PR and keep the exact structure.
+            Do not make the PR review comments too verbose unless specifically requested.
+            Always have a final recommendation regarding merging the PR.
 
           # Optional: Use sticky comments to make Claude reuse the same comment on subsequent pushes to the same PR
           # use_sticky_comment: true
