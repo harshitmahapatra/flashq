@@ -71,11 +71,11 @@ async fn test_poll_messages_integration() {
         .await;
 
     // Verify MessageWithOffset structure
-    assert_eq!(poll_data.messages[0].offset, 0); // Changed from id to offset
-    assert_eq!(poll_data.messages[0].value, "Message for polling test"); // Changed from content to value
-    assert!(poll_data.messages[0].key.is_none()); // Key should be None for basic message
-    assert!(poll_data.messages[0].headers.is_none()); // Headers should be None for basic message
-    assert!(poll_data.messages[0].timestamp.contains("T")); // ISO 8601 timestamp format
+    assert_eq!(poll_data.records[0].offset, 0); // Changed from id to offset
+    assert_eq!(poll_data.records[0].value, "Message for polling test"); // Changed from content to value
+    assert!(poll_data.records[0].key.is_none()); // Key should be None for basic message
+    assert!(poll_data.records[0].headers.is_none()); // Headers should be None for basic message
+    assert!(poll_data.records[0].timestamp.contains("T")); // ISO 8601 timestamp format
 }
 
 #[tokio::test]
@@ -140,21 +140,20 @@ async fn test_end_to_end_workflow() {
 
     assert!(topic1_response.status().is_success());
 
-    let topic1_data: PollMessagesResponse = topic1_response
+    let topic1_data: FetchResponse = topic1_response
         .json()
         .await
         .expect("Failed to parse topic1 response");
 
-    assert_eq!(topic1_data.count, 2);
-    assert_eq!(topic1_data.messages.len(), 2);
+    assert_eq!(topic1_data.records.len(), 2);
 
     // Verify MessageWithOffset structure for topic1
-    assert_eq!(topic1_data.messages[0].value, "topic1 message1");
-    assert_eq!(topic1_data.messages[1].value, "topic1 message2");
-    assert_eq!(topic1_data.messages[0].offset, 0); // First message in topic1 (offset 0)
-    assert_eq!(topic1_data.messages[1].offset, 1); // Second message in topic1 (offset 1)
-    assert!(topic1_data.messages[0].key.is_none()); // First message has no key
-    assert_eq!(topic1_data.messages[1].key.as_ref().unwrap(), "user123"); // Second message has key
+    assert_eq!(topic1_data.records[0].value, "topic1 message1");
+    assert_eq!(topic1_data.records[1].value, "topic1 message2");
+    assert_eq!(topic1_data.records[0].offset, 0); // First message in topic1 (offset 0)
+    assert_eq!(topic1_data.records[1].offset, 1); // Second message in topic1 (offset 1)
+    assert!(topic1_data.records[0].key.is_none()); // First message has no key
+    assert_eq!(topic1_data.records[1].key.as_ref().unwrap(), "user123"); // Second message has key
 
     // Test topic2: should have 1 message with metadata
     let topic2_url = format!("{base_url}/topics/topic2/messages");
@@ -166,19 +165,18 @@ async fn test_end_to_end_workflow() {
 
     assert!(topic2_response.status().is_success());
 
-    let topic2_data: PollMessagesResponse = topic2_response
+    let topic2_data: FetchResponse = topic2_response
         .json()
         .await
         .expect("Failed to parse topic2 response");
 
-    assert_eq!(topic2_data.count, 1);
-    assert_eq!(topic2_data.messages.len(), 1);
-    assert_eq!(topic2_data.messages[0].value, "topic2 message1");
-    assert_eq!(topic2_data.messages[0].offset, 0); // First message in topic2 (offset 0)
-    assert_eq!(topic2_data.messages[0].key.as_ref().unwrap(), "user456");
+    assert_eq!(topic2_data.records.len(), 1);
+    assert_eq!(topic2_data.records[0].value, "topic2 message1");
+    assert_eq!(topic2_data.records[0].offset, 0); // First message in topic2 (offset 0)
+    assert_eq!(topic2_data.records[0].key.as_ref().unwrap(), "user456");
 
     // Verify headers
-    let headers = topic2_data.messages[0].headers.as_ref().unwrap();
+    let headers = topic2_data.records[0].headers.as_ref().unwrap();
     assert_eq!(headers.get("source").unwrap(), "workflow-test");
 
     // Test count parameter: limit topic1 to 1 message
@@ -191,19 +189,18 @@ async fn test_end_to_end_workflow() {
 
     assert!(limited_response.status().is_success());
 
-    let limited_data: PollMessagesResponse = limited_response
+    let limited_data: FetchResponse = limited_response
         .json()
         .await
         .expect("Failed to parse limited response");
 
-    assert_eq!(limited_data.count, 1);
-    assert_eq!(limited_data.messages.len(), 1);
-    assert_eq!(limited_data.messages[0].value, "topic1 message1"); // Should get first message
+    assert_eq!(limited_data.records.len(), 1);
+    assert_eq!(limited_data.records[0].value, "topic1 message1"); // Should get first message
 
     // Verify timestamps are in ascending order (FIFO) and in ISO 8601 format
-    assert!(topic1_data.messages[0].timestamp <= topic1_data.messages[1].timestamp);
-    assert!(topic1_data.messages[0].timestamp.contains("T")); // ISO 8601 format
-    assert!(topic1_data.messages[1].timestamp.contains("T")); // ISO 8601 format
+    assert!(topic1_data.records[0].timestamp <= topic1_data.records[1].timestamp);
+    assert!(topic1_data.records[0].timestamp.contains("T")); // ISO 8601 format
+    assert!(topic1_data.records[1].timestamp.contains("T")); // ISO 8601 format
 }
 
 #[tokio::test]
@@ -523,11 +520,10 @@ async fn test_consumer_group_empty_topics() {
     // Server returns 404 for nonexistent consumer group + topic combination initially
     // But since we created the consumer group, it should succeed and return empty results
     if response.status() == 200 {
-        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, 0);
-        assert_eq!(poll_data.messages.len(), 0);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), 0);
         assert_eq!(
-            poll_data.new_offset, 0,
+            poll_data.next_offset, 0,
             "Offset should remain 0 for nonexistent topic"
         );
     } else {
@@ -556,11 +552,10 @@ async fn test_consumer_group_empty_topics() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-    assert_eq!(poll_data.count, 1);
-    assert_eq!(poll_data.messages.len(), 1);
+    let poll_data: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.records.len(), 1);
     assert_eq!(
-        poll_data.new_offset, 1,
+        poll_data.next_offset, 1,
         "Offset should advance to 1 after consuming message"
     );
 
@@ -571,11 +566,10 @@ async fn test_consumer_group_empty_topics() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-    assert_eq!(poll_data.count, 0);
-    assert_eq!(poll_data.messages.len(), 0);
+    let poll_data: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.records.len(), 0);
     assert_eq!(
-        poll_data.new_offset, 1,
+        poll_data.next_offset, 1,
         "Offset should remain at 1 when no new messages"
     );
 
@@ -587,11 +581,10 @@ async fn test_consumer_group_empty_topics() {
             .unwrap();
         assert_eq!(response.status(), 200);
 
-        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, 0);
-        assert_eq!(poll_data.messages.len(), 0);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), 0);
         assert_eq!(
-            poll_data.new_offset, 1,
+            poll_data.next_offset, 1,
             "Offset should consistently remain at 1"
         );
     }
@@ -648,13 +641,12 @@ async fn test_consumer_group_offset_advancement() {
         .poll_consumer_group_messages(group, topic, Some(1))
         .await
         .unwrap();
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
 
-    assert_eq!(poll_data.count, 1);
-    assert_eq!(poll_data.messages.len(), 1);
-    assert_eq!(poll_data.messages[0].value, "Message 0");
+    assert_eq!(poll_data.records.len(), 1);
+    assert_eq!(poll_data.records[0].value, "Message 0");
     assert_eq!(
-        poll_data.new_offset, 1,
+        poll_data.next_offset, 1,
         "Offset should advance to 1 after consuming 1 message"
     );
 
@@ -663,14 +655,13 @@ async fn test_consumer_group_offset_advancement() {
         .poll_consumer_group_messages(group, topic, Some(2))
         .await
         .unwrap();
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
 
-    assert_eq!(poll_data.count, 2);
-    assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].value, "Message 1");
-    assert_eq!(poll_data.messages[1].value, "Message 2");
+    assert_eq!(poll_data.records.len(), 2);
+    assert_eq!(poll_data.records[0].value, "Message 1");
+    assert_eq!(poll_data.records[1].value, "Message 2");
     assert_eq!(
-        poll_data.new_offset, 3,
+        poll_data.next_offset, 3,
         "Offset should advance to 3 after consuming 2 more messages"
     );
 
@@ -679,14 +670,13 @@ async fn test_consumer_group_offset_advancement() {
         .poll_consumer_group_messages(group, topic, None)
         .await
         .unwrap();
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
 
-    assert_eq!(poll_data.count, 2);
-    assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].value, "Message 3");
-    assert_eq!(poll_data.messages[1].value, "Message 4");
+    assert_eq!(poll_data.records.len(), 2);
+    assert_eq!(poll_data.records[0].value, "Message 3");
+    assert_eq!(poll_data.records[1].value, "Message 4");
     assert_eq!(
-        poll_data.new_offset, 5,
+        poll_data.next_offset, 5,
         "Offset should advance to 5 after consuming all remaining messages"
     );
 
@@ -695,12 +685,11 @@ async fn test_consumer_group_offset_advancement() {
         .poll_consumer_group_messages(group, topic, None)
         .await
         .unwrap();
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
 
-    assert_eq!(poll_data.count, 0);
-    assert_eq!(poll_data.messages.len(), 0);
+    assert_eq!(poll_data.records.len(), 0);
     assert_eq!(
-        poll_data.new_offset, 5,
+        poll_data.next_offset, 5,
         "Offset should remain at 5 when no new messages"
     );
 
@@ -716,14 +705,13 @@ async fn test_consumer_group_offset_advancement() {
         .poll_consumer_group_messages(group, topic, None)
         .await
         .unwrap();
-    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
 
-    assert_eq!(poll_data.count, 2);
-    assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].value, "Message 5");
-    assert_eq!(poll_data.messages[1].value, "Message 6");
+    assert_eq!(poll_data.records.len(), 2);
+    assert_eq!(poll_data.records[0].value, "Message 5");
+    assert_eq!(poll_data.records[1].value, "Message 6");
     assert_eq!(
-        poll_data.new_offset, 7,
+        poll_data.next_offset, 7,
         "Offset should advance to 7 after consuming new messages"
     );
 }
@@ -761,8 +749,8 @@ async fn test_consumer_group_concurrent_operations() {
                         .poll_consumer_group_messages(group, topic, Some(4))
                         .await
                         .unwrap();
-                    let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-                    let messages = poll_data.messages;
+                    let poll_data: FetchResponse = response.json().await.unwrap();
+                    let messages = poll_data.records;
 
                     // Verify FIFO ordering within each poll
                     for i in 1..messages.len() {
@@ -934,11 +922,15 @@ async fn test_message_size_and_validation_limits() {
     // Verify all messages were stored correctly
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
-    let poll_data: PollMessagesResponse = response.json().await.unwrap();
-    assert_eq!(poll_data.count, 4, "All valid messages should be stored");
+    let poll_data: FetchResponse = response.json().await.unwrap();
+    assert_eq!(
+        poll_data.records.len(),
+        4,
+        "All valid messages should be stored"
+    );
 
     // Verify the max key message
-    let max_key_message = &poll_data.messages[0];
+    let max_key_message = &poll_data.records[0];
     assert_eq!(max_key_message.key.as_ref().unwrap(), &max_key);
     assert_eq!(max_key_message.value, "Valid message with max key size");
 }
@@ -994,14 +986,15 @@ async fn test_concurrent_message_posting() {
     // Verify message ordering and content
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
-    let poll_data: PollMessagesResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
-        poll_data.count, 20,
+        poll_data.records.len(),
+        20,
         "All concurrent messages should be stored"
     );
 
     // Verify offset sequence (should be 0-19)
-    for (i, message) in poll_data.messages.iter().enumerate() {
+    for (i, message) in poll_data.records.iter().enumerate() {
         assert_eq!(message.offset, i as u64, "Offsets should be sequential");
         assert!(
             message.value.starts_with("Concurrent message"),
@@ -1047,8 +1040,12 @@ async fn test_concurrent_message_posting() {
         let topic_name = format!("concurrent_topic_{topic_index}");
         let response = helper.poll_messages(&topic_name, None).await.unwrap();
         assert_eq!(response.status(), 200);
-        let poll_data: PollMessagesResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, 5, "Each topic should have 5 messages");
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(
+            poll_data.records.len(),
+            5,
+            "Each topic should have 5 messages"
+        );
     }
 }
 
@@ -1130,14 +1127,15 @@ async fn test_message_structure_edge_cases() {
     // Verify all messages were stored with correct structure
     let response = helper.poll_messages(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
-    let poll_data: PollMessagesResponse = response.json().await.unwrap();
+    let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
-        poll_data.count, 5,
+        poll_data.records.len(),
+        5,
         "All edge case messages should be stored"
     );
 
     // Verify specific message structures
-    let messages = &poll_data.messages;
+    let messages = &poll_data.records;
 
     // First message: empty key
     assert_eq!(messages[0].key.as_deref(), Some(""));
@@ -1192,12 +1190,12 @@ async fn test_replay_functionality_basic_polling() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let poll_response: PollMessagesResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 5);
-    assert_eq!(poll_response.messages[0].value, "message 0");
-    assert_eq!(poll_response.messages[0].offset, 0);
-    assert_eq!(poll_response.messages[4].value, "message 4");
-    assert_eq!(poll_response.messages[4].offset, 4);
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 5);
+    assert_eq!(poll_response.records[0].value, "message 0");
+    assert_eq!(poll_response.records[0].offset, 0);
+    assert_eq!(poll_response.records[4].value, "message 4");
+    assert_eq!(poll_response.records[4].offset, 4);
 
     // Test polling from offset 2 (middle)
     let response = helper
@@ -1211,12 +1209,12 @@ async fn test_replay_functionality_basic_polling() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let poll_response: PollMessagesResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 3);
-    assert_eq!(poll_response.messages[0].value, "message 2");
-    assert_eq!(poll_response.messages[0].offset, 2);
-    assert_eq!(poll_response.messages[2].value, "message 4");
-    assert_eq!(poll_response.messages[2].offset, 4);
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 3);
+    assert_eq!(poll_response.records[0].value, "message 2");
+    assert_eq!(poll_response.records[0].offset, 2);
+    assert_eq!(poll_response.records[2].value, "message 4");
+    assert_eq!(poll_response.records[2].offset, 4);
 
     // Test polling with count limit from offset
     let response = helper
@@ -1230,12 +1228,12 @@ async fn test_replay_functionality_basic_polling() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let poll_response: PollMessagesResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 2);
-    assert_eq!(poll_response.messages[0].value, "message 1");
-    assert_eq!(poll_response.messages[0].offset, 1);
-    assert_eq!(poll_response.messages[1].value, "message 2");
-    assert_eq!(poll_response.messages[1].offset, 2);
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 2);
+    assert_eq!(poll_response.records[0].value, "message 1");
+    assert_eq!(poll_response.records[0].offset, 1);
+    assert_eq!(poll_response.records[1].value, "message 2");
+    assert_eq!(poll_response.records[1].offset, 2);
 }
 
 #[tokio::test]
@@ -1265,27 +1263,30 @@ async fn test_consumer_group_replay_functionality() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 2);
-    assert_eq!(poll_response.new_offset, 2); // Offset advanced
-    assert_eq!(poll_response.messages[0].value, "message 0");
-    assert_eq!(poll_response.messages[1].value, "message 1");
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 2);
+    assert_eq!(poll_response.next_offset, 2); // Offset advanced
+    assert_eq!(poll_response.records[0].value, "message 0");
+    assert_eq!(poll_response.records[1].value, "message 1");
 
     // Replay from offset 0 (should NOT advance the consumer group offset)
     let response = helper
         .client
-        .get(format!("{}/consumer/replay-group/topics/consumer-replay-test?from_offset=0&count=3", helper.base_url))
+        .get(format!(
+            "{}/consumer/replay-group/topics/consumer-replay-test?from_offset=0&count=3",
+            helper.base_url
+        ))
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 3);
-    assert_eq!(poll_response.new_offset, 2); // Offset should remain unchanged
-    assert_eq!(poll_response.messages[0].value, "message 0");
-    assert_eq!(poll_response.messages[1].value, "message 1");
-    assert_eq!(poll_response.messages[2].value, "message 2");
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 3);
+    assert_eq!(poll_response.next_offset, 2); // Offset should remain unchanged
+    assert_eq!(poll_response.records[0].value, "message 0");
+    assert_eq!(poll_response.records[1].value, "message 1");
+    assert_eq!(poll_response.records[2].value, "message 2");
 
     // Verify consumer group offset is still at 2 by doing normal polling
     let response = helper
@@ -1294,11 +1295,11 @@ async fn test_consumer_group_replay_functionality() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_response: ConsumerGroupPollResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 2);
-    assert_eq!(poll_response.new_offset, 4); // Now advanced to end
-    assert_eq!(poll_response.messages[0].value, "message 2");
-    assert_eq!(poll_response.messages[1].value, "message 3");
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 2);
+    assert_eq!(poll_response.next_offset, 4); // Now advanced to end
+    assert_eq!(poll_response.records[0].value, "message 2");
+    assert_eq!(poll_response.records[1].value, "message 3");
 }
 
 #[tokio::test]
@@ -1327,9 +1328,9 @@ async fn test_replay_from_invalid_offset() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let poll_response: PollMessagesResponse = response.json().await.unwrap();
-    assert_eq!(poll_response.count, 0); // Should return empty result, not error
-    assert!(poll_response.messages.is_empty());
+    let poll_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_response.records.len(), 0); // Should return empty result, not error
+    assert!(poll_response.records.is_empty());
 }
 
 #[tokio::test]

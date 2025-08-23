@@ -286,23 +286,28 @@ impl TestHelper {
             .await
     }
 
-    // Updated assertion helpers for new MessageWithOffset structure
+    // Updated assertion helpers for new FetchResponse structure
     pub async fn assert_consumer_group_poll_response(
         &self,
         response: reqwest::Response,
         expected_count: usize,
         expected_values: Option<&[&str]>,
-    ) -> ConsumerGroupPollResponse {
+    ) -> FetchResponse {
         assert_eq!(response.status(), 200);
-        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, expected_count);
-        assert_eq!(poll_data.messages.len(), expected_count);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), expected_count);
+
+        // Verify high water mark and lag calculations
+        assert!(poll_data.high_water_mark >= poll_data.next_offset);
+        if let Some(lag) = poll_data.lag {
+            assert_eq!(lag, poll_data.high_water_mark - poll_data.next_offset);
+        }
 
         if let Some(expected) = expected_values {
             for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].value, *expected_value);
+                assert_eq!(poll_data.records[i].value, *expected_value);
                 // Verify timestamp is in ISO 8601 format
-                assert!(poll_data.messages[i].timestamp.contains("T"));
+                assert!(poll_data.records[i].timestamp.contains("T"));
             }
         }
 
@@ -314,19 +319,26 @@ impl TestHelper {
         response: reqwest::Response,
         expected_count: usize,
         expected_values: Option<&[&str]>,
-    ) -> PollMessagesResponse {
+    ) -> FetchResponse {
         assert_eq!(response.status(), 200);
-        let poll_data: PollMessagesResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, expected_count);
-        assert_eq!(poll_data.messages.len(), expected_count);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), expected_count);
+
+        // Verify high water mark is reasonable (should be >= next_offset)
+        assert!(poll_data.high_water_mark >= poll_data.next_offset);
+        
+        // Verify lag calculation if present
+        if let Some(lag) = poll_data.lag {
+            assert_eq!(lag, poll_data.high_water_mark - poll_data.next_offset);
+        }
 
         if let Some(expected) = expected_values {
             for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].value, *expected_value);
+                assert_eq!(poll_data.records[i].value, *expected_value);
                 // Verify timestamp is in ISO 8601 format
-                assert!(poll_data.messages[i].timestamp.contains("T"));
+                assert!(poll_data.records[i].timestamp.contains("T"));
                 // Verify offset sequence
-                assert_eq!(poll_data.messages[i].offset, i as u64);
+                assert_eq!(poll_data.records[i].offset, i as u64);
             }
         }
 

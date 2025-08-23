@@ -334,6 +334,16 @@ impl MessageQueue {
         // Poll messages from the specified offset without updating the consumer group offset
         self.poll_messages_from_offset(topic, offset, count)
     }
+
+    /// Get the high water mark (highest offset + 1) for a topic
+    /// Returns the next offset that would be assigned to a new message
+    pub fn get_high_water_mark(&self, topic: &str) -> u64 {
+        let topics = self.topics.lock().unwrap();
+        match topics.get(topic) {
+            Some(topic_log) => topic_log.next_offset(),
+            None => 0, // Topic doesn't exist, so high water mark is 0
+        }
+    }
 }
 
 pub mod api;
