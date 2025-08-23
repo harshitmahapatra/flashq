@@ -1,4 +1,4 @@
-use crate::{MessageQueue, MessageRecord};
+use crate::{MessageQueue, Record};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -67,13 +67,13 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
         return;
     }
 
-    let record = MessageRecord {
+    let record = Record {
         key: None,
         value: content.clone(),
         headers: None,
     };
 
-    match queue.post_message(topic.clone(), record) {
+    match queue.post_record(topic.clone(), record) {
         Ok(message_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
             println!("✅ Message posted successfully!");
@@ -120,7 +120,7 @@ fn poll_messages_interactive(queue: &MessageQueue) {
         }
     };
 
-    match queue.poll_messages(&topic, count) {
+    match queue.poll_records(&topic, count) {
         Ok(messages) => {
             if messages.is_empty() {
                 println!("📭 No messages found in topic '{topic}'");
@@ -202,12 +202,12 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
     );
 
     for (i, content) in demo_messages.iter().enumerate() {
-        let record = MessageRecord {
+        let record = Record {
             key: None,
             value: content.to_string(),
             headers: None,
         };
-        match queue.post_message(demo_topic.clone(), record) {
+        match queue.post_record(demo_topic.clone(), record) {
             Ok(message_id) => {
                 println!("  ✅ Message {} posted (ID: {})", i + 1, message_id);
                 *topics_created.entry(demo_topic.clone()).or_insert(0) += 1;
@@ -217,7 +217,7 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
     }
 
     println!("\n📬 Polling all messages from topic '{demo_topic}'...");
-    match queue.poll_messages(&demo_topic, None) {
+    match queue.poll_records(&demo_topic, None) {
         Ok(messages) => {
             println!("📋 Retrieved {} message(s):", messages.len());
             for (i, message) in messages.iter().enumerate() {

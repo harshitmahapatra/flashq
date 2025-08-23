@@ -23,19 +23,20 @@ Logging level is automatically detected - no manual configuration needed.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/topics/{topic}/messages` | Post a message to a topic |
-| `GET` | `/api/topics/{topic}/messages` | Poll messages from a topic |
-| `POST` | `/api/consumer-groups` | Create a new consumer group |
-| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
-| `POST` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
-| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/messages` | Poll messages for a consumer group |
+| `POST` | `/topics/{topic}/records` | Post a record to a topic |
+| `GET` | `/topics/{topic}/messages` | Poll records from a topic |
+| `POST` | `/consumer/{group_id}` | Create a new consumer group |
+| `DELETE` | `/consumer/{group_id}` | Leave/delete a consumer group |
+| `GET` | `/consumer/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
+| `POST` | `/consumer/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
+| `GET` | `/consumer/{group_id}/topics/{topic}` | Poll records for a consumer group |
 | `GET` | `/health` | Health check endpoint |
 
-## POST Message
+## POST Record
 
-Post a new message to a specified topic.
+Post a new record to a specified topic.
 
-**Endpoint:** `POST /api/topics/{topic}/messages`
+**Endpoint:** `POST /topics/{topic}/records`
 
 **Request Headers:**
 ```
@@ -81,38 +82,38 @@ Content-Type: application/json
 **Size Limit Error Response (400 Bad Request):**
 ```json
 {
-  "error": "Message key exceeds maximum length of 1024 characters (got 1025)"
+  "error": "Record key exceeds maximum length of 1024 characters (got 1025)"
 }
 ```
 
 ### Example with curl
 
 ```bash
-# Simple message
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+# Simple record
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": null, "value": "Hello, World!", "headers": null}'
 
-# Message with key and headers
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+# Record with key and headers
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}}'
 ```
 
-## Poll Messages
+## Poll Records
 
-Retrieve messages from a specified topic.
+Retrieve records from a specified topic.
 
-**Endpoint:** `GET /api/topics/{topic}/messages`
+**Endpoint:** `GET /topics/{topic}/messages`
 
 **Query Parameters:**
-- `count` (optional): Maximum number of messages to return
+- `count` (optional): Maximum number of records to return
 - `from_offset` (optional): Start polling from a specific offset (enables replay functionality)
 
 **Success Response (200 OK):**
 ```json
 {
-  "messages": [
+  "records": [
     {
       "key": null,
       "value": "Hello, World!",
@@ -122,7 +123,7 @@ Retrieve messages from a specified topic.
     },
     {
       "key": "user123",
-      "value": "Second message with metadata",
+      "value": "Second record with metadata",
       "headers": {
         "priority": "high",
         "source": "mobile-app"
@@ -138,7 +139,7 @@ Retrieve messages from a specified topic.
 **Empty Topic Response (200 OK):**
 ```json
 {
-  "messages": [],
+  "records": [],
   "count": 0
 }
 ```
@@ -146,31 +147,31 @@ Retrieve messages from a specified topic.
 ### Examples with curl
 
 ```bash
-# Get all messages from topic
-curl http://127.0.0.1:8080/api/topics/news/messages
+# Get all records from topic
+curl http://127.0.0.1:8080/topics/news/messages
 
-# Limit to 5 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+# Limit to 5 records
+curl http://127.0.0.1:8080/topics/news/messages?count=5
 
 # Replay from offset 10 (seek functionality)
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=10
 
-# Replay from offset 5 with limit of 3 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=5&count=3
+# Replay from offset 5 with limit of 3 records
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=5&count=3
 
 # Poll non-existent topic (returns empty)
-curl http://127.0.0.1:8080/api/topics/nonexistent/messages
+curl http://127.0.0.1:8080/topics/nonexistent/messages
 ```
 
 ## Consumer Group Operations
 
-Consumer groups enable coordinated consumption of messages with offset tracking, similar to Kafka's consumer group model.
+Consumer groups enable coordinated consumption of records with offset tracking, similar to Kafka's consumer group model.
 
 ### Create Consumer Group
 
 Create a new consumer group with a unique group ID.
 
-**Endpoint:** `POST /api/consumer-groups`
+**Endpoint:** `POST /consumer/{group_id}`
 
 **Request Headers:**
 ```
@@ -200,16 +201,36 @@ Content-Type: application/json
 
 #### Example with curl
 ```bash
-curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+curl -X POST http://127.0.0.1:8080/consumer/my-consumer-group \
   -H "Content-Type: application/json" \
   -d '{"group_id": "my-consumer-group"}'
+```
+
+### Delete Consumer Group
+
+Leave and delete a consumer group.
+
+**Endpoint:** `DELETE /consumer/{group_id}`
+
+**Success Response (204 No Content):** *(Empty response body)*
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": "No consumer group exists for group_id nonexistent-group"
+}
+```
+
+#### Example with curl
+```bash
+curl -X DELETE http://127.0.0.1:8080/consumer/my-consumer-group
 ```
 
 ### Get Consumer Group Offset
 
 Retrieve the current offset for a consumer group on a specific topic.
 
-**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/offset`
+**Endpoint:** `GET /consumer/{group_id}/topics/{topic}/offset`
 
 **Success Response (200 OK):**
 ```json
@@ -229,14 +250,14 @@ Retrieve the current offset for a consumer group on a specific topic.
 
 #### Example with curl
 ```bash
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset
+curl http://127.0.0.1:8080/consumer/my-group/topics/news/offset
 ```
 
 ### Update Consumer Group Offset
 
 Manually update the offset for a consumer group on a specific topic.
 
-**Endpoint:** `POST /api/consumer-groups/{group_id}/topics/{topic}/offset`
+**Endpoint:** `POST /consumer/{group_id}/topics/{topic}/offset`
 
 **Request Headers:**
 ```
@@ -261,35 +282,35 @@ Content-Type: application/json
 
 #### Example with curl
 ```bash
-curl -X POST http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset \
+curl -X POST http://127.0.0.1:8080/consumer/my-group/topics/news/offset \
   -H "Content-Type: application/json" \
   -d '{"offset": 10}'
 ```
 
-### Poll Messages for Consumer Group
+### Poll Records for Consumer Group
 
-Poll messages for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
+Poll records for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
 
-**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/messages`
+**Endpoint:** `GET /consumer/{group_id}/topics/{topic}`
 
 **Query Parameters:**
-- `count` (optional): Maximum number of messages to return
+- `count` (optional): Maximum number of records to return
 - `from_offset` (optional): Start polling from a specific offset without updating the group's stored offset (replay mode)
 
 **Success Response (200 OK):**
 ```json
 {
-  "messages": [
+  "records": [
     {
       "key": null,
-      "value": "Message at offset 5",
+      "value": "Record at offset 5",
       "headers": null,
       "offset": 5,
       "timestamp": "2024-01-15T10:35:20Z"
     },
     {
       "key": "user456",
-      "value": "Message at offset 6",
+      "value": "Record at offset 6",
       "headers": {
         "priority": "medium"
       },
@@ -311,17 +332,17 @@ Poll messages for a consumer group starting from its current offset. The offset 
 
 #### Examples with curl
 ```bash
-# Poll all available messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+# Poll all available records
+curl http://127.0.0.1:8080/consumer/my-group/topics/news
 
-# Limit to 3 messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?count=3
+# Limit to 3 records
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?count=3
 
 # Replay from offset 5 (doesn't update group offset)
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5
 
-# Replay from offset 10 with limit of 2 messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=10&count=2
+# Replay from offset 10 with limit of 2 records
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=10&count=2
 ```
 
 ## Health Check
@@ -379,17 +400,49 @@ Structure returned when polling messages:
 
 ### Error Responses
 
-All API errors return a standardized error response:
+All API errors return OpenAPI-compliant structured error responses:
 
 ```json
 {
-  "error": "Human-readable error description"
+  "error": "error_code_identifier",
+  "message": "Human-readable error description", 
+  "details": {
+    "parameter": "field_name",
+    "max_size": 1024,
+    "actual_size": 1500
+  }
 }
 ```
 
-Common HTTP status codes:
-- `400 Bad Request` - Invalid request format or missing required fields
+**Error Response Fields:**
+- `error` - Machine-readable error code for programmatic handling
+- `message` - Human-readable error description  
+- `details` - Optional additional context (field name, limits, etc.)
+
+**Common Error Codes:**
+- `validation_error` - Request validation failed (size limits, format issues)
+- `invalid_parameter` - Parameter format/pattern validation failed
+- `topic_not_found` - Requested topic does not exist  
+- `group_not_found` - Consumer group does not exist
+- `internal_error` - Server-side processing error
+
+**HTTP Status Codes:**
+- `200 OK` - Request successful, response includes data
+- `201 Created` - Resource created successfully (consumer groups)
+- `204 No Content` - Request successful, no response body (delete operations)
+- `400 Bad Request` - Invalid request parameters or validation errors
+- `404 Not Found` - Topic or consumer group not found
+- `422 Unprocessable Entity` - Request format valid but semantically incorrect
 - `500 Internal Server Error` - Server-side processing error
+
+**Validation Rules:**
+- Topic names: 1-255 characters, pattern `^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`
+- Consumer group IDs: 1-255 characters, same pattern as topics
+- Record keys: Maximum 1024 characters
+- Record values: Maximum 1MB (1,048,576 bytes)
+- Header values: Maximum 1024 characters each
+- Query parameter `max_records`: 1-10000 range
+- Query parameter `timeout_ms`: 0-60000 range
 
 ## Message Ordering
 

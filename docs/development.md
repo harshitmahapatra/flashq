@@ -78,14 +78,39 @@ cargo test -- --ignored
 ### Test Coverage
 
 Current test coverage includes:
-- Message creation and ID assignment
+- Record creation and offset assignment
 - FIFO ordering within topics
-- Topic isolation (messages don't leak between topics)
+- Topic isolation (records don't leak between topics)
 - Polling with count limits
-- Non-destructive polling (messages persist)
+- Non-destructive polling (records persist)
 - HTTP API endpoints (POST/GET)
-- Error handling for invalid requests
+- Error handling for invalid requests with OpenAPI-compliant structured responses
+- Request validation including schema validation, size limits, and pattern matching
+- HTTP status code verification (400, 404, 422, 500)
 - Health check endpoint
+
+### Validation Testing
+
+The project includes comprehensive validation tests for OpenAPI compliance:
+
+```bash
+# Test error response structure
+cargo test test_server_error_handling
+
+# Test request validation limits  
+cargo test test_message_size_and_validation_limits
+
+# Test malformed requests
+cargo test test_malformed_requests
+```
+
+**Validation Test Coverage:**
+- Record size limits (keys: 1024 chars, values: 1MB, headers: 1024 chars)
+- Topic name pattern validation (`^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`)
+- Consumer group ID pattern validation
+- Query parameter limits (`max_records`: 1-10000, `timeout_ms`: 0-60000)
+- HTTP status code correctness (400, 404, 422, 500)
+- Structured error response format with `error`, `message`, and `details` fields
 
 ## Code Quality
 
@@ -150,10 +175,10 @@ cargo run --bin server &
 
 ### CLI Client
 ```bash
-# Post a message
-cargo run --bin client -- post news "Development message"
+# Post a record
+cargo run --bin client -- post news "Development record"
 
-# Poll messages
+# Poll records
 cargo run --bin client -- poll news
 
 # Poll with count limit
@@ -168,7 +193,7 @@ cargo run --bin client -- --port=9090 post test "Custom port"
 ```
 message-queue-rs/
 ├── src/
-│   ├── lib.rs              # Core library with MessageQueue and Message
+│   ├── lib.rs              # Core library with MessageQueue and Record types
 │   ├── main.rs             # Main binary entry point  
 │   ├── demo.rs             # Interactive demo module
 │   ├── api.rs              # HTTP API data structures
@@ -228,7 +253,7 @@ The server implements automatic log level detection:
 ```rust
 // The server uses a built-in logging system
 // Add debug prints in your development if needed
-println!("Debug: message count = {}", messages.len());
+println!("Debug: record count = {}", records.len());
 ```
 
 ### Common Issues
@@ -260,10 +285,10 @@ cargo run --bin server &
 
 # Use curl in loop for basic testing
 for i in {1..100}; do
-  cargo run --bin client -- post test "Message $i"
+  cargo run --bin client -- post test "Record $i"
 done
 
-# Poll to verify all messages received
+# Poll to verify all records received
 cargo run --bin client -- poll test
 ```
 

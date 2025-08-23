@@ -175,6 +175,7 @@ pub struct TestHelper {
     pub base_url: String,
 }
 
+#[allow(dead_code)]
 impl TestHelper {
     pub fn new(server: &TestServer) -> Self {
         Self {
@@ -202,8 +203,8 @@ impl TestHelper {
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
         self.client
-            .post(format!("{}/api/topics/{}/messages", self.base_url, topic))
-            .json(&PostMessageRequest {
+            .post(format!("{}/topics/{}/records", self.base_url, topic))
+            .json(&PostRecordRequest {
                 key,
                 value: value.to_string(),
                 headers,
@@ -219,7 +220,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         let mut request = self
             .client
-            .get(format!("{}/api/topics/{}/messages", self.base_url, topic));
+            .get(format!("{}/topics/{}/messages", self.base_url, topic));
         if let Some(c) = count {
             request = request.query(&[("count", c.to_string())]);
         }
@@ -232,28 +233,9 @@ impl TestHelper {
         group_id: &str,
     ) -> reqwest::Result<reqwest::Response> {
         self.client
-            .post(format!("{}/api/consumer-groups", self.base_url))
-            .json(&CreateConsumerGroupRequest {
-                group_id: group_id.to_string(),
-            })
+            .post(format!("{}/consumer/{}", self.base_url, group_id))
             .send()
             .await
-    }
-
-    pub async fn poll_consumer_group_messages(
-        &self,
-        group_id: &str,
-        topic: &str,
-        count: Option<usize>,
-    ) -> reqwest::Result<reqwest::Response> {
-        let mut request = self.client.get(format!(
-            "{}/api/consumer-groups/{}/topics/{}/messages",
-            self.base_url, group_id, topic
-        ));
-        if let Some(c) = count {
-            request = request.query(&[("count", c.to_string())]);
-        }
-        request.send().await
     }
 
     pub async fn update_consumer_group_offset(
@@ -264,7 +246,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .post(format!(
-                "{}/api/consumer-groups/{}/topics/{}/offset",
+                "{}/consumer/{}/topics/{}/offset",
                 self.base_url, group_id, topic
             ))
             .json(&UpdateConsumerGroupOffsetRequest { offset })
@@ -279,34 +261,56 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .get(format!(
-                "{}/api/consumer-groups/{}/topics/{}/offset",
+                "{}/consumer/{}/topics/{}/offset",
                 self.base_url, group_id, topic
             ))
             .send()
             .await
     }
 
-    // Updated assertion helpers for new MessageWithOffset structure
-    pub async fn assert_consumer_group_poll_response(
-        &self,
-        response: reqwest::Response,
-        expected_count: usize,
-        expected_values: Option<&[&str]>,
-    ) -> ConsumerGroupPollResponse {
-        assert_eq!(response.status(), 200);
-        let poll_data: ConsumerGroupPollResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, expected_count);
-        assert_eq!(poll_data.messages.len(), expected_count);
+    pub async fn leave_consumer_group(&self, group_id: &str) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .delete(format!("{}/consumer/{}", self.base_url, group_id))
+            .send()
+            .await
+    }
 
-        if let Some(expected) = expected_values {
-            for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].value, *expected_value);
-                // Verify timestamp is in ISO 8601 format
-                assert!(poll_data.messages[i].timestamp.contains("T"));
-            }
+    pub async fn fetch_messages_for_consumer_group(
+        &self,
+        group_id: &str,
+        topic: &str,
+        count: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut request = self.client.get(format!(
+            "{}/consumer/{}/topics/{}",
+            self.base_url, group_id, topic
+        ));
+        if let Some(c) = count {
+            request = request.query(&[("count", c.to_string())]);
+        }
+        request.send().await
+    }
+
+    pub async fn fetch_messages_for_consumer_group_from_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_offset: u64,
+        count: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut query = vec![("from_offset", from_offset.to_string())];
+        if let Some(c) = count {
+            query.push(("count", c.to_string()));
         }
 
-        poll_data
+        self.client
+            .get(format!(
+                "{}/consumer/{}/topics/{}",
+                self.base_url, group_id, topic
+            ))
+            .query(&query)
+            .send()
+            .await
     }
 
     pub async fn assert_poll_response(
@@ -314,39 +318,30 @@ impl TestHelper {
         response: reqwest::Response,
         expected_count: usize,
         expected_values: Option<&[&str]>,
-    ) -> PollMessagesResponse {
+    ) -> FetchResponse {
         assert_eq!(response.status(), 200);
-        let poll_data: PollMessagesResponse = response.json().await.unwrap();
-        assert_eq!(poll_data.count, expected_count);
-        assert_eq!(poll_data.messages.len(), expected_count);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), expected_count);
+
+        // Verify high water mark is reasonable (should be >= next_offset)
+        assert!(poll_data.high_water_mark >= poll_data.next_offset);
+
+        // Verify lag calculation if present
+        if let Some(lag) = poll_data.lag {
+            assert_eq!(lag, poll_data.high_water_mark - poll_data.next_offset);
+        }
 
         if let Some(expected) = expected_values {
             for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.messages[i].value, *expected_value);
+                assert_eq!(poll_data.records[i].value, *expected_value);
                 // Verify timestamp is in ISO 8601 format
-                assert!(poll_data.messages[i].timestamp.contains("T"));
+                assert!(poll_data.records[i].timestamp.contains("T"));
                 // Verify offset sequence
-                assert_eq!(poll_data.messages[i].offset, i as u64);
+                assert_eq!(poll_data.records[i].offset, i as u64);
             }
         }
 
         poll_data
-    }
-
-    // Setup helpers - updated for new message structure
-    pub async fn setup_topic_with_messages(&self, topic: &str, message_count: usize) {
-        for i in 0..message_count {
-            let response = self
-                .post_message(topic, &format!("Message {i}"))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), 200);
-        }
-    }
-
-    pub async fn setup_consumer_group(&self, group_id: &str) {
-        let response = self.create_consumer_group(group_id).await.unwrap();
-        assert_eq!(response.status(), 200);
     }
 
     pub async fn health_check(&self) -> reqwest::Result<reqwest::Response> {

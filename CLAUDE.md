@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced message structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
+This is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
 
 ## Development Commands
 
@@ -23,7 +23,7 @@ This is a Kafka-inspired message queue implementation with HTTP API endpoints, c
 
 ### Testing and Quality
 - `cargo test` - Run all tests (unit + integration)
-- `cargo test --test integration_tests` - Run only integration tests
+- `cargo test --test '*'` - Run only integration tests
 - `cargo test <test_name>` - Run a specific test
 - `cargo clippy` - Run Rust linter for code quality checks
 - `cargo fmt` - Format code according to Rust style guidelines
@@ -48,10 +48,10 @@ Following Rust best practices with library and binary crates:
 - `Cargo.toml` - Project configuration using Rust 2024 edition
 
 ### Library Crate (`src/lib.rs`)
-- `MessageRecord` struct - Message payload with optional key and headers
-- `MessageWithOffset` struct - Message with offset and ISO 8601 timestamp
+- `Record` struct - Record payload with optional key and headers
+- `RecordWithOffset` struct - Record with offset and ISO 8601 timestamp
 - `MessageQueue` struct - Main queue implementation with topic-based organization
-- `TopicLog` struct - Append-only log storage for messages within topics
+- `TopicLog` struct - Append-only log storage for records within topics
 - Consumer group management with offset tracking
 - `demo` module - Interactive CLI functionality (exposed publicly)
 - Thread-safe using `Arc<Mutex<>>` for concurrent access
@@ -60,7 +60,7 @@ Following Rust best practices with library and binary crates:
 ### Binary Crates
 - **`src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
 - **`src/demo.rs`** - Interactive CLI demo module with user-friendly menu system
-- **`src/bin/server.rs`** - HTTP REST API server with endpoints for posting/polling messages
+- **`src/bin/server.rs`** - HTTP REST API server with endpoints for posting/polling records
 - **`src/bin/client.rs`** - Command-line client for interacting with the HTTP server
 
 ### Interactive Demo (`src/demo.rs`)
@@ -68,11 +68,11 @@ The demo module provides an educational interactive demonstration of the message
 
 **Features:**
 - **Menu-driven interface** - 5 clear options with emoji-based visual feedback
-- **Post messages interactively** - Prompts for topic and message value with input validation
-- **Enhanced message display** - Shows keys, headers, offsets, and ISO 8601 timestamps
-- **Poll messages with options** - Choose topic and optionally limit message count
-- **Topic management** - View all created topics with message counts from current session
-- **Quick demo mode** - Automated demonstration posting and polling multiple messages
+- **Post records interactively** - Prompts for topic and record value with input validation
+- **Enhanced record display** - Shows keys, headers, offsets, and ISO 8601 timestamps
+- **Poll records with options** - Choose topic and optionally limit record count
+- **Topic management** - View all created topics with record counts from current session
+- **Quick demo mode** - Automated demonstration posting and polling multiple records
 - **Error handling** - Graceful input validation and user-friendly error messages
 
 **Usage:**
@@ -85,8 +85,8 @@ cargo run --bin message-queue-rs
 ```
 
 **Menu Options:**
-1. Post a message - Interactive topic and message value input (creates MessageRecord)
-2. Poll messages from a topic - Display enhanced messages with keys, headers, offsets
+1. Post a record - Interactive topic and record value input (creates Record)
+2. Poll records from a topic - Display enhanced records with keys, headers, offsets
 3. View all topics - Show session statistics and topic overview
 4. Run quick demo - Automated demonstration of core functionality
 5. Exit - Clean program termination
@@ -94,33 +94,33 @@ cargo run --bin message-queue-rs
 This provides an excellent way to understand the library API and test functionality without requiring HTTP server setup or external clients.
 
 ### Integration Tests (`tests/integration_tests.rs`)
-- **End-to-end workflow testing** - Multi-topic message posting and polling with enhanced structure
+- **End-to-end workflow testing** - Multi-topic record posting and polling with enhanced structure
 - **HTTP API validation** - All REST endpoints tested including consumer group operations
-- **FIFO ordering verification** - Ensures message ordering guarantees with offset-based positioning
+- **FIFO ordering verification** - Ensures record ordering guarantees with offset-based positioning
 - **Count parameter testing** - Validates polling limits work correctly
 - **Consumer group testing** - Offset management and coordinated consumption
-- **Enhanced message testing** - Keys, headers, and metadata validation
+- **Enhanced record testing** - Keys, headers, and metadata validation
 - **Replay functionality testing** - from_offset parameter for both basic and consumer group polling
-- **Message size validation testing** - Comprehensive validation of size limits per OpenAPI spec
+- **Record size validation testing** - Comprehensive validation of size limits per OpenAPI spec
 - **Error handling** - Tests invalid requests and edge cases
 - **Health check testing** - Server status endpoint validation
 
 ## Architecture Notes
 
 Current implementation features:
-- **Kafka-style messaging**: Messages with optional keys and headers for routing/metadata
-- **Topic-based organization**: Messages organized by topic strings with separate offset counters
+- **Kafka-style messaging**: Records with optional keys and headers for routing/metadata
+- **Topic-based organization**: Records organized by topic strings with separate offset counters
 - **Offset-based positioning**: Sequential offsets within topics starting from 0
-- **Non-destructive polling**: Messages remain in queue after being read
-- **FIFO ordering**: Messages returned in the order they were posted with offset guarantees
+- **Non-destructive polling**: Records remain in queue after being read
+- **FIFO ordering**: Records returned in the order they were posted with offset guarantees
 - **Thread safety**: Safe concurrent access using Arc<Mutex<>>
-- **ISO 8601 timestamps**: Human-readable timestamp format for message creation time
-- **Count limiting**: Poll operations can limit number of messages returned
+- **ISO 8601 timestamps**: Human-readable timestamp format for record creation time
+- **Count limiting**: Poll operations can limit number of records returned
 - **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
 - **Replay functionality**: Seek to specific offsets with `from_offset` parameter for both basic and consumer group polling
-- **Message size validation**: OpenAPI-compliant validation (key: 1024 chars, value: 1MB, headers: 1024 chars each)
+- **Record size validation**: OpenAPI-compliant validation (key: 1024 chars, value: 1MB, headers: 1024 chars each)
 - **HTTP REST API**: Full REST endpoints for posting, polling, and consumer group operations
-- **Enhanced API structures**: MessageRecord (requests) and MessageResponse (polling responses)
+- **Enhanced API structures**: Record (requests) and RecordResponse (polling responses)
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
 - **Production ready**: Error handling, health checks, and proper HTTP status codes
@@ -155,14 +155,14 @@ After building with `cargo build --release`:
 
 **Client:**
 ```bash
-# Post message
-./target/release/client post news "Production message"
+# Post record
+./target/release/client post news "Production record"
 
-# Poll messages
+# Poll records
 ./target/release/client poll news
 
 # Custom server port
-./target/release/client --port=9090 post news "Custom port message"
+./target/release/client --port=9090 post news "Custom port record"
 ```
 
 ### Binary Installation
@@ -175,7 +175,7 @@ cargo install --path . --bin client
 
 # Run from anywhere
 server 8080
-client post news "Installed binary message"
+client post news "Installed binary record"
 ```
 
 **Manual deployment:**

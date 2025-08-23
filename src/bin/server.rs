@@ -3,12 +3,16 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, MessageRecord, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
+
+// =============================================================================
+// CONFIGURATION & LOGGING
+// =============================================================================
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum LogLevel {
@@ -32,19 +36,6 @@ struct AppConfig {
     log_level: LogLevel,
 }
 
-#[derive(serde::Deserialize)]
-struct ConsumerGroupParams {
-    group_id: String,
-    topic: String,
-}
-
-#[derive(serde::Serialize)]
-struct HealthCheckResponse {
-    status: String,
-    service: String,
-    timestamp: u64,
-}
-
 type AppState = Arc<AppStateInner>;
 
 #[derive(Clone)]
@@ -60,41 +51,80 @@ fn log(app_log_level: LogLevel, message_log_level: LogLevel, message: &str) {
     }
 }
 
-fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
-    if error.is_not_found() {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::BAD_REQUEST
+// =============================================================================
+// REQUEST/RESPONSE TYPES
+// =============================================================================
+
+#[derive(serde::Deserialize)]
+struct ConsumerGroupParams {
+    group_id: String,
+    topic: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ConsumerGroupIdParams {
+    group_id: String,
+}
+
+#[derive(serde::Serialize)]
+struct HealthCheckResponse {
+    status: String,
+    service: String,
+    timestamp: u64,
+}
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+fn error_to_status_code(error_code: &str) -> StatusCode {
+    match error_code {
+        "invalid_parameter" | "validation_error" => StatusCode::BAD_REQUEST,
+
+        "topic_not_found" | "group_not_found" => StatusCode::NOT_FOUND,
+
+        "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
+
+        "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
+
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
-fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> {
-    // Validate key length (max 1024 characters)
+fn validate_record_request(request: &PostRecordRequest) -> Result<(), ErrorResponse> {
     if let Some(key) = &request.key {
         if key.len() > 1024 {
-            return Err(format!(
-                "Message key exceeds maximum length of 1024 characters (got {})",
-                key.len()
+            return Err(ErrorResponse::record_size_error(
+                "Record key",
+                1024,
+                key.len(),
             ));
         }
     }
 
-    // Validate value length (max 1MB = 1,048,576 characters)
     if request.value.len() > 1_048_576 {
-        return Err(format!(
-            "Message value exceeds maximum length of 1MB (got {} bytes)",
-            request.value.len()
+        return Err(ErrorResponse::record_size_error(
+            "Record value",
+            1_048_576,
+            request.value.len(),
         ));
     }
 
-    // Validate header values (each max 1024 characters)
     if let Some(headers) = &request.headers {
         for (header_key, header_value) in headers {
             if header_value.len() > 1024 {
-                return Err(format!(
-                    "Header '{}' value exceeds maximum length of 1024 characters (got {})",
-                    header_key,
-                    header_value.len()
+                return Err(ErrorResponse::with_details(
+                    "validation_error",
+                    &format!(
+                        "Header '{}' value exceeds maximum length of 1024 characters (got {})",
+                        header_key,
+                        header_value.len()
+                    ),
+                    serde_json::json!({
+                        "field": format!("headers.{}", header_key),
+                        "max_size": 1024,
+                        "actual_size": header_value.len()
+                    }),
                 ));
             }
         }
@@ -103,11 +133,90 @@ fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> 
     Ok(())
 }
 
+fn validate_topic_name(topic: &str) -> Result<(), ErrorResponse> {
+    // OpenAPI pattern: ^[a-zA-Z0-9._][a-zA-Z0-9._-]*$
+    if topic.is_empty() || topic.len() > 255 {
+        return Err(ErrorResponse::invalid_parameter(
+            "topic",
+            "Topic name must be between 1 and 255 characters",
+        ));
+    }
+
+    let chars: Vec<char> = topic.chars().collect();
+
+    // First character must be alphanumeric, dot, or underscore
+    if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
+        return Err(ErrorResponse::invalid_topic_name(topic));
+    }
+
+    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
+    for ch in chars.iter().skip(1) {
+        if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
+            return Err(ErrorResponse::invalid_topic_name(topic));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_consumer_group_id(group_id: &str) -> Result<(), ErrorResponse> {
+    // Same pattern as topic names
+    if group_id.is_empty() || group_id.len() > 255 {
+        return Err(ErrorResponse::invalid_parameter(
+            "group_id",
+            "Consumer group ID must be between 1 and 255 characters",
+        ));
+    }
+
+    let chars: Vec<char> = group_id.chars().collect();
+
+    // First character must be alphanumeric, dot, or underscore
+    if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
+        return Err(ErrorResponse::invalid_consumer_group_id(group_id));
+    }
+
+    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
+    for ch in chars.iter().skip(1) {
+        if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
+            return Err(ErrorResponse::invalid_consumer_group_id(group_id));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
+    // Validate max_records parameter
+    if let Some(max_records) = query.max_records {
+        if !(1..=10000).contains(&max_records) {
+            return Err(ErrorResponse::invalid_parameter(
+                "max_records",
+                "max_records must be between 1 and 10000",
+            ));
+        }
+    }
+
+    // Validate timeout_ms parameter
+    if let Some(timeout_ms) = query.timeout_ms {
+        if timeout_ms > 60000 {
+            return Err(ErrorResponse::invalid_parameter(
+                "timeout_ms",
+                "timeout_ms must not exceed 60000 milliseconds",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// MAIN APPLICATION
+// =============================================================================
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Parse port argument
     let port = if args.len() > 1 {
         match args[1].parse::<u16>() {
             Ok(p) => p,
@@ -121,7 +230,6 @@ async fn main() {
         8080
     };
 
-    // Set log level based on debug build or environment
     let log_level = if cfg!(debug_assertions) {
         LogLevel::Trace
     } else {
@@ -135,22 +243,22 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/api/topics/{topic}/messages", post(post_message))
-        .route("/api/topics/{topic}/messages", get(poll_messages))
+        .route("/topics/{topic}/records", post(post_message))
+        .route("/topics/{topic}/messages", get(poll_messages))
         .route("/health", get(health_check))
-        // Consumer Group API routes
-        .route("/api/consumer-groups", post(create_consumer_group))
+        .route("/consumer/{group_id}", post(create_consumer_group))
+        .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
+            "/consumer/{group_id}/topics/{topic}",
+            get(fetch_messages_for_consumer_group),
+        )
+        .route(
+            "/consumer/{group_id}/topics/{topic}/offset",
             get(get_consumer_group_offset),
         )
         .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
-            post(update_consumer_group_offset),
-        )
-        .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/messages",
-            get(poll_messages_for_consumer_group),
+            "/consumer/{group_id}/topics/{topic}/offset",
+            post(commit_consumer_group_offset),
         )
         .with_state(app_state.clone());
 
@@ -170,6 +278,10 @@ async fn main() {
         .expect("Server failed to start");
 }
 
+// =============================================================================
+// HEALTH CHECK ENDPOINT
+// =============================================================================
+
 async fn health_check(
     State(app_state): State<AppState>,
 ) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -184,30 +296,51 @@ async fn health_check(
     }))
 }
 
+// =============================================================================
+// PRODUCER ENDPOINTS
+// =============================================================================
+
 async fn post_message(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
-    Json(request): Json<PostMessageRequest>,
-) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Validate message size limits according to OpenAPI spec
-    if let Err(validation_error) = validate_message_request(&request) {
+    Json(request): Json<PostRecordRequest>,
+) -> Result<Json<PostRecordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&topic) {
         log(
             app_state.config.log_level,
             LogLevel::Error,
-            &format!("POST /api/topics/{topic}/messages validation failed: {validation_error}"),
+            &format!(
+                "POST /topics/{}/records topic validation failed: {}",
+                topic, error_response.message
+            ),
         );
         return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: validation_error,
-            }),
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate record request
+    if let Err(error_response) = validate_record_request(&request) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /topics/{}/records validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
         ));
     }
 
     let value_for_log = request.value.clone();
-    match app_state.queue.post_message(
+    match app_state.queue.post_record(
         topic.clone(),
-        MessageRecord {
+        Record {
             key: request.key,
             value: request.value,
             headers: request.headers,
@@ -217,38 +350,77 @@ async fn post_message(
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!(
-                    "POST /api/topics/{topic}/messages - Offset: {offset} - '{value_for_log}'"
-                ),
+                &format!("POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"),
             );
             let timestamp = chrono::Utc::now().to_rfc3339();
 
-            Ok(Json(PostMessageResponse { offset, timestamp }))
+            Ok(Json(PostRecordResponse { offset, timestamp }))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /api/topics/{topic}/messages failed: {error}"),
+                &format!("POST /topics/{topic}/records failed: {error}"),
             );
+            let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
 }
 
+// =============================================================================
+// BASIC CONSUMER ENDPOINTS
+// =============================================================================
+
 async fn poll_messages(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
-) -> Result<Json<PollMessagesResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /topics/{}/records topic validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate query parameters
+    if let Err(error_response) = validate_poll_query(&params) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /topics/{}/records query validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    let limit = params.effective_limit();
+    let timeout_ms = params.effective_timeout_ms();
+    let include_headers = params.should_include_headers();
+
     let messages_result = match params.from_offset {
         Some(offset) => app_state
             .queue
-            .poll_messages_from_offset(&topic, offset, params.count),
-        None => app_state.queue.poll_messages(&topic, params.count),
+            .poll_records_from_offset(&topic, offset, limit),
+        None => app_state.queue.poll_records(&topic, limit),
     };
 
     match messages_result {
@@ -262,75 +434,167 @@ async fn poll_messages(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/topics/{}/messages - count: {:?}{} - {} messages returned",
+                    "GET /topics/{}/records - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
                     topic,
-                    params.count,
+                    limit,
+                    timeout_ms,
                     offset_info,
                     messages.len()
                 ),
             );
-            let count = messages.len();
-            let message_responses: Vec<MessageResponse> = messages
+
+            let message_responses: Vec<RecordResponse> = messages
                 .into_iter()
-                .map(|msg| MessageResponse {
+                .map(|msg| RecordResponse {
                     key: msg.record.key,
                     value: msg.record.value,
-                    headers: msg.record.headers,
+                    headers: if include_headers {
+                        msg.record.headers
+                    } else {
+                        None
+                    },
                     offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
 
-            Ok(Json(PollMessagesResponse {
-                messages: message_responses,
-                count,
-            }))
+            let next_offset = if let Some(last_message) = message_responses.last() {
+                last_message.offset + 1
+            } else {
+                params
+                    .from_offset
+                    .unwrap_or_else(|| app_state.queue.get_high_water_mark(&topic))
+            };
+
+            let high_water_mark = app_state.queue.get_high_water_mark(&topic);
+            let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
+
+            Ok(Json(response))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("GET /api/topics/{topic}/messages failed: {error}"),
+                &format!("GET /topics/{topic}/records failed: {error}"),
             );
+
+            // Check if it's a topic not found error
+            let error_response = if error.is_not_found() {
+                ErrorResponse::topic_not_found(&topic)
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
 }
 
+// =============================================================================
+// CONSUMER GROUP ENDPOINTS
+// =============================================================================
+
 async fn create_consumer_group(
     State(app_state): State<AppState>,
-    Json(request): Json<CreateConsumerGroupRequest>,
-) -> Result<Json<CreateConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Path(params): Path<ConsumerGroupIdParams>,
+) -> Result<Json<ConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{} validation failed: {}",
+                params.group_id, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state
         .queue
-        .create_consumer_group(request.group_id.clone())
+        .create_consumer_group(params.group_id.clone())
     {
         Ok(_) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!("POST /api/consumer-groups - group_id: {}", request.group_id),
+                &format!("POST /consumer/{} - group created", params.group_id),
             );
-            Ok(Json(CreateConsumerGroupResponse {
-                group_id: request.group_id,
-            }))
+
+            let response = ConsumerGroupResponse {
+                group_id: params.group_id,
+            };
+
+            Ok(Json(response))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /api/consumer-groups failed: {error}"),
+                &format!("POST /consumer/{} failed: {}", params.group_id, error),
             );
+
+            let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
+            ))
+        }
+    }
+}
+
+async fn leave_consumer_group(
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupIdParams>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "DELETE /consumer/{} validation failed: {}",
+                params.group_id, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    match app_state.queue.delete_consumer_group(&params.group_id) {
+        Ok(_) => {
+            log(
+                app_state.config.log_level,
+                LogLevel::Trace,
+                &format!("DELETE /consumer/{} - consumer group left", params.group_id),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            log(
+                app_state.config.log_level,
+                LogLevel::Error,
+                &format!("DELETE /consumer/{} failed: {}", params.group_id, error),
+            );
+
+            let error_response = if error.is_not_found() {
+                ErrorResponse::group_not_found(&params.group_id)
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
+            Err((
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -339,50 +603,129 @@ async fn create_consumer_group(
 async fn get_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
-) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<OffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state
         .queue
         .get_consumer_group_offset(&params.group_id, &params.topic)
     {
-        Ok(offset) => {
+        Ok(committed_offset) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/offset - offset: {}",
-                    params.group_id, params.topic, offset
+                    "GET /consumer/{}/topics/{}/offset - offset: {}",
+                    params.group_id, params.topic, committed_offset
                 ),
             );
-            Ok(Json(GetConsumerGroupOffsetResponse {
-                group_id: params.group_id.clone(),
-                topic: params.topic.clone(),
-                offset,
-            }))
+
+            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
+
+            // Use current timestamp for last_commit_time since we just retrieved the offset
+            let last_commit_time = Some(chrono::Utc::now().to_rfc3339());
+            let response = OffsetResponse::new(
+                params.topic.clone(),
+                committed_offset,
+                high_water_mark,
+                last_commit_time,
+            );
+
+            Ok(Json(response))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/offset failed: {error}",
-                    params.group_id, params.topic
+                    "GET /consumer/{}/topics/{}/offset failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = match &error {
+                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                    ErrorResponse::group_not_found(group_id)
+                }
+                _ => ErrorResponse::internal_error(&error.to_string()),
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
 }
 
-async fn update_consumer_group_offset(
+async fn commit_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Json(request): Json<UpdateConsumerGroupOffsetRequest>,
 ) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{}/topics/{}/offset group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{}/topics/{}/offset topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state.queue.update_consumer_group_offset(
         &params.group_id,
         params.topic.clone(),
@@ -393,7 +736,7 @@ async fn update_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "POST /api/consumer-groups/{}/topics/{}/offset - offset: {}",
+                    "POST /consumer/{}/topics/{}/offset - offset: {}",
                     params.group_id, params.topic, request.offset
                 ),
             );
@@ -408,44 +751,113 @@ async fn update_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "POST /api/consumer-groups/{}/topics/{}/offset failed: {error}",
-                    params.group_id, params.topic
+                    "POST /consumer/{}/topics/{}/offset failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = match &error {
+                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                    ErrorResponse::group_not_found(group_id)
+                }
+                _ => ErrorResponse::internal_error(&error.to_string()),
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
 }
 
-async fn poll_messages_for_consumer_group(
+async fn fetch_messages_for_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
-) -> Result<Json<ConsumerGroupPollResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate query parameters
+    if let Err(error_response) = validate_poll_query(&query) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} query validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    let limit = query.effective_limit();
+    let timeout_ms = query.effective_timeout_ms();
+    let include_headers = query.should_include_headers();
+
     let messages_result = match query.from_offset {
-        Some(offset) => {
-            // Poll from specific offset without updating consumer group offset (replay mode)
+        Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
+            &params.group_id,
+            &params.topic,
+            offset,
+            limit,
+        ),
+        None => {
             app_state
                 .queue
-                .poll_messages_for_consumer_group_from_offset(
-                    &params.group_id,
-                    &params.topic,
-                    offset,
-                    query.count,
-                )
+                .poll_records_for_consumer_group(&params.group_id, &params.topic, limit)
         }
-        None => {
-            // Normal polling from consumer group's current offset
-            app_state.queue.poll_messages_for_consumer_group(
-                &params.group_id,
-                &params.topic,
-                query.count,
-            )
+    };
+
+    let create_error_response = |error| {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset: {}",
+                params.group_id, params.topic, error
+            ),
+        );
+        match &error {
+            MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                ErrorResponse::group_not_found(group_id)
+            }
+            _ => ErrorResponse::internal_error(&error.to_string()),
         }
     };
 
@@ -460,52 +872,74 @@ async fn poll_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
                     params.group_id,
                     params.topic,
-                    query.count,
+                    limit,
+                    timeout_ms,
                     offset_info,
                     messages.len()
                 ),
             );
-            let count = messages.len();
-            let message_responses: Vec<MessageResponse> = messages
+
+            let message_responses: Vec<RecordResponse> = messages
                 .into_iter()
-                .map(|msg| MessageResponse {
+                .map(|msg| RecordResponse {
                     key: msg.record.key,
                     value: msg.record.value,
-                    headers: msg.record.headers,
+                    headers: if include_headers {
+                        msg.record.headers
+                    } else {
+                        None
+                    },
                     offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
 
-            // Get the current offset from the consumer group (whether it was updated or not)
-            let new_offset = app_state
+            let offset_response = app_state
                 .queue
-                .get_consumer_group_offset(&params.group_id, &params.topic)
-                .unwrap_or_default();
+                .get_consumer_group_offset(&params.group_id, &params.topic);
 
-            Ok(Json(ConsumerGroupPollResponse {
-                messages: message_responses,
-                count,
-                new_offset,
-            }))
+            match offset_response {
+                Ok(next_offset) => {
+                    let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
+                    let response =
+                        FetchResponse::new(message_responses, next_offset, high_water_mark);
+                    Ok(Json(response))
+                }
+                Err(error) => {
+                    log(
+                        app_state.config.log_level,
+                        LogLevel::Error,
+                        &format!(
+                            "GET /consumer/{}/topics/{}/offset: {}",
+                            params.group_id, params.topic, error
+                        ),
+                    );
+                    let error_response = create_error_response(error);
+                    Err((
+                        error_to_status_code(&error_response.error),
+                        Json(error_response),
+                    ))
+                }
+            }
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages failed: {error}",
-                    params.group_id, params.topic
+                    "GET /consumer/{}/topics/{} failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = create_error_response(error);
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }

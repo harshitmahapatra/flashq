@@ -4,16 +4,18 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 
 ## Features
 
-- **Kafka-style messaging** - Optional message keys and headers for routing/metadata
-- **Topic-based organization** - Messages organized by topic strings
-- **Offset-based positioning** - Sequential message positioning within topics
-- **Replay functionality** - Seek to specific offsets for message replay
+- **Kafka-style messaging** - Optional record keys and headers for routing/metadata
+- **Topic-based organization** - Records organized by topic strings
+- **Offset-based positioning** - Sequential record positioning within topics
+- **Replay functionality** - Seek to specific offsets for record replay
 - **Consumer groups** - Coordinated consumption with offset management
 - **HTTP REST API** - Easy integration with any HTTP client
-- **Non-destructive polling** - Messages persist after being read
-- **FIFO ordering** - Messages returned in order they were posted
+- **Non-destructive polling** - Records persist after being read
+- **FIFO ordering** - Records returned in order they were posted
 - **Thread-safe** - Concurrent posting and polling support
-- **ISO 8601 timestamps** - Human-readable message timestamps
+- **ISO 8601 timestamps** - Human-readable record timestamps
+- **OpenAPI-compliant error handling** - Structured error responses with proper HTTP status codes
+- **Request validation** - Schema validation with detailed error messages
 
 ## Quick Start
 
@@ -53,44 +55,47 @@ cargo run --bin client -- poll news 5
 
 ### HTTP API
 
-Post a simple message:
+Post a simple record:
 ```bash
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": null, "value": "Hello, World!", "headers": null}'
 ```
 
-Post a message with key and headers:
+Post a record with key and headers:
 ```bash
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": "user123", "value": "Important update", "headers": {"priority": "high", "source": "mobile"}}'
 ```
 
-Poll messages:
+Poll records:
 ```bash
-# Get all messages from topic
-curl http://127.0.0.1:8080/api/topics/news/messages
+# Get all records from topic
+curl http://127.0.0.1:8080/topics/news/messages
 
-# Limit to 5 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+# Limit to 5 records
+curl http://127.0.0.1:8080/topics/news/messages?count=5
 
 # Replay from specific offset (seek functionality)
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10&count=5
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=10&count=5
 ```
 
 Consumer group operations:
 ```bash
 # Create consumer group
-curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+curl -X POST http://127.0.0.1:8080/consumer/my-group \
   -H "Content-Type: application/json" \
   -d '{"group_id": "my-group"}'
 
-# Poll messages for consumer group (automatically advances offset)
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+# Poll records for consumer group (automatically advances offset)
+curl http://127.0.0.1:8080/consumer/my-group/topics/news
 
 # Replay from specific offset for consumer group (doesn't advance group offset)  
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5&count=3
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5&count=3
+
+# Leave consumer group
+curl -X DELETE http://127.0.0.1:8080/consumer/my-group
 ```
 
 ## Development
