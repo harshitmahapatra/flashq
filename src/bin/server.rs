@@ -674,9 +674,7 @@ async fn get_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => {
-                    ErrorResponse::topic_not_found(topic)
-                }
+                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
                 MessageQueueError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
@@ -759,9 +757,7 @@ async fn commit_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => {
-                    ErrorResponse::topic_not_found(topic)
-                }
+                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
                 MessageQueueError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
@@ -904,9 +900,7 @@ async fn fetch_messages_for_consumer_group(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => {
-                    ErrorResponse::topic_not_found(topic)
-                }
+                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
                 MessageQueueError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
