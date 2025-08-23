@@ -843,6 +843,24 @@ async fn fetch_messages_for_consumer_group(
         }
     };
 
+    let create_error_response = |error| {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset: {}",
+                params.group_id, params.topic, error
+            ),
+        );
+        match &error {
+            MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                ErrorResponse::group_not_found(group_id)
+            }
+            _ => ErrorResponse::internal_error(&error.to_string()),
+        }
+    };
+
     match messages_result {
         Ok(messages) => {
             let offset_info = match query.from_offset {
@@ -879,15 +897,33 @@ async fn fetch_messages_for_consumer_group(
                 })
                 .collect();
 
-            let next_offset = app_state
+            let offset_response = app_state
                 .queue
-                .get_consumer_group_offset(&params.group_id, &params.topic)
-                .unwrap_or_default();
+                .get_consumer_group_offset(&params.group_id, &params.topic);
 
-            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
-            let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
-
-            Ok(Json(response))
+            match offset_response {
+                Ok(next_offset) => {
+                    let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
+                    let response =
+                        FetchResponse::new(message_responses, next_offset, high_water_mark);
+                    Ok(Json(response))
+                }
+                Err(error) => {
+                    log(
+                        app_state.config.log_level,
+                        LogLevel::Error,
+                        &format!(
+                            "GET /consumer/{}/topics/{}/offset: {}",
+                            params.group_id, params.topic, error
+                        ),
+                    );
+                    let error_response = create_error_response(error);
+                    Err((
+                        error_to_status_code(&error_response.error),
+                        Json(error_response),
+                    ))
+                }
+            }
         }
         Err(error) => {
             log(
@@ -899,13 +935,7 @@ async fn fetch_messages_for_consumer_group(
                 ),
             );
 
-            let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                MessageQueueError::ConsumerGroupNotFound { group_id } => {
-                    ErrorResponse::group_not_found(group_id)
-                }
-                _ => ErrorResponse::internal_error(&error.to_string()),
-            };
+            let error_response = create_error_response(error);
 
             Err((
                 error_to_status_code(&error_response.error),
