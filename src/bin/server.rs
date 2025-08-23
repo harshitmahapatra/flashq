@@ -10,6 +10,10 @@ use message_queue_rs::{MessageQueue, MessageQueueError, MessageRecord, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
+// =============================================================================
+// CONFIGURATION & LOGGING
+// =============================================================================
+
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum LogLevel {
     Error = 0,
@@ -32,6 +36,25 @@ struct AppConfig {
     log_level: LogLevel,
 }
 
+type AppState = Arc<AppStateInner>;
+
+#[derive(Clone)]
+struct AppStateInner {
+    queue: Arc<MessageQueue>,
+    config: AppConfig,
+}
+
+fn log(app_log_level: LogLevel, message_log_level: LogLevel, message: &str) {
+    if message_log_level <= app_log_level {
+        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+        println!("{timestamp} [{}] {message}", message_log_level.as_str());
+    }
+}
+
+// =============================================================================
+// REQUEST/RESPONSE TYPES
+// =============================================================================
+
 #[derive(serde::Deserialize)]
 struct ConsumerGroupParams {
     group_id: String,
@@ -50,20 +73,9 @@ struct HealthCheckResponse {
     timestamp: u64,
 }
 
-type AppState = Arc<AppStateInner>;
-
-#[derive(Clone)]
-struct AppStateInner {
-    queue: Arc<MessageQueue>,
-    config: AppConfig,
-}
-
-fn log(app_log_level: LogLevel, message_log_level: LogLevel, message: &str) {
-    if message_log_level <= app_log_level {
-        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-        println!("{timestamp} [{}] {message}", message_log_level.as_str());
-    }
-}
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
 
 fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
     if error.is_not_found() {
@@ -74,7 +86,6 @@ fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
 }
 
 fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> {
-    // Validate key length (max 1024 characters)
     if let Some(key) = &request.key {
         if key.len() > 1024 {
             return Err(format!(
@@ -84,7 +95,6 @@ fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> 
         }
     }
 
-    // Validate value length (max 1MB = 1,048,576 characters)
     if request.value.len() > 1_048_576 {
         return Err(format!(
             "Message value exceeds maximum length of 1MB (got {} bytes)",
@@ -92,7 +102,6 @@ fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> 
         ));
     }
 
-    // Validate header values (each max 1024 characters)
     if let Some(headers) = &request.headers {
         for (header_key, header_value) in headers {
             if header_value.len() > 1024 {
@@ -108,11 +117,14 @@ fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> 
     Ok(())
 }
 
+// =============================================================================
+// MAIN APPLICATION
+// =============================================================================
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Parse port argument
     let port = if args.len() > 1 {
         match args[1].parse::<u16>() {
             Ok(p) => p,
@@ -126,7 +138,6 @@ async fn main() {
         8080
     };
 
-    // Set log level based on debug build or environment
     let log_level = if cfg!(debug_assertions) {
         LogLevel::Trace
     } else {
@@ -143,7 +154,6 @@ async fn main() {
         .route("/topics/{topic}/records", post(post_message))
         .route("/topics/{topic}/messages", get(poll_messages))
         .route("/health", get(health_check))
-        // Consumer Group API routes - OpenAPI compliant paths
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
@@ -176,6 +186,10 @@ async fn main() {
         .expect("Server failed to start");
 }
 
+// =============================================================================
+// HEALTH CHECK ENDPOINT
+// =============================================================================
+
 async fn health_check(
     State(app_state): State<AppState>,
 ) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -190,12 +204,15 @@ async fn health_check(
     }))
 }
 
+// =============================================================================
+// PRODUCER ENDPOINTS
+// =============================================================================
+
 async fn post_message(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Json(request): Json<PostMessageRequest>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Validate message size limits according to OpenAPI spec
     if let Err(validation_error) = validate_message_request(&request) {
         log(
             app_state.config.log_level,
@@ -245,16 +262,19 @@ async fn post_message(
     }
 }
 
+// =============================================================================
+// BASIC CONSUMER ENDPOINTS
+// =============================================================================
+
 async fn poll_messages(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Use effective limit from Phase 2 query parameters
     let limit = params.effective_limit();
     let timeout_ms = params.effective_timeout_ms();
     let include_headers = params.should_include_headers();
-    
+
     let messages_result = match params.from_offset {
         Some(offset) => app_state
             .queue
@@ -281,31 +301,31 @@ async fn poll_messages(
                     messages.len()
                 ),
             );
-            
-            // Convert to message responses, optionally filtering headers
+
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
                 .map(|msg| MessageResponse {
                     key: msg.record.key,
                     value: msg.record.value,
-                    headers: if include_headers { msg.record.headers } else { None },
+                    headers: if include_headers {
+                        msg.record.headers
+                    } else {
+                        None
+                    },
                     offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
 
-            // Calculate next offset
             let next_offset = if let Some(last_message) = message_responses.last() {
                 last_message.offset + 1
             } else {
-                // If no messages returned, calculate based on from_offset or use high water mark
-                params.from_offset.unwrap_or_else(|| app_state.queue.get_high_water_mark(&topic))
+                params
+                    .from_offset
+                    .unwrap_or_else(|| app_state.queue.get_high_water_mark(&topic))
             };
-            
-            // Get high water mark for the topic
-            let high_water_mark = app_state.queue.get_high_water_mark(&topic);
 
-            // Create enhanced response with lag calculation
+            let high_water_mark = app_state.queue.get_high_water_mark(&topic);
             let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
 
             Ok(Json(response))
@@ -326,10 +346,13 @@ async fn poll_messages(
     }
 }
 
+// =============================================================================
+// CONSUMER GROUP ENDPOINTS
+// =============================================================================
+
 async fn create_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
-    Json(_request): Json<CreateConsumerGroupRequest>,
 ) -> Result<Json<ConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
     match app_state
         .queue
@@ -341,15 +364,11 @@ async fn create_consumer_group(
                 LogLevel::Trace,
                 &format!("POST /consumer/{} - group created", params.group_id),
             );
-            
-            // Create enhanced consumer group response
+
             let response = ConsumerGroupResponse {
                 group_id: params.group_id,
-                state: ConsumerGroupState::Stable,
-                protocol: "range".to_string(),
-                members: 1, // Single member for now
             };
-            
+
             Ok(Json(response))
         }
         Err(error) => {
@@ -414,19 +433,17 @@ async fn get_consumer_group_offset(
                     params.group_id, params.topic, committed_offset
                 ),
             );
-            
-            // Get high water mark for lag calculation
+
             let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
-            
-            // Create enhanced offset response with lag calculation
+
             // TODO(human): Add timestamp tracking for last_commit_time
             let response = OffsetResponse::new(
                 params.topic.clone(),
                 committed_offset,
                 high_water_mark,
-                None, // last_commit_time not yet implemented
+                None,
             );
-            
+
             Ok(Json(response))
         }
         Err(error) => {
@@ -497,30 +514,23 @@ async fn fetch_messages_for_consumer_group(
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Use effective limit from Phase 2 query parameters
     let limit = query.effective_limit();
     let timeout_ms = query.effective_timeout_ms();
     let include_headers = query.should_include_headers();
-    
+
     let messages_result = match query.from_offset {
-        Some(offset) => {
-            // Poll from specific offset without updating consumer group offset (replay mode)
-            app_state
-                .queue
-                .poll_messages_for_consumer_group_from_offset(
-                    &params.group_id,
-                    &params.topic,
-                    offset,
-                    limit,
-                )
-        }
-        None => {
-            // Normal polling from consumer group's current offset
-            app_state.queue.poll_messages_for_consumer_group(
+        Some(offset) => app_state
+            .queue
+            .poll_messages_for_consumer_group_from_offset(
                 &params.group_id,
                 &params.topic,
+                offset,
                 limit,
-            )
+            ),
+        None => {
+            app_state
+                .queue
+                .poll_messages_for_consumer_group(&params.group_id, &params.topic, limit)
         }
     };
 
@@ -544,29 +554,28 @@ async fn fetch_messages_for_consumer_group(
                     messages.len()
                 ),
             );
-            
-            // Convert to message responses, optionally filtering headers
+
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
                 .map(|msg| MessageResponse {
                     key: msg.record.key,
                     value: msg.record.value,
-                    headers: if include_headers { msg.record.headers } else { None },
+                    headers: if include_headers {
+                        msg.record.headers
+                    } else {
+                        None
+                    },
                     offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
 
-            // Get the current offset from the consumer group (whether it was updated or not)
             let next_offset = app_state
                 .queue
                 .get_consumer_group_offset(&params.group_id, &params.topic)
                 .unwrap_or_default();
-            
-            // Get high water mark for the topic
-            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
 
-            // Create enhanced response with lag calculation
+            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
             let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
 
             Ok(Json(response))
