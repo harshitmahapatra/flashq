@@ -905,9 +905,7 @@ mod tests {
         let record = Record::new(None, "test".to_string(), None);
 
         // Post a message to create topic with offset 0
-        queue
-            .post_record("test-topic".to_string(), record)
-            .unwrap();
+        queue.post_record("test-topic".to_string(), record).unwrap();
 
         // Create consumer group and try to set invalid offset (beyond available messages)
         queue
