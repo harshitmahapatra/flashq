@@ -16,7 +16,7 @@ async fn test_post_message_integration() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let response_data: PostMessageResponse = response
+    let response_data: PostRecordResponse = response
         .json()
         .await
         .expect("Failed to parse response JSON");
@@ -38,7 +38,7 @@ async fn test_post_message_integration() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let response_data: PostMessageResponse = response
+    let response_data: PostRecordResponse = response
         .json()
         .await
         .expect("Failed to parse response JSON");

@@ -204,7 +204,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .post(format!("{}/topics/{}/records", self.base_url, topic))
-            .json(&PostMessageRequest {
+            .json(&PostRecordRequest {
                 key,
                 value: value.to_string(),
                 headers,

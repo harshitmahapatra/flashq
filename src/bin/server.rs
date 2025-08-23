@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, MessageRecord, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -85,11 +85,11 @@ fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
     }
 }
 
-fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> {
+fn validate_record_request(request: &PostRecordRequest) -> Result<(), String> {
     if let Some(key) = &request.key {
         if key.len() > 1024 {
             return Err(format!(
-                "Message key exceeds maximum length of 1024 characters (got {})",
+                "Record key exceeds maximum length of 1024 characters (got {})",
                 key.len()
             ));
         }
@@ -97,7 +97,7 @@ fn validate_message_request(request: &PostMessageRequest) -> Result<(), String> 
 
     if request.value.len() > 1_048_576 {
         return Err(format!(
-            "Message value exceeds maximum length of 1MB (got {} bytes)",
+            "Record value exceeds maximum length of 1MB (got {} bytes)",
             request.value.len()
         ));
     }
@@ -211,9 +211,9 @@ async fn health_check(
 async fn post_message(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
-    Json(request): Json<PostMessageRequest>,
-) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if let Err(validation_error) = validate_message_request(&request) {
+    Json(request): Json<PostRecordRequest>,
+) -> Result<Json<PostRecordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if let Err(validation_error) = validate_record_request(&request) {
         log(
             app_state.config.log_level,
             LogLevel::Error,
@@ -228,9 +228,9 @@ async fn post_message(
     }
 
     let value_for_log = request.value.clone();
-    match app_state.queue.post_message(
+    match app_state.queue.post_record(
         topic.clone(),
-        MessageRecord {
+        Record {
             key: request.key,
             value: request.value,
             headers: request.headers,
@@ -246,7 +246,7 @@ async fn post_message(
             );
             let timestamp = chrono::Utc::now().to_rfc3339();
 
-            Ok(Json(PostMessageResponse { offset, timestamp }))
+            Ok(Json(PostRecordResponse { offset, timestamp }))
         }
         Err(error) => {
             log(
@@ -278,8 +278,8 @@ async fn poll_messages(
     let messages_result = match params.from_offset {
         Some(offset) => app_state
             .queue
-            .poll_messages_from_offset(&topic, offset, limit),
-        None => app_state.queue.poll_messages(&topic, limit),
+            .poll_records_from_offset(&topic, offset, limit),
+        None => app_state.queue.poll_records(&topic, limit),
     };
 
     match messages_result {
@@ -302,9 +302,9 @@ async fn poll_messages(
                 ),
             );
 
-            let message_responses: Vec<MessageResponse> = messages
+            let message_responses: Vec<RecordResponse> = messages
                 .into_iter()
-                .map(|msg| MessageResponse {
+                .map(|msg| RecordResponse {
                     key: msg.record.key,
                     value: msg.record.value,
                     headers: if include_headers {
@@ -436,12 +436,13 @@ async fn get_consumer_group_offset(
 
             let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
 
-            // TODO(human): Add timestamp tracking for last_commit_time
+            // Use current timestamp for last_commit_time since we just retrieved the offset
+            let last_commit_time = Some(chrono::Utc::now().to_rfc3339());
             let response = OffsetResponse::new(
                 params.topic.clone(),
                 committed_offset,
                 high_water_mark,
-                None,
+                last_commit_time,
             );
 
             Ok(Json(response))
@@ -521,7 +522,7 @@ async fn fetch_messages_for_consumer_group(
     let messages_result = match query.from_offset {
         Some(offset) => app_state
             .queue
-            .poll_messages_for_consumer_group_from_offset(
+            .poll_records_for_consumer_group_from_offset(
                 &params.group_id,
                 &params.topic,
                 offset,
@@ -530,7 +531,7 @@ async fn fetch_messages_for_consumer_group(
         None => {
             app_state
                 .queue
-                .poll_messages_for_consumer_group(&params.group_id, &params.topic, limit)
+                .poll_records_for_consumer_group(&params.group_id, &params.topic, limit)
         }
     };
 
@@ -555,9 +556,9 @@ async fn fetch_messages_for_consumer_group(
                 ),
             );
 
-            let message_responses: Vec<MessageResponse> = messages
+            let message_responses: Vec<RecordResponse> = messages
                 .into_iter()
-                .map(|msg| MessageResponse {
+                .map(|msg| RecordResponse {
                     key: msg.record.key,
                     value: msg.record.value,
                     headers: if include_headers {

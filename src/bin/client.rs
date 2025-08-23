@@ -55,7 +55,7 @@ async fn main() {
 // =============================================================================
 
 async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, message: &str) {
-    let request = PostMessageRequest {
+    let request = PostRecordRequest {
         key: None,
         value: message.to_string(),
         headers: None,
@@ -66,7 +66,7 @@ async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, m
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<PostMessageResponse>().await {
+                match response.json::<PostRecordResponse>().await {
                     Ok(post_response) => {
                         println!(
                             "✓ Posted message to topic '{}' with offset: {}",
@@ -135,7 +135,7 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     }
 }
 
-fn print_message(message: &MessageResponse) {
+fn print_message(message: &RecordResponse) {
     print!(
         "{} [{}] {}",
         message.timestamp, message.offset, message.value

@@ -6,14 +6,14 @@ use std::collections::HashMap;
 // =============================================================================
 
 #[derive(Serialize, Deserialize)]
-pub struct PostMessageRequest {
+pub struct PostRecordRequest {
     pub key: Option<String>,
     pub value: String,
     pub headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PostMessageResponse {
+pub struct PostRecordResponse {
     pub offset: u64,
     pub timestamp: String,
 }
@@ -46,7 +46,7 @@ impl PollQuery {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MessageResponse {
+pub struct RecordResponse {
     pub key: Option<String>,
     pub value: String,
     pub headers: Option<HashMap<String, String>>,
@@ -55,14 +55,14 @@ pub struct MessageResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PollMessagesResponse {
-    pub messages: Vec<MessageResponse>,
+pub struct PollRecordsResponse {
+    pub records: Vec<RecordResponse>,
     pub count: usize,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct FetchResponse {
-    pub records: Vec<MessageResponse>,
+    pub records: Vec<RecordResponse>,
     pub next_offset: u64,
     pub high_water_mark: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,7 +70,7 @@ pub struct FetchResponse {
 }
 
 impl FetchResponse {
-    pub fn new(records: Vec<MessageResponse>, next_offset: u64, high_water_mark: u64) -> Self {
+    pub fn new(records: Vec<RecordResponse>, next_offset: u64, high_water_mark: u64) -> Self {
         let lag = if high_water_mark >= next_offset {
             Some(high_water_mark - next_offset)
         } else {
