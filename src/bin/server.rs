@@ -6,15 +6,66 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
-type AppState = Arc<MessageQueue>;
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+enum LogLevel {
+    Error = 0,
+    Info = 2,
+    Trace = 4,
+}
 
-fn log(level: &str, message: &str) {
-    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-    println!("{timestamp} [{level}] {message}");
+impl LogLevel {
+    fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::Error => "ERROR",
+            LogLevel::Info => "INFO",
+            LogLevel::Trace => "TRACE",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AppConfig {
+    log_level: LogLevel,
+}
+
+#[derive(serde::Deserialize)]
+struct ConsumerGroupParams {
+    group_id: String,
+    topic: String,
+}
+
+#[derive(serde::Serialize)]
+struct HealthCheckResponse {
+    status: String,
+    service: String,
+    timestamp: u64,
+}
+
+type AppState = Arc<AppStateInner>;
+
+#[derive(Clone)]
+struct AppStateInner {
+    queue: Arc<MessageQueue>,
+    config: AppConfig,
+}
+
+fn log(app_log_level: LogLevel, message_log_level: LogLevel, message: &str) {
+    if message_log_level <= app_log_level {
+        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+        println!("{timestamp} [{}] {message}", message_log_level.as_str());
+    }
+}
+
+fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
+    if error.is_not_found() {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::BAD_REQUEST
+    }
 }
 
 #[tokio::main]
@@ -35,7 +86,18 @@ async fn main() {
         8080
     };
 
-    let queue = Arc::new(MessageQueue::new());
+    // Set log level based on debug build or environment
+    let log_level = if cfg!(debug_assertions) {
+        LogLevel::Trace
+    } else {
+        LogLevel::Info
+    };
+
+    let config = AppConfig { log_level };
+    let app_state = Arc::new(AppStateInner {
+        queue: Arc::new(MessageQueue::new()),
+        config,
+    });
 
     let app = Router::new()
         .route("/api/topics/{topic}/messages", post(post_message))
@@ -55,7 +117,7 @@ async fn main() {
             "/api/consumer-groups/{group_id}/topics/{topic}/messages",
             get(poll_messages_for_consumer_group),
         )
-        .with_state(queue);
+        .with_state(app_state.clone());
 
     let bind_address = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&bind_address)
@@ -63,7 +125,8 @@ async fn main() {
         .expect("Failed to bind to address");
 
     log(
-        "INFO",
+        app_state.config.log_level,
+        LogLevel::Info,
         &format!("Message Queue Server starting on http://{bind_address}"),
     );
 
@@ -72,22 +135,34 @@ async fn main() {
         .expect("Server failed to start");
 }
 
-async fn health_check() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "healthy",
-        "service": "message-queue-rs"
+async fn health_check(
+    State(app_state): State<AppState>,
+) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
+    log(
+        app_state.config.log_level,
+        LogLevel::Trace,
+        "GET /health",
+    );
+    Ok(Json(HealthCheckResponse {
+        status: "healthy".to_string(),
+        service: "message-queue-rs".to_string(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
     }))
 }
 
 async fn post_message(
-    State(queue): State<AppState>,
+    State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Json(request): Json<PostMessageRequest>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match queue.post_message(topic.clone(), request.content.clone()) {
+    match app_state.queue.post_message(topic.clone(), request.content.clone()) {
         Ok(id) => {
             log(
-                "INFO",
+                app_state.config.log_level,
+                LogLevel::Trace,
                 &format!(
                     "POST /api/topics/{}/messages - ID: {} - '{}'",
                     topic, id, request.content
@@ -102,7 +177,8 @@ async fn post_message(
         }
         Err(error) => {
             log(
-                "ERROR",
+                app_state.config.log_level,
+                LogLevel::Error,
                 &format!("POST /api/topics/{topic}/messages failed: {error}"),
             );
             Err((
@@ -114,60 +190,61 @@ async fn post_message(
 }
 
 async fn poll_messages(
-    State(queue): State<AppState>,
+    State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
 ) -> Result<Json<PollMessagesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let _count = params.count;
-    let _topic_name = topic;
-    match queue.poll_messages(&_topic_name, _count) {
+    match app_state.queue.poll_messages(&topic, params.count) {
         Ok(messages) => {
             log(
-                "INFO",
+                app_state.config.log_level,
+                LogLevel::Trace,
                 &format!(
-                    "GET /api/topics/{}/messages - {} messages",
-                    _topic_name,
+                    "GET /api/topics/{}/messages - count: {:?} - {} messages returned",
+                    topic,
+                    params.count,
                     messages.len()
                 ),
             );
+            let count = messages.len();
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
-                .map(|message| MessageResponse {
-                    id: message.id,
-                    content: message.content,
-                    timestamp: message.timestamp,
+                .map(|msg| MessageResponse {
+                    id: msg.id,
+                    content: msg.content,
+                    timestamp: msg.timestamp,
                 })
                 .collect();
+            
             Ok(Json(PollMessagesResponse {
-                count: message_responses.len(),
                 messages: message_responses,
+                count,
             }))
         }
         Err(error) => {
             log(
-                "ERROR",
-                &format!("GET /api/topics/{_topic_name}/messages failed: {error}"),
+                app_state.config.log_level,
+                LogLevel::Error,
+                &format!("GET /api/topics/{topic}/messages failed: {error}"),
             );
             Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error }),
+                error_to_status_code(&error),
+                Json(ErrorResponse { error: error.to_string() }),
             ))
         }
     }
 }
 
 async fn create_consumer_group(
-    State(queue): State<AppState>,
+    State(app_state): State<AppState>,
     Json(request): Json<CreateConsumerGroupRequest>,
 ) -> Result<Json<CreateConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match queue.create_consumer_group(request.group_id.clone()) {
-        Ok(()) => {
+    match app_state.queue.create_consumer_group(request.group_id.clone()) {
+        Ok(_) => {
             log(
-                "INFO",
-                &format!(
-                    "POST /api/consumer-groups - Created group: {}",
-                    request.group_id
-                ),
+                app_state.config.log_level,
+                LogLevel::Trace,
+                &format!("POST /api/consumer-groups - group_id: {}", request.group_id),
             );
             Ok(Json(CreateConsumerGroupResponse {
                 group_id: request.group_id,
@@ -175,116 +252,152 @@ async fn create_consumer_group(
         }
         Err(error) => {
             log(
-                "ERROR",
+                app_state.config.log_level,
+                LogLevel::Error,
                 &format!("POST /api/consumer-groups failed: {error}"),
             );
-            Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
+            Err((
+                error_to_status_code(&error),
+                Json(ErrorResponse { error: error.to_string() }),
+            ))
         }
     }
 }
 
 async fn get_consumer_group_offset(
-    State(queue): State<AppState>,
-    Path((group_id, topic)): Path<(String, String)>,
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupParams>,
 ) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match queue.get_consumer_group_offset(&group_id, &topic) {
+    match app_state
+        .queue
+        .get_consumer_group_offset(&params.group_id, &params.topic)
+    {
         Ok(offset) => {
             log(
-                "INFO",
+                app_state.config.log_level,
+                LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{group_id}/topics/{topic}/offset - Offset: {offset}"
+                    "GET /api/consumer-groups/{}/topics/{}/offset - offset: {}",
+                    params.group_id, params.topic, offset
                 ),
             );
-            Ok(Json(GetConsumerGroupOffsetResponse {
-                group_id,
-                topic,
+            Ok(Json(GetConsumerGroupOffsetResponse { 
+                group_id: params.group_id.clone(),
+                topic: params.topic.clone(),
                 offset,
             }))
         }
         Err(error) => {
             log(
-                "ERROR",
+                app_state.config.log_level,
+                LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{group_id}/topics/{topic}/offset failed: {error}"
+                    "GET /api/consumer-groups/{}/topics/{}/offset failed: {error}",
+                    params.group_id, params.topic
                 ),
             );
-            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
+            Err((
+                error_to_status_code(&error),
+                Json(ErrorResponse { error: error.to_string() }),
+            ))
         }
     }
 }
 
 async fn update_consumer_group_offset(
-    State(queue): State<AppState>,
-    Path((group_id, topic)): Path<(String, String)>,
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupParams>,
     Json(request): Json<UpdateConsumerGroupOffsetRequest>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    match queue.update_consumer_group_offset(&group_id, topic.clone(), request.offset) {
-        Ok(()) => {
+) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match app_state
+        .queue
+        .update_consumer_group_offset(&params.group_id, params.topic.clone(), request.offset)
+    {
+        Ok(_) => {
             log(
-                "INFO",
+                app_state.config.log_level,
+                LogLevel::Trace,
                 &format!(
-                    "POST /api/consumer-groups/{}/topics/{}/offset - Updated to: {}",
-                    group_id, topic, request.offset
+                    "POST /api/consumer-groups/{}/topics/{}/offset - offset: {}",
+                    params.group_id, params.topic, request.offset
                 ),
             );
-            Ok(StatusCode::OK)
+            Ok(Json(GetConsumerGroupOffsetResponse {
+                group_id: params.group_id.clone(),
+                topic: params.topic.clone(),
+                offset: request.offset,
+            }))
         }
         Err(error) => {
             log(
-                "ERROR",
+                app_state.config.log_level,
+                LogLevel::Error,
                 &format!(
-                    "POST /api/consumer-groups/{group_id}/topics/{topic}/offset failed: {error}"
+                    "POST /api/consumer-groups/{}/topics/{}/offset failed: {error}",
+                    params.group_id, params.topic
                 ),
             );
-            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
+            Err((
+                error_to_status_code(&error),
+                Json(ErrorResponse { error: error.to_string() }),
+            ))
         }
     }
 }
 
 async fn poll_messages_for_consumer_group(
-    State(queue): State<AppState>,
-    Path((group_id, topic)): Path<(String, String)>,
-    Query(params): Query<ConsumerGroupPollQuery>,
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupParams>,
+    Query(query): Query<PollQuery>,
 ) -> Result<Json<ConsumerGroupPollResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match queue.poll_messages_for_consumer_group(&group_id, &topic, params.count) {
+    match app_state
+        .queue
+        .poll_messages_for_consumer_group(&params.group_id, &params.topic, query.count)
+    {
         Ok(messages) => {
             log(
-                "INFO",
+                app_state.config.log_level,
+                LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages - {} messages",
-                    group_id,
-                    topic,
-                    messages.len()
+                    "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?} - {} messages returned",
+                    params.group_id, params.topic, query.count, messages.len()
                 ),
             );
+            let count = messages.len();
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
-                .map(|message| MessageResponse {
-                    id: message.id,
-                    content: message.content,
-                    timestamp: message.timestamp,
+                .map(|msg| MessageResponse {
+                    id: msg.id,
+                    content: msg.content,
+                    timestamp: msg.timestamp,
                 })
                 .collect();
-
-            // Get the new offset after polling
-            let new_offset = queue
-                .get_consumer_group_offset(&group_id, &topic)
-                .unwrap_or(0);
-
+            
+            // Get the updated offset from the consumer group
+            let new_offset = match app_state.queue.get_consumer_group_offset(&params.group_id, &params.topic) {
+                Ok(offset) => offset,
+                Err(_) => 0, // Default to 0 if we can't get the offset
+            };
+            
             Ok(Json(ConsumerGroupPollResponse {
-                count: message_responses.len(),
                 messages: message_responses,
+                count,
                 new_offset,
             }))
         }
         Err(error) => {
             log(
-                "ERROR",
+                app_state.config.log_level,
+                LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{group_id}/topics/{topic}/messages failed: {error}"
+                    "GET /api/consumer-groups/{}/topics/{}/messages failed: {error}",
+                    params.group_id, params.topic
                 ),
             );
-            Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error })))
+            Err((
+                error_to_status_code(&error),
+                Json(ErrorResponse { error: error.to_string() }),
+            ))
         }
     }
 }
