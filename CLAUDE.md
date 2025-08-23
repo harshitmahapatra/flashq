@@ -23,7 +23,7 @@ This is a Kafka-inspired message queue implementation with HTTP API endpoints, c
 
 ### Testing and Quality
 - `cargo test` - Run all tests (unit + integration)
-- `cargo test --test integration_tests` - Run only integration tests
+- `cargo test --test '*'` - Run only integration tests
 - `cargo test <test_name>` - Run a specific test
 - `cargo clippy` - Run Rust linter for code quality checks
 - `cargo fmt` - Format code according to Rust style guidelines
