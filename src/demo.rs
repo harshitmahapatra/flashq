@@ -85,25 +85,6 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
     }
 }
 
-// TODO(human): Update poll_messages_interactive to work with MessageWithOffset structure
-//
-// Changes needed:
-// 1. Update field access from message.id to message.offset (line ~49)
-// 2. Update field access from message.value to message.value (already correct)
-// 3. Update timestamp display to handle ISO 8601 String format instead of u64
-// 4. Change display text from "ID:" to "Offset:" to match new terminology
-// 5. Optionally display key and headers if present for enhanced demo experience
-//
-// Example updated display:
-// println!("  📍 Offset: {}", message.offset);
-// println!("  ⏰ Timestamp: {}", message.timestamp); // Now ISO 8601 string
-// if let Some(key) = &message.key {
-//     println!("  🔑 Key: {}", key);
-// }
-// if let Some(headers) = &message.headers {
-//     println!("  📋 Headers: {:?}", headers);
-// }
-
 fn poll_messages_interactive(queue: &MessageQueue) {
     print!("📝 Enter topic name to poll from: ");
     io::stdout().flush().unwrap();
@@ -162,12 +143,11 @@ fn poll_messages_interactive(queue: &MessageQueue) {
                     println!("  📄 Value: \"{}\"", message.record.value);
 
                     // Display headers if present
-                    if let Some(ref headers) = message.record.headers {
-                        if !headers.is_empty() {
-                            println!("  🏷️  Headers:");
-                            for (header_key, header_value) in headers {
-                                println!("    {header_key}: \"{header_value}\"");
-                            }
+                    if let Some(ref headers) = message.record.headers
+                        && !headers.is_empty() {
+                        println!("  🏷️  Headers:");
+                        for (header_key, header_value) in headers {
+                            println!("    {header_key}: \"{header_value}\"");
                         }
                     }
 
