@@ -55,14 +55,14 @@ cargo run --bin client -- poll news 5
 
 Post a simple message:
 ```bash
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": null, "value": "Hello, World!", "headers": null}'
 ```
 
 Post a message with key and headers:
 ```bash
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": "user123", "value": "Important update", "headers": {"priority": "high", "source": "mobile"}}'
 ```
@@ -70,27 +70,30 @@ curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
 Poll messages:
 ```bash
 # Get all messages from topic
-curl http://127.0.0.1:8080/api/topics/news/messages
+curl http://127.0.0.1:8080/topics/news/messages
 
 # Limit to 5 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+curl http://127.0.0.1:8080/topics/news/messages?count=5
 
 # Replay from specific offset (seek functionality)
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10&count=5
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=10&count=5
 ```
 
 Consumer group operations:
 ```bash
 # Create consumer group
-curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+curl -X POST http://127.0.0.1:8080/consumer/my-group \
   -H "Content-Type: application/json" \
   -d '{"group_id": "my-group"}'
 
 # Poll messages for consumer group (automatically advances offset)
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+curl http://127.0.0.1:8080/consumer/my-group/topics/news
 
 # Replay from specific offset for consumer group (doesn't advance group offset)  
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5&count=3
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5&count=3
+
+# Leave consumer group
+curl -X DELETE http://127.0.0.1:8080/consumer/my-group
 ```
 
 ## Development

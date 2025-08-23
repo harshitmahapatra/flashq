@@ -120,7 +120,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   # Consumer Group Management
-  /consumers/{group-id}:
+  /consumer/{group-id}:
     post:
       summary: Create or join consumer group
       description: |
@@ -189,7 +189,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   # Consumer APIs
-  /consumers/{group-id}/topics/{topic}:
+  /consumer/{group-id}/topics/{topic}:
     get:
       summary: Fetch messages from current offset
       description: |
@@ -284,7 +284,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   # Offset Management
-  /consumers/{group-id}/topics/{topic}/offsets:
+  /consumer/{group-id}/topics/{topic}/offset:
     post:
       summary: Commit offset
       description: |

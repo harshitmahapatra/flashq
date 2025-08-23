@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::Utc;
 use message_queue_rs::{MessageQueue, MessageQueueError, MessageRecord, api::*};
@@ -36,6 +36,11 @@ struct AppConfig {
 struct ConsumerGroupParams {
     group_id: String,
     topic: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ConsumerGroupIdParams {
+    group_id: String,
 }
 
 #[derive(serde::Serialize)]
@@ -135,22 +140,23 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/api/topics/{topic}/messages", post(post_message))
-        .route("/api/topics/{topic}/messages", get(poll_messages))
+        .route("/topics/{topic}/records", post(post_message))
+        .route("/topics/{topic}/messages", get(poll_messages))
         .route("/health", get(health_check))
-        // Consumer Group API routes
-        .route("/api/consumer-groups", post(create_consumer_group))
+        // Consumer Group API routes - OpenAPI compliant paths
+        .route("/consumer/{group_id}", post(create_consumer_group))
+        .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
+            "/consumer/{group_id}/topics/{topic}",
+            get(fetch_messages_for_consumer_group),
+        )
+        .route(
+            "/consumer/{group_id}/topics/{topic}/offset",
             get(get_consumer_group_offset),
         )
         .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/offset",
-            post(update_consumer_group_offset),
-        )
-        .route(
-            "/api/consumer-groups/{group_id}/topics/{topic}/messages",
-            get(poll_messages_for_consumer_group),
+            "/consumer/{group_id}/topics/{topic}/offset",
+            post(commit_consumer_group_offset),
         )
         .with_state(app_state.clone());
 
@@ -304,27 +310,57 @@ async fn poll_messages(
 
 async fn create_consumer_group(
     State(app_state): State<AppState>,
-    Json(request): Json<CreateConsumerGroupRequest>,
+    Path(params): Path<ConsumerGroupIdParams>,
+    Json(_request): Json<CreateConsumerGroupRequest>,
 ) -> Result<Json<CreateConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
     match app_state
         .queue
-        .create_consumer_group(request.group_id.clone())
+        .create_consumer_group(params.group_id.clone())
     {
         Ok(_) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!("POST /api/consumer-groups - group_id: {}", request.group_id),
+                &format!("POST /consumer/{} - group created", params.group_id),
             );
             Ok(Json(CreateConsumerGroupResponse {
-                group_id: request.group_id,
+                group_id: params.group_id,
             }))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /api/consumer-groups failed: {error}"),
+                &format!("POST /consumer/{} failed: {error}", params.group_id),
+            );
+            Err((
+                error_to_status_code(&error),
+                Json(ErrorResponse {
+                    error: error.to_string(),
+                }),
+            ))
+        }
+    }
+}
+
+async fn leave_consumer_group(
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupIdParams>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    match app_state.queue.delete_consumer_group(&params.group_id) {
+        Ok(_) => {
+            log(
+                app_state.config.log_level,
+                LogLevel::Trace,
+                &format!("DELETE /consumer/{} - consumer group left", params.group_id),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            log(
+                app_state.config.log_level,
+                LogLevel::Error,
+                &format!("DELETE /consumer/{} failed: {error}", params.group_id),
             );
             Err((
                 error_to_status_code(&error),
@@ -349,7 +385,7 @@ async fn get_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/offset - offset: {}",
+                    "GET /consumer/{}/topics/{}/offset - offset: {}",
                     params.group_id, params.topic, offset
                 ),
             );
@@ -364,7 +400,7 @@ async fn get_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/offset failed: {error}",
+                    "GET /consumer/{}/topics/{}/offset failed: {error}",
                     params.group_id, params.topic
                 ),
             );
@@ -378,7 +414,7 @@ async fn get_consumer_group_offset(
     }
 }
 
-async fn update_consumer_group_offset(
+async fn commit_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Json(request): Json<UpdateConsumerGroupOffsetRequest>,
@@ -393,7 +429,7 @@ async fn update_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "POST /api/consumer-groups/{}/topics/{}/offset - offset: {}",
+                    "POST /consumer/{}/topics/{}/offset - offset: {}",
                     params.group_id, params.topic, request.offset
                 ),
             );
@@ -408,7 +444,7 @@ async fn update_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "POST /api/consumer-groups/{}/topics/{}/offset failed: {error}",
+                    "POST /consumer/{}/topics/{}/offset failed: {error}",
                     params.group_id, params.topic
                 ),
             );
@@ -422,7 +458,7 @@ async fn update_consumer_group_offset(
     }
 }
 
-async fn poll_messages_for_consumer_group(
+async fn fetch_messages_for_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
@@ -460,7 +496,7 @@ async fn poll_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages - count: {:?}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - count: {:?}{} - {} messages returned",
                     params.group_id,
                     params.topic,
                     query.count,
@@ -497,7 +533,7 @@ async fn poll_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /api/consumer-groups/{}/topics/{}/messages failed: {error}",
+                    "GET /consumer/{}/topics/{} failed: {error}",
                     params.group_id, params.topic
                 ),
             );

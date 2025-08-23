@@ -23,19 +23,20 @@ Logging level is automatically detected - no manual configuration needed.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/topics/{topic}/messages` | Post a message to a topic |
-| `GET` | `/api/topics/{topic}/messages` | Poll messages from a topic |
-| `POST` | `/api/consumer-groups` | Create a new consumer group |
-| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
-| `POST` | `/api/consumer-groups/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
-| `GET` | `/api/consumer-groups/{group_id}/topics/{topic}/messages` | Poll messages for a consumer group |
+| `POST` | `/topics/{topic}/records` | Post a message to a topic |
+| `GET` | `/topics/{topic}/messages` | Poll messages from a topic |
+| `POST` | `/consumer/{group_id}` | Create a new consumer group |
+| `DELETE` | `/consumer/{group_id}` | Leave/delete a consumer group |
+| `GET` | `/consumer/{group_id}/topics/{topic}/offset` | Get consumer group offset for a topic |
+| `POST` | `/consumer/{group_id}/topics/{topic}/offset` | Update consumer group offset for a topic |
+| `GET` | `/consumer/{group_id}/topics/{topic}` | Poll messages for a consumer group |
 | `GET` | `/health` | Health check endpoint |
 
 ## POST Message
 
 Post a new message to a specified topic.
 
-**Endpoint:** `POST /api/topics/{topic}/messages`
+**Endpoint:** `POST /topics/{topic}/records`
 
 **Request Headers:**
 ```
@@ -89,12 +90,12 @@ Content-Type: application/json
 
 ```bash
 # Simple message
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": null, "value": "Hello, World!", "headers": null}'
 
 # Message with key and headers
-curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
+curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
   -d '{"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}}'
 ```
@@ -103,7 +104,7 @@ curl -X POST http://127.0.0.1:8080/api/topics/news/messages \
 
 Retrieve messages from a specified topic.
 
-**Endpoint:** `GET /api/topics/{topic}/messages`
+**Endpoint:** `GET /topics/{topic}/messages`
 
 **Query Parameters:**
 - `count` (optional): Maximum number of messages to return
@@ -147,19 +148,19 @@ Retrieve messages from a specified topic.
 
 ```bash
 # Get all messages from topic
-curl http://127.0.0.1:8080/api/topics/news/messages
+curl http://127.0.0.1:8080/topics/news/messages
 
 # Limit to 5 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?count=5
+curl http://127.0.0.1:8080/topics/news/messages?count=5
 
 # Replay from offset 10 (seek functionality)
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=10
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=10
 
 # Replay from offset 5 with limit of 3 messages
-curl http://127.0.0.1:8080/api/topics/news/messages?from_offset=5&count=3
+curl http://127.0.0.1:8080/topics/news/messages?from_offset=5&count=3
 
 # Poll non-existent topic (returns empty)
-curl http://127.0.0.1:8080/api/topics/nonexistent/messages
+curl http://127.0.0.1:8080/topics/nonexistent/messages
 ```
 
 ## Consumer Group Operations
@@ -170,7 +171,7 @@ Consumer groups enable coordinated consumption of messages with offset tracking,
 
 Create a new consumer group with a unique group ID.
 
-**Endpoint:** `POST /api/consumer-groups`
+**Endpoint:** `POST /consumer/{group_id}`
 
 **Request Headers:**
 ```
@@ -200,16 +201,36 @@ Content-Type: application/json
 
 #### Example with curl
 ```bash
-curl -X POST http://127.0.0.1:8080/api/consumer-groups \
+curl -X POST http://127.0.0.1:8080/consumer/my-consumer-group \
   -H "Content-Type: application/json" \
   -d '{"group_id": "my-consumer-group"}'
+```
+
+### Delete Consumer Group
+
+Leave and delete a consumer group.
+
+**Endpoint:** `DELETE /consumer/{group_id}`
+
+**Success Response (204 No Content):** *(Empty response body)*
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": "No consumer group exists for group_id nonexistent-group"
+}
+```
+
+#### Example with curl
+```bash
+curl -X DELETE http://127.0.0.1:8080/consumer/my-consumer-group
 ```
 
 ### Get Consumer Group Offset
 
 Retrieve the current offset for a consumer group on a specific topic.
 
-**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/offset`
+**Endpoint:** `GET /consumer/{group_id}/topics/{topic}/offset`
 
 **Success Response (200 OK):**
 ```json
@@ -229,14 +250,14 @@ Retrieve the current offset for a consumer group on a specific topic.
 
 #### Example with curl
 ```bash
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset
+curl http://127.0.0.1:8080/consumer/my-group/topics/news/offset
 ```
 
 ### Update Consumer Group Offset
 
 Manually update the offset for a consumer group on a specific topic.
 
-**Endpoint:** `POST /api/consumer-groups/{group_id}/topics/{topic}/offset`
+**Endpoint:** `POST /consumer/{group_id}/topics/{topic}/offset`
 
 **Request Headers:**
 ```
@@ -261,7 +282,7 @@ Content-Type: application/json
 
 #### Example with curl
 ```bash
-curl -X POST http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offset \
+curl -X POST http://127.0.0.1:8080/consumer/my-group/topics/news/offset \
   -H "Content-Type: application/json" \
   -d '{"offset": 10}'
 ```
@@ -270,7 +291,7 @@ curl -X POST http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/offs
 
 Poll messages for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
 
-**Endpoint:** `GET /api/consumer-groups/{group_id}/topics/{topic}/messages`
+**Endpoint:** `GET /consumer/{group_id}/topics/{topic}`
 
 **Query Parameters:**
 - `count` (optional): Maximum number of messages to return
@@ -312,16 +333,16 @@ Poll messages for a consumer group starting from its current offset. The offset 
 #### Examples with curl
 ```bash
 # Poll all available messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages
+curl http://127.0.0.1:8080/consumer/my-group/topics/news
 
 # Limit to 3 messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?count=3
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?count=3
 
 # Replay from offset 5 (doesn't update group offset)
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=5
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5
 
 # Replay from offset 10 with limit of 2 messages
-curl http://127.0.0.1:8080/api/consumer-groups/my-group/topics/news/messages?from_offset=10&count=2
+curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=10&count=2
 ```
 
 ## Health Check

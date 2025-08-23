@@ -296,6 +296,16 @@ impl MessageQueue {
         }
     }
 
+    pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), MessageQueueError> {
+        let mut consumer_group_map = self.consumer_groups.lock().unwrap();
+        match consumer_group_map.remove(group_id) {
+            Some(_) => Ok(()),
+            None => Err(MessageQueueError::ConsumerGroupNotFound {
+                group_id: group_id.to_string(),
+            }),
+        }
+    }
+
     pub fn poll_messages_for_consumer_group(
         &self,
         group_id: &str,
@@ -748,6 +758,93 @@ mod tests {
         } else {
             panic!("Expected ConsumerGroupNotFound error");
         }
+    }
+
+    #[test]
+    fn test_delete_consumer_group_success() {
+        let queue = MessageQueue::new();
+        let group_id = "test-group";
+
+        // Create a consumer group
+        queue.create_consumer_group(group_id.to_string()).unwrap();
+        
+        // Create topic by posting a message
+        let record = MessageRecord::new(None, "test message".to_string(), None);
+        queue.post_message("topic1".to_string(), record).unwrap();
+        
+        // Set an offset to verify the group exists
+        queue.update_consumer_group_offset(group_id, "topic1".to_string(), 1).unwrap();
+        
+        // Verify the group exists by getting its offset
+        let offset = queue.get_consumer_group_offset(group_id, "topic1").unwrap();
+        assert_eq!(offset, 1);
+
+        // Delete the consumer group
+        let result = queue.delete_consumer_group(group_id);
+        assert!(result.is_ok());
+
+        // Verify the group no longer exists
+        let get_result = queue.get_consumer_group_offset(group_id, "topic1");
+        assert!(get_result.is_err());
+        
+        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id: error_group_id }) = get_result {
+            assert_eq!(error_group_id, group_id);
+        } else {
+            panic!("Expected ConsumerGroupNotFound error after deletion");
+        }
+    }
+
+    #[test]
+    fn test_delete_consumer_group_not_found() {
+        let queue = MessageQueue::new();
+        let nonexistent_group = "nonexistent-group";
+
+        // Try to delete a non-existent consumer group
+        let result = queue.delete_consumer_group(nonexistent_group);
+        assert!(result.is_err());
+
+        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+            assert_eq!(group_id, nonexistent_group);
+        } else {
+            panic!("Expected ConsumerGroupNotFound error");
+        }
+    }
+
+    #[test]
+    fn test_delete_consumer_group_multiple_topics() {
+        let queue = MessageQueue::new();
+        let group_id = "multi-topic-group";
+
+        // Create a consumer group
+        queue.create_consumer_group(group_id.to_string()).unwrap();
+        
+        // Create topics by posting messages
+        let record1 = MessageRecord::new(None, "test message 1".to_string(), None);
+        let record2 = MessageRecord::new(None, "test message 2".to_string(), None);
+        let record3 = MessageRecord::new(None, "test message 3".to_string(), None);
+        
+        queue.post_message("topic1".to_string(), record1).unwrap();
+        queue.post_message("topic2".to_string(), record2).unwrap();
+        queue.post_message("topic3".to_string(), record3).unwrap();
+        
+        // Set offsets for multiple topics
+        queue.update_consumer_group_offset(group_id, "topic1".to_string(), 1).unwrap();
+        queue.update_consumer_group_offset(group_id, "topic2".to_string(), 1).unwrap();
+        queue.update_consumer_group_offset(group_id, "topic3".to_string(), 1).unwrap();
+
+        // Verify all offsets are set
+        assert_eq!(queue.get_consumer_group_offset(group_id, "topic1").unwrap(), 1);
+        assert_eq!(queue.get_consumer_group_offset(group_id, "topic2").unwrap(), 1);
+        assert_eq!(queue.get_consumer_group_offset(group_id, "topic3").unwrap(), 1);
+
+        // Delete the consumer group
+        let result = queue.delete_consumer_group(group_id);
+        assert!(result.is_ok());
+
+        // Verify all topic offsets for this group are gone
+        assert!(queue.get_consumer_group_offset(group_id, "topic1").is_err());
+        assert!(queue.get_consumer_group_offset(group_id, "topic2").is_err());
+        assert!(queue.get_consumer_group_offset(group_id, "topic3").is_err());
     }
 
     #[test]

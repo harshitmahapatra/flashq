@@ -202,7 +202,7 @@ impl TestHelper {
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
         self.client
-            .post(format!("{}/api/topics/{}/messages", self.base_url, topic))
+            .post(format!("{}/topics/{}/records", self.base_url, topic))
             .json(&PostMessageRequest {
                 key,
                 value: value.to_string(),
@@ -219,7 +219,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         let mut request = self
             .client
-            .get(format!("{}/api/topics/{}/messages", self.base_url, topic));
+            .get(format!("{}/topics/{}/messages", self.base_url, topic));
         if let Some(c) = count {
             request = request.query(&[("count", c.to_string())]);
         }
@@ -232,7 +232,7 @@ impl TestHelper {
         group_id: &str,
     ) -> reqwest::Result<reqwest::Response> {
         self.client
-            .post(format!("{}/api/consumer-groups", self.base_url))
+            .post(format!("{}/consumer/{}", self.base_url, group_id))
             .json(&CreateConsumerGroupRequest {
                 group_id: group_id.to_string(),
             })
@@ -247,7 +247,7 @@ impl TestHelper {
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
         let mut request = self.client.get(format!(
-            "{}/api/consumer-groups/{}/topics/{}/messages",
+            "{}/consumer/{}/topics/{}",
             self.base_url, group_id, topic
         ));
         if let Some(c) = count {
@@ -264,7 +264,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .post(format!(
-                "{}/api/consumer-groups/{}/topics/{}/offset",
+                "{}/consumer/{}/topics/{}/offset",
                 self.base_url, group_id, topic
             ))
             .json(&UpdateConsumerGroupOffsetRequest { offset })
@@ -279,7 +279,7 @@ impl TestHelper {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .get(format!(
-                "{}/api/consumer-groups/{}/topics/{}/offset",
+                "{}/consumer/{}/topics/{}/offset",
                 self.base_url, group_id, topic
             ))
             .send()

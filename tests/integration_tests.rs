@@ -121,7 +121,7 @@ async fn test_end_to_end_workflow() {
     // Post all messages sequentially
     for (topic, post_message_request) in &post_message_requests {
         client
-            .post(format!("{base_url}/api/topics/{topic}/messages"))
+            .post(format!("{base_url}/topics/{topic}/records"))
             .json(&post_message_request)
             .send()
             .await
@@ -131,7 +131,7 @@ async fn test_end_to_end_workflow() {
     // Verify that messages are present and have the correct ordering and content
 
     // Test topic1: should have 2 messages in FIFO order
-    let topic1_url = format!("{base_url}/api/topics/topic1/messages");
+    let topic1_url = format!("{base_url}/topics/topic1/messages");
     let topic1_response = client
         .get(&topic1_url)
         .send()
@@ -157,7 +157,7 @@ async fn test_end_to_end_workflow() {
     assert_eq!(topic1_data.messages[1].key.as_ref().unwrap(), "user123"); // Second message has key
 
     // Test topic2: should have 1 message with metadata
-    let topic2_url = format!("{base_url}/api/topics/topic2/messages");
+    let topic2_url = format!("{base_url}/topics/topic2/messages");
     let topic2_response = client
         .get(&topic2_url)
         .send()
@@ -182,7 +182,7 @@ async fn test_end_to_end_workflow() {
     assert_eq!(headers.get("source").unwrap(), "workflow-test");
 
     // Test count parameter: limit topic1 to 1 message
-    let topic1_limited_url = format!("{base_url}/api/topics/topic1/messages?count=1");
+    let topic1_limited_url = format!("{base_url}/topics/topic1/messages?count=1");
     let limited_response = client
         .get(&topic1_limited_url)
         .send()
@@ -234,7 +234,7 @@ async fn test_error_handling() {
         .expect("Failed to start test server");
 
     let client = reqwest::Client::new();
-    let url = format!("{}/api/topics/test/messages", server.base_url());
+    let url = format!("{}/topics/test/records", server.base_url());
 
     // Test invalid JSON
     let response = client
@@ -427,7 +427,7 @@ async fn test_consumer_group_error_handling() {
     // Invalid JSON for consumer group creation (expect 400)
     let response = helper
         .client
-        .post(format!("{}/api/consumer-groups", helper.base_url))
+        .post(format!("{}/consumer/invalid-group", helper.base_url))
         .header("Content-Type", "application/json")
         .body("invalid json")
         .send()
@@ -442,7 +442,7 @@ async fn test_consumer_group_error_handling() {
     let response = helper
         .client
         .post(format!(
-            "{}/api/consumer-groups/{}/topics/{}/offset",
+            "{}/consumer/{}/topics/{}/offset",
             helper.base_url, duplicate_group, test_topic
         ))
         .header("Content-Type", "application/json")
@@ -459,7 +459,7 @@ async fn test_consumer_group_error_handling() {
     // Missing required fields in consumer group creation (expect 422)
     let response = helper
         .client
-        .post(format!("{}/api/consumer-groups", helper.base_url))
+        .post(format!("{}/consumer/missing-fields-group", helper.base_url))
         .json(&serde_json::json!({}))
         .send()
         .await
@@ -480,7 +480,7 @@ async fn test_consumer_group_error_handling() {
     let response = helper
         .client
         .post(format!(
-            "{}/api/consumer-groups/{}/topics/{}/offset",
+            "{}/consumer/{}/topics/{}/offset",
             helper.base_url, valid_group, test_topic
         ))
         .json(&serde_json::json!({"offset": -1}))
@@ -1104,7 +1104,7 @@ async fn test_message_structure_edge_cases() {
     // Test 4: Message with only value (minimal valid request)
     let response = helper
         .client
-        .post(format!("{}/api/topics/{}/messages", helper.base_url, topic))
+        .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
             "value": "Minimal message"
         }))
@@ -1116,7 +1116,7 @@ async fn test_message_structure_edge_cases() {
     // Test 5: Message with null key and headers (explicit nulls)
     let response = helper
         .client
-        .post(format!("{}/api/topics/{}/messages", helper.base_url, topic))
+        .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
             "key": null,
             "value": "Message with explicit nulls",
@@ -1184,7 +1184,7 @@ async fn test_replay_functionality_basic_polling() {
     let response = helper
         .client
         .get(format!(
-            "{}/api/topics/replay-test/messages?from_offset=0",
+            "{}/topics/replay-test/messages?from_offset=0",
             helper.base_url
         ))
         .send()
@@ -1203,7 +1203,7 @@ async fn test_replay_functionality_basic_polling() {
     let response = helper
         .client
         .get(format!(
-            "{}/api/topics/replay-test/messages?from_offset=2",
+            "{}/topics/replay-test/messages?from_offset=2",
             helper.base_url
         ))
         .send()
@@ -1222,7 +1222,7 @@ async fn test_replay_functionality_basic_polling() {
     let response = helper
         .client
         .get(format!(
-            "{}/api/topics/replay-test/messages?from_offset=1&count=2",
+            "{}/topics/replay-test/messages?from_offset=1&count=2",
             helper.base_url
         ))
         .send()
@@ -1274,7 +1274,7 @@ async fn test_consumer_group_replay_functionality() {
     // Replay from offset 0 (should NOT advance the consumer group offset)
     let response = helper
         .client
-        .get(format!("{}/api/consumer-groups/replay-group/topics/consumer-replay-test/messages?from_offset=0&count=3", helper.base_url))
+        .get(format!("{}/consumer/replay-group/topics/consumer-replay-test?from_offset=0&count=3", helper.base_url))
         .send()
         .await
         .unwrap();
@@ -1319,7 +1319,7 @@ async fn test_replay_from_invalid_offset() {
     let response = helper
         .client
         .get(format!(
-            "{}/api/topics/invalid-offset-test/messages?from_offset=5",
+            "{}/topics/invalid-offset-test/messages?from_offset=5",
             helper.base_url
         ))
         .send()
@@ -1343,7 +1343,7 @@ async fn test_replay_nonexistent_topic() {
     let response = helper
         .client
         .get(format!(
-            "{}/api/topics/nonexistent/messages?from_offset=0",
+            "{}/topics/nonexistent/messages?from_offset=0",
             helper.base_url
         ))
         .send()
