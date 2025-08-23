@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
+use message_queue_rs::{MessageQueue, Record, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -77,40 +77,132 @@ struct HealthCheckResponse {
 // UTILITY FUNCTIONS
 // =============================================================================
 
-fn error_to_status_code(error: &MessageQueueError) -> StatusCode {
-    if error.is_not_found() {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::BAD_REQUEST
+fn error_to_status_code(error_code: &str) -> StatusCode {
+    match error_code {
+        "invalid_parameter" | "validation_error" => StatusCode::BAD_REQUEST,
+
+        "topic_not_found" | "group_not_found" => StatusCode::NOT_FOUND,
+
+        "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
+
+        "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
+        
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
-fn validate_record_request(request: &PostRecordRequest) -> Result<(), String> {
+fn validate_record_request(request: &PostRecordRequest) -> Result<(), ErrorResponse> {
     if let Some(key) = &request.key {
         if key.len() > 1024 {
-            return Err(format!(
-                "Record key exceeds maximum length of 1024 characters (got {})",
-                key.len()
+            return Err(ErrorResponse::record_size_error(
+                "Record key",
+                1024,
+                key.len(),
             ));
         }
     }
 
     if request.value.len() > 1_048_576 {
-        return Err(format!(
-            "Record value exceeds maximum length of 1MB (got {} bytes)",
-            request.value.len()
+        return Err(ErrorResponse::record_size_error(
+            "Record value",
+            1_048_576,
+            request.value.len(),
         ));
     }
 
     if let Some(headers) = &request.headers {
         for (header_key, header_value) in headers {
             if header_value.len() > 1024 {
-                return Err(format!(
-                    "Header '{}' value exceeds maximum length of 1024 characters (got {})",
-                    header_key,
-                    header_value.len()
+                return Err(ErrorResponse::with_details(
+                    "validation_error",
+                    &format!(
+                        "Header '{}' value exceeds maximum length of 1024 characters (got {})",
+                        header_key,
+                        header_value.len()
+                    ),
+                    serde_json::json!({
+                        "field": format!("headers.{}", header_key),
+                        "max_size": 1024,
+                        "actual_size": header_value.len()
+                    }),
                 ));
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_topic_name(topic: &str) -> Result<(), ErrorResponse> {
+    // OpenAPI pattern: ^[a-zA-Z0-9._][a-zA-Z0-9._-]*$
+    if topic.is_empty() || topic.len() > 255 {
+        return Err(ErrorResponse::invalid_parameter(
+            "topic",
+            "Topic name must be between 1 and 255 characters",
+        ));
+    }
+
+    let chars: Vec<char> = topic.chars().collect();
+
+    // First character must be alphanumeric, dot, or underscore
+    if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
+        return Err(ErrorResponse::invalid_topic_name(topic));
+    }
+
+    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
+    for ch in chars.iter().skip(1) {
+        if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
+            return Err(ErrorResponse::invalid_topic_name(topic));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_consumer_group_id(group_id: &str) -> Result<(), ErrorResponse> {
+    // Same pattern as topic names
+    if group_id.is_empty() || group_id.len() > 255 {
+        return Err(ErrorResponse::invalid_parameter(
+            "group_id",
+            "Consumer group ID must be between 1 and 255 characters",
+        ));
+    }
+
+    let chars: Vec<char> = group_id.chars().collect();
+
+    // First character must be alphanumeric, dot, or underscore
+    if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
+        return Err(ErrorResponse::invalid_consumer_group_id(group_id));
+    }
+
+    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
+    for ch in chars.iter().skip(1) {
+        if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
+            return Err(ErrorResponse::invalid_consumer_group_id(group_id));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
+    // Validate max_records parameter
+    if let Some(max_records) = query.max_records {
+        if !(1..=10000).contains(&max_records) {
+            return Err(ErrorResponse::invalid_parameter(
+                "max_records",
+                "max_records must be between 1 and 10000",
+            ));
+        }
+    }
+
+    // Validate timeout_ms parameter
+    if let Some(timeout_ms) = query.timeout_ms {
+        if timeout_ms > 60000 {
+            return Err(ErrorResponse::invalid_parameter(
+                "timeout_ms",
+                "timeout_ms must not exceed 60000 milliseconds",
+            ));
         }
     }
 
@@ -213,17 +305,35 @@ async fn post_message(
     Path(topic): Path<String>,
     Json(request): Json<PostRecordRequest>,
 ) -> Result<Json<PostRecordResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if let Err(validation_error) = validate_record_request(&request) {
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&topic) {
         log(
             app_state.config.log_level,
             LogLevel::Error,
-            &format!("POST /api/topics/{topic}/messages validation failed: {validation_error}"),
+            &format!(
+                "POST /topics/{}/records topic validation failed: {}",
+                topic, error_response.message
+            ),
         );
         return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: validation_error,
-            }),
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate record request
+    if let Err(error_response) = validate_record_request(&request) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /topics/{}/records validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
         ));
     }
 
@@ -241,7 +351,7 @@ async fn post_message(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "POST /api/topics/{topic}/messages - Offset: {offset} - '{value_for_log}'"
+                    "POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"
                 ),
             );
             let timestamp = chrono::Utc::now().to_rfc3339();
@@ -252,11 +362,12 @@ async fn post_message(
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /api/topics/{topic}/messages failed: {error}"),
+                &format!("POST /topics/{topic}/records failed: {error}"),
             );
+            let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -271,6 +382,38 @@ async fn poll_messages(
     Path(topic): Path<String>,
     Query(params): Query<PollQuery>,
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /topics/{}/records topic validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate query parameters
+    if let Err(error_response) = validate_poll_query(&params) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /topics/{}/records query validation failed: {}",
+                topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     let limit = params.effective_limit();
     let timeout_ms = params.effective_timeout_ms();
     let include_headers = params.should_include_headers();
@@ -293,7 +436,7 @@ async fn poll_messages(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /topics/{}/messages - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
+                    "GET /topics/{}/records - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
                     topic,
                     limit,
                     timeout_ms,
@@ -334,13 +477,19 @@ async fn poll_messages(
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("GET /topics/{topic}/messages failed: {error}"),
+                &format!("GET /topics/{topic}/records failed: {error}"),
             );
+
+            // Check if it's a topic not found error
+            let error_response = if error.is_not_found() {
+                ErrorResponse::topic_not_found(&topic)
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -354,6 +503,22 @@ async fn create_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
 ) -> Result<Json<ConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{} validation failed: {}",
+                params.group_id, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state
         .queue
         .create_consumer_group(params.group_id.clone())
@@ -375,13 +540,13 @@ async fn create_consumer_group(
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /consumer/{} failed: {error}", params.group_id),
+                &format!("POST /consumer/{} failed: {}", params.group_id, error),
             );
+
+            let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -391,6 +556,22 @@ async fn leave_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "DELETE /consumer/{} validation failed: {}",
+                params.group_id, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state.queue.delete_consumer_group(&params.group_id) {
         Ok(_) => {
             log(
@@ -404,13 +585,18 @@ async fn leave_consumer_group(
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("DELETE /consumer/{} failed: {error}", params.group_id),
+                &format!("DELETE /consumer/{} failed: {}", params.group_id, error),
             );
+
+            let error_response = if error.is_not_found() {
+                ErrorResponse::group_not_found(&params.group_id)
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -420,6 +606,38 @@ async fn get_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
 ) -> Result<Json<OffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{}/offset topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state
         .queue
         .get_consumer_group_offset(&params.group_id, &params.topic)
@@ -452,15 +670,25 @@ async fn get_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /consumer/{}/topics/{}/offset failed: {error}",
-                    params.group_id, params.topic
+                    "GET /consumer/{}/topics/{}/offset failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = if error.is_not_found() {
+                // Could be either group not found or topic not found
+                if error.to_string().contains("group") {
+                    ErrorResponse::group_not_found(&params.group_id)
+                } else {
+                    ErrorResponse::topic_not_found(&params.topic)
+                }
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -471,6 +699,38 @@ async fn commit_consumer_group_offset(
     Path(params): Path<ConsumerGroupParams>,
     Json(request): Json<UpdateConsumerGroupOffsetRequest>,
 ) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{}/topics/{}/offset group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "POST /consumer/{}/topics/{}/offset topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     match app_state.queue.update_consumer_group_offset(
         &params.group_id,
         params.topic.clone(),
@@ -496,15 +756,24 @@ async fn commit_consumer_group_offset(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "POST /consumer/{}/topics/{}/offset failed: {error}",
-                    params.group_id, params.topic
+                    "POST /consumer/{}/topics/{}/offset failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = if error.is_not_found() {
+                if error.to_string().contains("group") {
+                    ErrorResponse::group_not_found(&params.group_id)
+                } else {
+                    ErrorResponse::topic_not_found(&params.topic)
+                }
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }
@@ -515,19 +784,65 @@ async fn fetch_messages_for_consumer_group(
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} group validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} topic validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate query parameters
+    if let Err(error_response) = validate_poll_query(&query) {
+        log(
+            app_state.config.log_level,
+            LogLevel::Error,
+            &format!(
+                "GET /consumer/{}/topics/{} query validation failed: {}",
+                params.group_id, params.topic, error_response.message
+            ),
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
     let limit = query.effective_limit();
     let timeout_ms = query.effective_timeout_ms();
     let include_headers = query.should_include_headers();
 
     let messages_result = match query.from_offset {
-        Some(offset) => app_state
-            .queue
-            .poll_records_for_consumer_group_from_offset(
-                &params.group_id,
-                &params.topic,
-                offset,
-                limit,
-            ),
+        Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
+            &params.group_id,
+            &params.topic,
+            offset,
+            limit,
+        ),
         None => {
             app_state
                 .queue
@@ -586,15 +901,24 @@ async fn fetch_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Error,
                 &format!(
-                    "GET /consumer/{}/topics/{} failed: {error}",
-                    params.group_id, params.topic
+                    "GET /consumer/{}/topics/{} failed: {}",
+                    params.group_id, params.topic, error
                 ),
             );
+
+            let error_response = if error.is_not_found() {
+                if error.to_string().contains("group") {
+                    ErrorResponse::group_not_found(&params.group_id)
+                } else {
+                    ErrorResponse::topic_not_found(&params.topic)
+                }
+            } else {
+                ErrorResponse::internal_error(&error.to_string())
+            };
+
             Err((
-                error_to_status_code(&error),
-                Json(ErrorResponse {
-                    error: error.to_string(),
-                }),
+                error_to_status_code(&error_response.error),
+                Json(error_response),
             ))
         }
     }

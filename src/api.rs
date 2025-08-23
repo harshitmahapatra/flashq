@@ -141,7 +141,91 @@ impl OffsetResponse {
 // SHARED/ERROR TYPES
 // =============================================================================
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ErrorResponse {
     pub error: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+impl ErrorResponse {
+    pub fn new(error: &str, message: &str) -> Self {
+        Self {
+            error: error.to_string(),
+            message: message.to_string(),
+            details: None,
+        }
+    }
+
+    pub fn with_details(error: &str, message: &str, details: serde_json::Value) -> Self {
+        Self {
+            error: error.to_string(),
+            message: message.to_string(),
+            details: Some(details),
+        }
+    }
+
+    // Validation error creation methods
+    pub fn validation_error(message: &str) -> Self {
+        Self::new("validation_error", message)
+    }
+
+    pub fn invalid_parameter(param_name: &str, message: &str) -> Self {
+        Self::with_details(
+            "invalid_parameter",
+            message,
+            serde_json::json!({ "parameter": param_name }),
+        )
+    }
+
+    pub fn topic_not_found(topic: &str) -> Self {
+        Self::with_details(
+            "topic_not_found",
+            &format!("Topic '{topic}' not found"),
+            serde_json::json!({ "topic": topic }),
+        )
+    }
+
+    pub fn group_not_found(group_id: &str) -> Self {
+        Self::with_details(
+            "group_not_found",
+            &format!("Consumer group '{group_id}' not found"),
+            serde_json::json!({ "group_id": group_id }),
+        )
+    }
+
+    pub fn internal_error(message: &str) -> Self {
+        Self::new("internal_error", message)
+    }
+
+    pub fn record_size_error(field: &str, max_size: usize, actual_size: usize) -> Self {
+        Self::with_details(
+            "validation_error",
+            &format!(
+                "{field} exceeds maximum length of {max_size} (got {actual_size})"
+            ),
+            serde_json::json!({
+                "field": field,
+                "max_size": max_size,
+                "actual_size": actual_size
+            }),
+        )
+    }
+
+    pub fn invalid_topic_name(topic: &str) -> Self {
+        Self::with_details(
+            "invalid_parameter",
+            "Topic name must contain only alphanumeric characters, dots, underscores, and hyphens",
+            serde_json::json!({ "parameter": "topic", "value": topic }),
+        )
+    }
+
+    pub fn invalid_consumer_group_id(group_id: &str) -> Self {
+        Self::with_details(
+            "invalid_parameter",
+            "Consumer group ID must contain only alphanumeric characters, dots, underscores, and hyphens",
+            serde_json::json!({ "parameter": "group_id", "value": group_id }),
+        )
+    }
 }

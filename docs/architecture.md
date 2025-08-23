@@ -20,7 +20,7 @@ The project follows Rust best practices with separate library and binary crates:
 - **RecordResponse** - Individual record in poll responses
 - **FetchResponse** - Complete poll response with record array
 - **PollQuery** - Query parameters for polling (count limits, offset positioning)
-- **ErrorResponse** - Standardized error response format
+- **ErrorResponse** - OpenAPI-compliant structured error responses with semantic error codes
 - All structures use serde for JSON serialization/deserialization
 
 ### Binary Crates
@@ -52,7 +52,9 @@ The demo module provides an educational interactive demonstration:
 - Endpoints for posting and polling records
 - Health check endpoint for monitoring
 - JSON request/response handling
-- Error handling with proper HTTP status codes
+- OpenAPI-compliant error handling with structured responses and semantic error codes
+- Request validation with detailed error messages and field-specific context
+- HTTP status code mapping (400, 404, 422, 500) based on error types
 
 #### CLI Client Binary (`src/bin/client.rs`)
 - Command-line interface for interacting with HTTP server
@@ -65,7 +67,7 @@ The demo module provides an educational interactive demonstration:
 - HTTP API validation with real server instances
 - FIFO ordering verification 
 - Count parameter testing for polling limits
-- Error handling validation for invalid requests
+- Comprehensive error handling validation including schema validation and edge cases
 - Health check endpoint testing
 
 ## Data Flow
@@ -101,6 +103,14 @@ The demo module provides an educational interactive demonstration:
 - JSON for structured communication
 - Separate request/response types for type safety
 - Optional query parameters for flexible polling
+
+### Error Handling Architecture
+- **OpenAPI Compliance**: Structured error responses with `error`, `message`, and optional `details` fields
+- **Semantic Error Codes**: Machine-readable error identifiers (`validation_error`, `topic_not_found`, etc.)
+- **HTTP Status Code Mapping**: Proper status codes based on error type (400/404/422/500)
+- **Request Validation**: Multi-layer validation including schema, size limits, and pattern matching
+- **Early Validation**: Invalid requests rejected before reaching business logic
+- **Contextual Details**: Error responses include specific field information and limit details
 
 ## Performance Characteristics
 

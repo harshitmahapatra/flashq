@@ -400,17 +400,49 @@ Structure returned when polling messages:
 
 ### Error Responses
 
-All API errors return a standardized error response:
+All API errors return OpenAPI-compliant structured error responses:
 
 ```json
 {
-  "error": "Human-readable error description"
+  "error": "error_code_identifier",
+  "message": "Human-readable error description", 
+  "details": {
+    "parameter": "field_name",
+    "max_size": 1024,
+    "actual_size": 1500
+  }
 }
 ```
 
-Common HTTP status codes:
-- `400 Bad Request` - Invalid request format or missing required fields
+**Error Response Fields:**
+- `error` - Machine-readable error code for programmatic handling
+- `message` - Human-readable error description  
+- `details` - Optional additional context (field name, limits, etc.)
+
+**Common Error Codes:**
+- `validation_error` - Request validation failed (size limits, format issues)
+- `invalid_parameter` - Parameter format/pattern validation failed
+- `topic_not_found` - Requested topic does not exist  
+- `group_not_found` - Consumer group does not exist
+- `internal_error` - Server-side processing error
+
+**HTTP Status Codes:**
+- `200 OK` - Request successful, response includes data
+- `201 Created` - Resource created successfully (consumer groups)
+- `204 No Content` - Request successful, no response body (delete operations)
+- `400 Bad Request` - Invalid request parameters or validation errors
+- `404 Not Found` - Topic or consumer group not found
+- `422 Unprocessable Entity` - Request format valid but semantically incorrect
 - `500 Internal Server Error` - Server-side processing error
+
+**Validation Rules:**
+- Topic names: 1-255 characters, pattern `^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`
+- Consumer group IDs: 1-255 characters, same pattern as topics
+- Record keys: Maximum 1024 characters
+- Record values: Maximum 1MB (1,048,576 bytes)
+- Header values: Maximum 1024 characters each
+- Query parameter `max_records`: 1-10000 range
+- Query parameter `timeout_ms`: 0-60000 range
 
 ## Message Ordering
 

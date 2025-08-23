@@ -84,8 +84,33 @@ Current test coverage includes:
 - Polling with count limits
 - Non-destructive polling (records persist)
 - HTTP API endpoints (POST/GET)
-- Error handling for invalid requests
+- Error handling for invalid requests with OpenAPI-compliant structured responses
+- Request validation including schema validation, size limits, and pattern matching
+- HTTP status code verification (400, 404, 422, 500)
 - Health check endpoint
+
+### Validation Testing
+
+The project includes comprehensive validation tests for OpenAPI compliance:
+
+```bash
+# Test error response structure
+cargo test test_server_error_handling
+
+# Test request validation limits  
+cargo test test_message_size_and_validation_limits
+
+# Test malformed requests
+cargo test test_malformed_requests
+```
+
+**Validation Test Coverage:**
+- Record size limits (keys: 1024 chars, values: 1MB, headers: 1024 chars)
+- Topic name pattern validation (`^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`)
+- Consumer group ID pattern validation
+- Query parameter limits (`max_records`: 1-10000, `timeout_ms`: 0-60000)
+- HTTP status code correctness (400, 404, 422, 500)
+- Structured error response format with `error`, `message`, and `details` fields
 
 ## Code Quality
 

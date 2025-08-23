@@ -14,6 +14,8 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 - **FIFO ordering** - Records returned in order they were posted
 - **Thread-safe** - Concurrent posting and polling support
 - **ISO 8601 timestamps** - Human-readable record timestamps
+- **OpenAPI-compliant error handling** - Structured error responses with proper HTTP status codes
+- **Request validation** - Schema validation with detailed error messages
 
 ## Quick Start
 
