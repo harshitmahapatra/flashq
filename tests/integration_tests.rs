@@ -11,8 +11,9 @@ async fn test_post_message_integration() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
 
+    // Test basic message posting with new structure
     let response = helper
-        .post_message("test", "Integration test message")
+        .post_message_with_record("test", None, "Integration test message", None)
         .await
         .unwrap();
     assert!(response.status().is_success());
@@ -21,8 +22,30 @@ async fn test_post_message_integration() {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.id, 0); // First message should have ID 0
-    assert!(response_data.timestamp > 0);
+    assert_eq!(response_data.offset, 0); // First message should have offset 0
+    assert!(response_data.timestamp.contains("T")); // ISO 8601 format check
+
+    // Test message with key and headers
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("source".to_string(), "integration-test".to_string());
+    headers.insert("priority".to_string(), "high".to_string());
+
+    let response = helper
+        .post_message_with_record(
+            "test",
+            Some("user123".to_string()),
+            "Message with metadata",
+            Some(headers),
+        )
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+
+    let response_data: PostMessageResponse = response
+        .json()
+        .await
+        .expect("Failed to parse response JSON");
+    assert_eq!(response_data.offset, 1); // Second message should have offset 1
 }
 
 #[tokio::test]
@@ -46,7 +69,13 @@ async fn test_poll_messages_integration() {
     let poll_data = helper
         .assert_poll_response(response, 1, Some(&["Message for polling test"]))
         .await;
-    assert_eq!(poll_data.messages[0].id, 0);
+
+    // Verify MessageWithOffset structure
+    assert_eq!(poll_data.messages[0].offset, 0); // Changed from id to offset
+    assert_eq!(poll_data.messages[0].value, "Message for polling test"); // Changed from content to value
+    assert!(poll_data.messages[0].key.is_none()); // Key should be None for basic message
+    assert!(poll_data.messages[0].headers.is_none()); // Headers should be None for basic message
+    assert!(poll_data.messages[0].timestamp.contains("T")); // ISO 8601 timestamp format
 }
 
 #[tokio::test]
@@ -62,19 +91,29 @@ async fn test_end_to_end_workflow() {
         (
             "topic1".to_string(),
             PostMessageRequest {
-                content: "topic1 message1".to_string(),
+                key: None,
+                value: "topic1 message1".to_string(),
+                headers: None,
             },
         ),
         (
             "topic2".to_string(),
             PostMessageRequest {
-                content: "topic2 message1".to_string(),
+                key: Some("user456".to_string()),
+                value: "topic2 message1".to_string(),
+                headers: {
+                    let mut headers = std::collections::HashMap::new();
+                    headers.insert("source".to_string(), "workflow-test".to_string());
+                    Some(headers)
+                },
             },
         ),
         (
             "topic1".to_string(),
             PostMessageRequest {
-                content: "topic1 message2".to_string(),
+                key: Some("user123".to_string()),
+                value: "topic1 message2".to_string(),
+                headers: None,
             },
         ),
     ];
@@ -108,12 +147,16 @@ async fn test_end_to_end_workflow() {
 
     assert_eq!(topic1_data.count, 2);
     assert_eq!(topic1_data.messages.len(), 2);
-    assert_eq!(topic1_data.messages[0].content, "topic1 message1");
-    assert_eq!(topic1_data.messages[1].content, "topic1 message2");
-    assert_eq!(topic1_data.messages[0].id, 0); // First message in topic1 (offset 0)
-    assert_eq!(topic1_data.messages[1].id, 1); // Second message in topic1 (offset 1)
 
-    // Test topic2: should have 1 message
+    // Verify MessageWithOffset structure for topic1
+    assert_eq!(topic1_data.messages[0].value, "topic1 message1");
+    assert_eq!(topic1_data.messages[1].value, "topic1 message2");
+    assert_eq!(topic1_data.messages[0].offset, 0); // First message in topic1 (offset 0)
+    assert_eq!(topic1_data.messages[1].offset, 1); // Second message in topic1 (offset 1)
+    assert!(topic1_data.messages[0].key.is_none()); // First message has no key
+    assert_eq!(topic1_data.messages[1].key.as_ref().unwrap(), "user123"); // Second message has key
+
+    // Test topic2: should have 1 message with metadata
     let topic2_url = format!("{base_url}/api/topics/topic2/messages");
     let topic2_response = client
         .get(&topic2_url)
@@ -130,8 +173,13 @@ async fn test_end_to_end_workflow() {
 
     assert_eq!(topic2_data.count, 1);
     assert_eq!(topic2_data.messages.len(), 1);
-    assert_eq!(topic2_data.messages[0].content, "topic2 message1");
-    assert_eq!(topic2_data.messages[0].id, 0); // First message in topic2 (offset 0)
+    assert_eq!(topic2_data.messages[0].value, "topic2 message1");
+    assert_eq!(topic2_data.messages[0].offset, 0); // First message in topic2 (offset 0)
+    assert_eq!(topic2_data.messages[0].key.as_ref().unwrap(), "user456");
+
+    // Verify headers
+    let headers = topic2_data.messages[0].headers.as_ref().unwrap();
+    assert_eq!(headers.get("source").unwrap(), "workflow-test");
 
     // Test count parameter: limit topic1 to 1 message
     let topic1_limited_url = format!("{base_url}/api/topics/topic1/messages?count=1");
@@ -150,10 +198,12 @@ async fn test_end_to_end_workflow() {
 
     assert_eq!(limited_data.count, 1);
     assert_eq!(limited_data.messages.len(), 1);
-    assert_eq!(limited_data.messages[0].content, "topic1 message1"); // Should get first message
+    assert_eq!(limited_data.messages[0].value, "topic1 message1"); // Should get first message
 
-    // Verify timestamps are in ascending order (FIFO)
+    // Verify timestamps are in ascending order (FIFO) and in ISO 8601 format
     assert!(topic1_data.messages[0].timestamp <= topic1_data.messages[1].timestamp);
+    assert!(topic1_data.messages[0].timestamp.contains("T")); // ISO 8601 format
+    assert!(topic1_data.messages[1].timestamp.contains("T")); // ISO 8601 format
 }
 
 #[tokio::test]
@@ -196,6 +246,30 @@ async fn test_error_handling() {
         .expect("Failed to send invalid request");
 
     assert!(!response.status().is_success());
+
+    // Test missing required 'value' field
+    let response = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "key": "test-key"
+        }))
+        .send()
+        .await
+        .expect("Failed to send request without value");
+
+    assert!(!response.status().is_success());
+
+    // Test valid minimal request (only value field)
+    let response = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "value": "test message"
+        }))
+        .send()
+        .await
+        .expect("Failed to send minimal valid request");
+
+    assert!(response.status().is_success());
 }
 
 #[tokio::test]
@@ -578,7 +652,7 @@ async fn test_consumer_group_offset_advancement() {
 
     assert_eq!(poll_data.count, 1);
     assert_eq!(poll_data.messages.len(), 1);
-    assert_eq!(poll_data.messages[0].content, "Message 0");
+    assert_eq!(poll_data.messages[0].value, "Message 0");
     assert_eq!(
         poll_data.new_offset, 1,
         "Offset should advance to 1 after consuming 1 message"
@@ -593,8 +667,8 @@ async fn test_consumer_group_offset_advancement() {
 
     assert_eq!(poll_data.count, 2);
     assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].content, "Message 1");
-    assert_eq!(poll_data.messages[1].content, "Message 2");
+    assert_eq!(poll_data.messages[0].value, "Message 1");
+    assert_eq!(poll_data.messages[1].value, "Message 2");
     assert_eq!(
         poll_data.new_offset, 3,
         "Offset should advance to 3 after consuming 2 more messages"
@@ -609,8 +683,8 @@ async fn test_consumer_group_offset_advancement() {
 
     assert_eq!(poll_data.count, 2);
     assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].content, "Message 3");
-    assert_eq!(poll_data.messages[1].content, "Message 4");
+    assert_eq!(poll_data.messages[0].value, "Message 3");
+    assert_eq!(poll_data.messages[1].value, "Message 4");
     assert_eq!(
         poll_data.new_offset, 5,
         "Offset should advance to 5 after consuming all remaining messages"
@@ -646,8 +720,8 @@ async fn test_consumer_group_offset_advancement() {
 
     assert_eq!(poll_data.count, 2);
     assert_eq!(poll_data.messages.len(), 2);
-    assert_eq!(poll_data.messages[0].content, "Message 5");
-    assert_eq!(poll_data.messages[1].content, "Message 6");
+    assert_eq!(poll_data.messages[0].value, "Message 5");
+    assert_eq!(poll_data.messages[1].value, "Message 6");
     assert_eq!(
         poll_data.new_offset, 7,
         "Offset should advance to 7 after consuming new messages"
@@ -693,7 +767,7 @@ async fn test_consumer_group_concurrent_operations() {
                     // Verify FIFO ordering within each poll
                     for i in 1..messages.len() {
                         assert!(
-                            messages[i - 1].id < messages[i].id,
+                            messages[i - 1].offset < messages[i].offset,
                             "Messages should maintain FIFO order"
                         );
                     }
@@ -716,9 +790,9 @@ async fn test_consumer_group_concurrent_operations() {
 
         // Verify content and uniqueness
         for (i, msg) in messages.iter().enumerate() {
-            assert_eq!(msg.content, format!("Message {i}"));
+            assert_eq!(msg.value, format!("Message {i}"));
         }
-        let ids: std::collections::HashSet<_> = messages.iter().map(|m| m.id).collect();
+        let ids: std::collections::HashSet<_> = messages.iter().map(|m| m.offset).collect();
         assert_eq!(
             ids.len(),
             10,

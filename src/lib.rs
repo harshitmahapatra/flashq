@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod demo;
 
@@ -60,29 +59,48 @@ impl MessageQueueError {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Message {
-    pub content: String,
-    pub timestamp: u64,
-    pub id: u64,
+pub struct MessageRecord {
+    pub key: Option<String>,
+    pub value: String,
+    pub headers: Option<HashMap<String, String>>,
 }
 
-impl Message {
-    pub fn new(content: String, id: u64) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MessageWithOffset {
+    #[serde(flatten)]
+    pub record: MessageRecord,
+    pub offset: u64,
+    pub timestamp: String,
+}
 
-        Message {
-            content,
-            timestamp,
-            id,
+impl MessageRecord {
+    pub fn new(
+        key: Option<String>,
+        value: String,
+        headers: Option<HashMap<String, String>>,
+    ) -> Self {
+        Self {
+            key,
+            value,
+            headers,
         }
     }
 }
+
+impl MessageWithOffset {
+    pub fn from_record(record: MessageRecord, offset: u64) -> Self {
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        Self {
+            record,
+            offset,
+            timestamp,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TopicLog {
-    messages: Vec<Message>,
+    messages: Vec<MessageWithOffset>,
     next_offset: u64,
 }
 
@@ -100,19 +118,19 @@ impl TopicLog {
         }
     }
 
-    pub fn append(&mut self, content: String, timestamp: u64) -> u64 {
+    pub fn append(&mut self, record: MessageRecord) -> u64 {
         let current_offset = self.next_offset;
-        let message = Message {
-            content,
-            timestamp,
-            id: current_offset,
-        };
-        self.messages.push(message);
+        let message_with_offset = MessageWithOffset::from_record(record, current_offset);
+        self.messages.push(message_with_offset);
         self.next_offset += 1;
         current_offset
     }
 
-    pub fn get_messages_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<&Message> {
+    pub fn get_messages_from_offset(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Vec<&MessageWithOffset> {
         let start_index = offset as usize;
         if start_index >= self.messages.len() {
             return Vec::new();
@@ -184,21 +202,17 @@ impl MessageQueue {
         }
     }
 
-    pub fn post_message(&self, topic: String, content: String) -> Result<u64, String> {
-        let current_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    pub fn post_message(&self, topic: String, record: MessageRecord) -> Result<u64, String> {
         let mut topic_log_map = self.topics.lock().unwrap();
         let topic_log = topic_log_map.entry(topic).or_default();
-        Ok(topic_log.append(content, current_timestamp))
+        Ok(topic_log.append(record))
     }
 
     pub fn poll_messages(
         &self,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<Message>, MessageQueueError> {
+    ) -> Result<Vec<MessageWithOffset>, MessageQueueError> {
         self.poll_messages_from_offset(topic, 0, count)
     }
 
@@ -207,7 +221,7 @@ impl MessageQueue {
         topic: &str,
         offset: u64,
         count: Option<usize>,
-    ) -> Result<Vec<Message>, MessageQueueError> {
+    ) -> Result<Vec<MessageWithOffset>, MessageQueueError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
             Some(topic_log) => Ok(topic_log
@@ -287,7 +301,7 @@ impl MessageQueue {
         group_id: &str,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<Message>, MessageQueueError> {
+    ) -> Result<Vec<MessageWithOffset>, MessageQueueError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
         let messages = self.poll_messages_from_offset(topic, current_offset, count)?;
         let new_offset = current_offset + messages.len() as u64;
@@ -301,13 +315,41 @@ pub mod api;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    // MessageRecord Tests
+    #[test]
+    fn test_message_record_creation() {
+        let record = MessageRecord::new(None, "test content".to_string(), None);
+        assert_eq!(record.value, "test content");
+        assert!(record.key.is_none());
+        assert!(record.headers.is_none());
+    }
 
     #[test]
-    fn test_message_creation() {
-        let message = Message::new("test content".to_string(), 42);
-        assert_eq!(message.content, "test content");
-        assert_eq!(message.id, 42);
-        assert!(message.timestamp > 0);
+    fn test_message_record_with_key_and_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("source".to_string(), "test".to_string());
+
+        let record = MessageRecord::new(
+            Some("user123".to_string()),
+            "test message".to_string(),
+            Some(headers.clone()),
+        );
+
+        assert_eq!(record.key.as_ref().unwrap(), "user123");
+        assert_eq!(record.value, "test message");
+        assert_eq!(record.headers.as_ref().unwrap(), &headers);
+    }
+
+    #[test]
+    fn test_message_with_offset_creation() {
+        let record = MessageRecord::new(None, "test content".to_string(), None);
+        let message_with_offset = MessageWithOffset::from_record(record.clone(), 42);
+
+        assert_eq!(message_with_offset.record.value, "test content");
+        assert_eq!(message_with_offset.offset, 42);
+        assert!(message_with_offset.timestamp.contains("T")); // ISO 8601 format
     }
 
     #[test]
@@ -320,119 +362,149 @@ mod tests {
     #[test]
     fn test_post_single_message() {
         let queue = MessageQueue::new();
-        let result = queue.post_message("test_topic".to_string(), "test message".to_string());
+        let record = MessageRecord::new(None, "test message".to_string(), None);
+        let result = queue.post_message("test_topic".to_string(), record);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0); // First message should have ID 0
+        assert_eq!(result.unwrap(), 0); // First message should have offset 0
     }
 
     #[test]
-    fn test_post_multiple_messages_increment_id() {
+    fn test_post_multiple_messages_increment_offset() {
         let queue = MessageQueue::new();
 
-        let id1 = queue
-            .post_message("topic".to_string(), "msg1".to_string())
-            .unwrap();
-        let id2 = queue
-            .post_message("topic".to_string(), "msg2".to_string())
-            .unwrap();
-        let id3 = queue
-            .post_message("different_topic".to_string(), "msg3".to_string())
+        let record1 = MessageRecord::new(None, "msg1".to_string(), None);
+        let record2 = MessageRecord::new(None, "msg2".to_string(), None);
+        let record3 = MessageRecord::new(None, "msg3".to_string(), None);
+
+        let offset1 = queue.post_message("topic".to_string(), record1).unwrap();
+        let offset2 = queue.post_message("topic".to_string(), record2).unwrap();
+        let offset3 = queue
+            .post_message("different_topic".to_string(), record3)
             .unwrap();
 
-        assert_eq!(id1, 0);
-        assert_eq!(id2, 1);
-        assert_eq!(id3, 0);
+        assert_eq!(offset1, 0);
+        assert_eq!(offset2, 1);
+        assert_eq!(offset3, 0); // Different topic starts from 0
     }
 
     #[test]
     fn test_poll_messages_from_existing_topic() {
         let queue = MessageQueue::new();
 
-        queue
-            .post_message("news".to_string(), "first news".to_string())
-            .unwrap();
-        queue
-            .post_message("news".to_string(), "second news".to_string())
-            .unwrap();
+        let record1 = MessageRecord::new(None, "first news".to_string(), None);
+        let record2 = MessageRecord::new(None, "second news".to_string(), None);
+
+        queue.post_message("news".to_string(), record1).unwrap();
+        queue.post_message("news".to_string(), record2).unwrap();
 
         let messages = queue.poll_messages("news", None).unwrap();
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "first news");
-        assert_eq!(messages[1].content, "second news");
+        assert_eq!(messages[0].record.value, "first news");
+        assert_eq!(messages[1].record.value, "second news");
+        assert_eq!(messages[0].offset, 0);
+        assert_eq!(messages[1].offset, 1);
     }
 
     #[test]
     fn test_poll_messages_with_count_limit() {
         let queue = MessageQueue::new();
 
-        queue
-            .post_message("news".to_string(), "first news".to_string())
-            .unwrap();
-        queue
-            .post_message("news".to_string(), "second news".to_string())
-            .unwrap();
+        let record1 = MessageRecord::new(None, "first news".to_string(), None);
+        let record2 = MessageRecord::new(None, "second news".to_string(), None);
+
+        queue.post_message("news".to_string(), record1).unwrap();
+        queue.post_message("news".to_string(), record2).unwrap();
 
         let messages = queue.poll_messages("news", Some(1)).unwrap();
         assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].record.value, "first news");
     }
 
     #[test]
     fn test_poll_nonexistent_topic() {
         let queue = MessageQueue::new();
         let poll_result = queue.poll_messages("news", None);
-        poll_result.expect_err("Testing: The topic news does not exist!");
+        poll_result.expect_err("Expected error for non-existent topic");
     }
 
     #[test]
     fn test_fifo_ordering() {
         let queue = MessageQueue::new();
 
-        queue
-            .post_message("ordered".to_string(), "first".to_string())
-            .unwrap();
-        queue
-            .post_message("ordered".to_string(), "second".to_string())
-            .unwrap();
-        queue
-            .post_message("ordered".to_string(), "third".to_string())
-            .unwrap();
+        let record1 = MessageRecord::new(None, "first".to_string(), None);
+        let record2 = MessageRecord::new(None, "second".to_string(), None);
+        let record3 = MessageRecord::new(None, "third".to_string(), None);
+
+        queue.post_message("ordered".to_string(), record1).unwrap();
+        queue.post_message("ordered".to_string(), record2).unwrap();
+        queue.post_message("ordered".to_string(), record3).unwrap();
 
         let messages = queue.poll_messages("ordered", None).unwrap();
-        assert_eq!(messages[0].content, "first");
-        assert_eq!(messages[1].content, "second");
-        assert_eq!(messages[2].content, "third");
+        assert_eq!(messages[0].record.value, "first");
+        assert_eq!(messages[1].record.value, "second");
+        assert_eq!(messages[2].record.value, "third");
+
+        // Verify timestamps are in ascending order (FIFO)
+        assert!(messages[0].timestamp <= messages[1].timestamp);
+        assert!(messages[1].timestamp <= messages[2].timestamp);
     }
 
     #[test]
     fn test_messages_persist_after_polling() {
         let queue = MessageQueue::new();
-        queue
-            .post_message("news".to_string(), "first news".to_string())
-            .unwrap();
+        let record = MessageRecord::new(None, "first news".to_string(), None);
+        queue.post_message("news".to_string(), record).unwrap();
+
         let first_polling_messages = queue.poll_messages("news", None).unwrap();
         let second_polling_messages = queue.poll_messages("news", None).unwrap();
-        assert_eq!(first_polling_messages[0], second_polling_messages[0])
+
+        assert_eq!(first_polling_messages[0], second_polling_messages[0]);
     }
 
     #[test]
     fn test_different_topics_isolated() {
         let queue = MessageQueue::new();
 
-        queue
-            .post_message("topic_a".to_string(), "message for A".to_string())
-            .unwrap();
-        queue
-            .post_message("topic_b".to_string(), "message for B".to_string())
-            .unwrap();
+        let record_a = MessageRecord::new(None, "message for A".to_string(), None);
+        let record_b = MessageRecord::new(None, "message for B".to_string(), None);
+
+        queue.post_message("topic_a".to_string(), record_a).unwrap();
+        queue.post_message("topic_b".to_string(), record_b).unwrap();
 
         let messages_a = queue.poll_messages("topic_a", None).unwrap();
         let messages_b = queue.poll_messages("topic_b", None).unwrap();
 
         assert_eq!(messages_a.len(), 1);
         assert_eq!(messages_b.len(), 1);
-        assert_eq!(messages_a[0].content, "message for A");
-        assert_eq!(messages_b[0].content, "message for B");
+        assert_eq!(messages_a[0].record.value, "message for A");
+        assert_eq!(messages_b[0].record.value, "message for B");
+    }
+
+    #[test]
+    fn test_message_with_key_and_headers() {
+        let queue = MessageQueue::new();
+        let mut headers = HashMap::new();
+        headers.insert("priority".to_string(), "high".to_string());
+        headers.insert("source".to_string(), "test-suite".to_string());
+
+        let record = MessageRecord::new(
+            Some("user456".to_string()),
+            "message with metadata".to_string(),
+            Some(headers.clone()),
+        );
+
+        queue
+            .post_message("metadata_topic".to_string(), record)
+            .unwrap();
+        let messages = queue.poll_messages("metadata_topic", None).unwrap();
+
+        assert_eq!(messages.len(), 1);
+        let msg = &messages[0];
+        assert_eq!(msg.record.key.as_ref().unwrap(), "user456");
+        assert_eq!(msg.record.value, "message with metadata");
+        assert_eq!(msg.record.headers.as_ref().unwrap(), &headers);
+        assert_eq!(msg.offset, 0);
     }
 
     // TopicLog Tests
@@ -446,7 +518,8 @@ mod tests {
     #[test]
     fn test_topic_log_append_single_message() {
         let mut log = TopicLog::new();
-        let offset = log.append("first message".to_string(), 1234567890);
+        let record = MessageRecord::new(None, "first message".to_string(), None);
+        let offset = log.append(record);
 
         assert_eq!(offset, 0);
         assert_eq!(log.len(), 1);
@@ -456,9 +529,13 @@ mod tests {
     #[test]
     fn test_topic_log_append_multiple_messages() {
         let mut log = TopicLog::new();
-        let offset1 = log.append("message 1".to_string(), 1234567890);
-        let offset2 = log.append("message 2".to_string(), 1234567891);
-        let offset3 = log.append("message 3".to_string(), 1234567892);
+        let record1 = MessageRecord::new(None, "message 1".to_string(), None);
+        let record2 = MessageRecord::new(None, "message 2".to_string(), None);
+        let record3 = MessageRecord::new(None, "message 3".to_string(), None);
+
+        let offset1 = log.append(record1);
+        let offset2 = log.append(record2);
+        let offset3 = log.append(record3);
 
         assert_eq!(offset1, 0);
         assert_eq!(offset2, 1);
@@ -470,61 +547,77 @@ mod tests {
     #[test]
     fn test_topic_log_get_messages_from_beginning() {
         let mut log = TopicLog::new();
-        log.append("first".to_string(), 100);
-        log.append("second".to_string(), 200);
-        log.append("third".to_string(), 300);
+        let record1 = MessageRecord::new(None, "first".to_string(), None);
+        let record2 = MessageRecord::new(None, "second".to_string(), None);
+        let record3 = MessageRecord::new(None, "third".to_string(), None);
+
+        log.append(record1);
+        log.append(record2);
+        log.append(record3);
 
         let messages = log.get_messages_from_offset(0, None);
         assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0].content, "first");
-        assert_eq!(messages[1].content, "second");
-        assert_eq!(messages[2].content, "third");
+        assert_eq!(messages[0].record.value, "first");
+        assert_eq!(messages[1].record.value, "second");
+        assert_eq!(messages[2].record.value, "third");
     }
 
     #[test]
     fn test_topic_log_get_messages_from_middle_offset() {
         let mut log = TopicLog::new();
-        log.append("first".to_string(), 100);
-        log.append("second".to_string(), 200);
-        log.append("third".to_string(), 300);
+        let record1 = MessageRecord::new(None, "first".to_string(), None);
+        let record2 = MessageRecord::new(None, "second".to_string(), None);
+        let record3 = MessageRecord::new(None, "third".to_string(), None);
+
+        log.append(record1);
+        log.append(record2);
+        log.append(record3);
 
         let messages = log.get_messages_from_offset(1, None);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "second");
-        assert_eq!(messages[1].content, "third");
+        assert_eq!(messages[0].record.value, "second");
+        assert_eq!(messages[1].record.value, "third");
     }
 
     #[test]
     fn test_topic_log_get_messages_with_count_limit() {
         let mut log = TopicLog::new();
-        log.append("first".to_string(), 100);
-        log.append("second".to_string(), 200);
-        log.append("third".to_string(), 300);
+        let record1 = MessageRecord::new(None, "first".to_string(), None);
+        let record2 = MessageRecord::new(None, "second".to_string(), None);
+        let record3 = MessageRecord::new(None, "third".to_string(), None);
+
+        log.append(record1);
+        log.append(record2);
+        log.append(record3);
 
         let messages = log.get_messages_from_offset(0, Some(2));
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "first");
-        assert_eq!(messages[1].content, "second");
+        assert_eq!(messages[0].record.value, "first");
+        assert_eq!(messages[1].record.value, "second");
     }
 
     #[test]
     fn test_topic_log_get_messages_beyond_log() {
         let mut log = TopicLog::new();
-        log.append("only message".to_string(), 100);
+        let record = MessageRecord::new(None, "only message".to_string(), None);
+        log.append(record);
 
         let messages = log.get_messages_from_offset(5, None);
         assert_eq!(messages.len(), 0);
     }
 
     #[test]
-    fn test_topic_log_message_ids_match_offsets() {
+    fn test_topic_log_message_offsets_match() {
         let mut log = TopicLog::new();
-        let offset1 = log.append("msg1".to_string(), 100);
-        let offset2 = log.append("msg2".to_string(), 200);
+        let record1 = MessageRecord::new(None, "msg1".to_string(), None);
+        let record2 = MessageRecord::new(None, "msg2".to_string(), None);
+
+        let offset1 = log.append(record1);
+        let offset2 = log.append(record2);
 
         let messages = log.get_messages_from_offset(0, None);
-        assert_eq!(messages[0].id, offset1);
-        assert_eq!(messages[1].id, offset2);
+        assert_eq!(messages[0].offset, offset1);
+        assert_eq!(messages[1].offset, offset2);
     }
 
     // ConsumerGroup Tests
@@ -571,4 +664,65 @@ mod tests {
         assert_eq!(group.get_offset("logs"), 42);
         assert_eq!(group.get_offset("unknown"), 0);
     }
+
+    // Serialization Tests
+    #[test]
+    fn test_message_record_serialization() {
+        let mut headers = HashMap::new();
+        headers.insert("test".to_string(), "value".to_string());
+
+        let record = MessageRecord::new(
+            Some("key123".to_string()),
+            "test content".to_string(),
+            Some(headers),
+        );
+
+        let json = serde_json::to_string(&record).expect("Should serialize");
+        let deserialized: MessageRecord = serde_json::from_str(&json).expect("Should deserialize");
+
+        assert_eq!(record, deserialized);
+    }
+
+    #[test]
+    fn test_message_with_offset_serialization() {
+        let record = MessageRecord::new(None, "test".to_string(), None);
+        let message_with_offset = MessageWithOffset::from_record(record, 42);
+
+        let json = serde_json::to_string(&message_with_offset).expect("Should serialize");
+        let deserialized: MessageWithOffset =
+            serde_json::from_str(&json).expect("Should deserialize");
+
+        assert_eq!(message_with_offset.record, deserialized.record);
+        assert_eq!(message_with_offset.offset, deserialized.offset);
+        // Note: timestamp might differ slightly due to precision, so we just check it's present
+        assert!(!deserialized.timestamp.is_empty());
+    }
 }
+// TODO(human): Update all unit tests in the tests module to work with MessageRecord/MessageWithOffset
+//
+// Changes needed for unit tests:
+//
+// 1. Message Creation Tests:
+//    - Update tests that create Message instances to use MessageRecord::new()
+//    - Test the new constructor with key, value, and headers parameters
+//    - Add tests for MessageWithOffset::from_record() method
+//
+// 2. MessageQueue Tests:
+//    - Update post_message() tests to accept MessageRecord instead of String content
+//    - Update poll_messages() tests to expect MessageWithOffset return values
+//    - Verify offset semantics work correctly (replacing id-based logic)
+//
+// 3. Field Access Tests:
+//    - Change tests accessing msg.content to msg.value (or msg.record.value for MessageWithOffset)
+//    - Change tests accessing msg.id to msg.offset
+//    - Update timestamp assertions to expect ISO 8601 String format
+//    - Add tests for new key and headers fields
+//
+// 4. TopicLog Tests:
+//    - Update any tests that directly interact with stored messages
+//    - Ensure offset-based retrieval works correctly
+//    - Test consumer group functionality with new message structure
+//
+// 5. Serialization Tests:
+//    - Add tests to verify serde compatibility with new structures
+//    - Test JSON serialization matches OpenAPI schema expectations

@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, MessageRecord, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -154,25 +154,26 @@ async fn post_message(
     Path(topic): Path<String>,
     Json(request): Json<PostMessageRequest>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app_state
-        .queue
-        .post_message(topic.clone(), request.content.clone())
-    {
-        Ok(id) => {
+    let value_for_log = request.value.clone();
+    match app_state.queue.post_message(
+        topic.clone(),
+        MessageRecord {
+            key: request.key,
+            value: request.value,
+            headers: request.headers,
+        },
+    ) {
+        Ok(offset) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "POST /api/topics/{}/messages - ID: {} - '{}'",
-                    topic, id, request.content
+                    "POST /api/topics/{topic}/messages - Offset: {offset} - '{value_for_log}'"
                 ),
             );
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let timestamp = chrono::Utc::now().to_rfc3339();
 
-            Ok(Json(PostMessageResponse { id, timestamp }))
+            Ok(Json(PostMessageResponse { offset, timestamp }))
         }
         Err(error) => {
             log(
@@ -209,8 +210,10 @@ async fn poll_messages(
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
                 .map(|msg| MessageResponse {
-                    id: msg.id,
-                    content: msg.content,
+                    key: msg.record.key,
+                    value: msg.record.value,
+                    headers: msg.record.headers,
+                    offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
@@ -382,8 +385,10 @@ async fn poll_messages_for_consumer_group(
             let message_responses: Vec<MessageResponse> = messages
                 .into_iter()
                 .map(|msg| MessageResponse {
-                    id: msg.id,
-                    content: msg.content,
+                    key: msg.record.key,
+                    value: msg.record.value,
+                    headers: msg.record.headers,
+                    offset: msg.offset,
                     timestamp: msg.timestamp,
                 })
                 .collect();
