@@ -29,6 +29,9 @@ This is a Rust-based message queue implementation with HTTP API endpoints, compr
 - `cargo fmt` - Format code according to Rust style guidelines
 - `cargo check` - Quick compile check without generating binaries
 
+### OpenAPI Specification Validation
+- `openapi-generator validate -i docs/openapi.yaml` - Validate OpenAPI specification syntax and structure
+
 ### Dependencies
 - `cargo add <crate_name>` - Add a new dependency
 - `cargo update` - Update dependencies to latest compatible versions

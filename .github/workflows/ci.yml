@@ -133,3 +133,20 @@ jobs:
       
     - name: Run security audit
       run: cargo audit
+
+  schema-validation:
+    name: OpenAPI Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Validate OpenAPI Specification
+      run: |
+        curl -Lo openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.2.0/openapi-generator-cli-7.2.0.jar
+        java -jar openapi-generator-cli.jar validate -i docs/openapi.yaml

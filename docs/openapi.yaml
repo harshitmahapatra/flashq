@@ -63,16 +63,7 @@ paths:
       tags:
         - Producer
       parameters:
-        - name: topic
-          in: path
-          required: true
-          description: The topic to produce messages to
-          schema:
-            type: string
-            pattern: '^[a-zA-Z0-9._-]+$'
-            minLength: 1
-            maxLength: 255
-          example: "user-events"
+        - $ref: '#/components/parameters/TopicName'
       requestBody:
         required: true
         content:
@@ -139,16 +130,7 @@ paths:
       tags:
         - Consumer Groups
       parameters:
-        - name: group-id
-          in: path
-          required: true
-          description: Unique identifier for the consumer group
-          schema:
-            type: string
-            pattern: '^[a-zA-Z0-9._-]+$'
-            minLength: 1
-            maxLength: 255
-          example: "analytics-processors"
+        - $ref: '#/components/parameters/ConsumerGroupId'
       requestBody:
         required: true
         content:
@@ -190,13 +172,7 @@ paths:
       tags:
         - Consumer Groups
       parameters:
-        - name: group-id
-          in: path
-          required: true
-          description: The consumer group to leave
-          schema:
-            type: string
-          example: "analytics-processors"
+        - $ref: '#/components/parameters/ConsumerGroupId'
       responses:
         '204':
           description: Successfully left consumer group
@@ -223,24 +199,12 @@ paths:
       tags:
         - Consumer
       parameters:
-        - name: group-id
-          in: path
-          required: true
-          description: The consumer group identifier
-          schema:
-            type: string
-          example: "analytics-processors"
-        - name: topic
-          in: path
-          required: true
-          description: The topic to fetch messages from
-          schema:
-            type: string
-          example: "user-events"
+        - $ref: '#/components/parameters/ConsumerGroupId'
+        - $ref: '#/components/parameters/TopicName'
         - name: max_records
           in: query
           required: false
-          description: Maximum number of records to return (default: 100)
+          description: "Maximum number of records to return (default: 100)"
           schema:
             type: integer
             minimum: 1
@@ -250,7 +214,7 @@ paths:
         - name: timeout_ms
           in: query
           required: false
-          description: Maximum time to wait for messages (default: 1000ms)
+          description: "Maximum time to wait for messages (default: 1000ms)"
           schema:
             type: integer
             minimum: 0
@@ -265,6 +229,14 @@ paths:
             type: integer
             minimum: 0
           example: 100
+        - name: include_headers
+          in: query
+          required: false
+          description: "Whether to include message headers in the response (default: true)"
+          schema:
+            type: boolean
+            default: true
+          example: true
       responses:
         '200':
           description: Messages fetched successfully
@@ -322,20 +294,8 @@ paths:
       tags:
         - Consumer
       parameters:
-        - name: group-id
-          in: path
-          required: true
-          description: The consumer group identifier
-          schema:
-            type: string
-          example: "analytics-processors"
-        - name: topic
-          in: path
-          required: true
-          description: The topic to commit offset for
-          schema:
-            type: string
-          example: "user-events"
+        - $ref: '#/components/parameters/ConsumerGroupId'
+        - $ref: '#/components/parameters/TopicName'
       requestBody:
         required: true
         content:
@@ -375,20 +335,8 @@ paths:
       tags:
         - Consumer
       parameters:
-        - name: group-id
-          in: path
-          required: true
-          description: The consumer group identifier
-          schema:
-            type: string
-          example: "analytics-processors"
-        - name: topic
-          in: path
-          required: true
-          description: The topic to get offset for
-          schema:
-            type: string
-          example: "user-events"
+        - $ref: '#/components/parameters/ConsumerGroupId'
+        - $ref: '#/components/parameters/TopicName'
       responses:
         '200':
           description: Current committed offset
@@ -458,7 +406,7 @@ components:
           example: "User logged in"
         headers:
           type: object
-          description: Optional key-value metadata headers
+          description: Optional key-value metadata headers. Header names should start with a letter and contain only letters, numbers, underscores, and hyphens
           additionalProperties:
             type: string
             maxLength: 1024
@@ -494,7 +442,10 @@ components:
       properties:
         records:
           type: array
-          description: Array of messages to produce
+          description: |
+            Array of messages to produce. Limited to 1000 messages per batch to prevent 
+            memory exhaustion and ensure reasonable response times while supporting 
+            high-throughput scenarios.
           minItems: 1
           maxItems: 1000
           items:
@@ -592,7 +543,7 @@ components:
           minimum: 0
         lag:
           type: integer
-          description: Number of messages behind high water mark
+          description: Number of messages behind high water mark (optional, can be calculated as high_water_mark - next_offset)
           minimum: 0
 
     # Offset Management
@@ -716,7 +667,7 @@ components:
       description: The topic name
       schema:
         type: string
-        pattern: '^[a-zA-Z0-9._-]+$'
+        pattern: '^[a-zA-Z0-9._-][a-zA-Z0-9._-]*$'
         minLength: 1
         maxLength: 255
       example: "user-events"
@@ -728,7 +679,7 @@ components:
       description: The consumer group identifier
       schema:
         type: string
-        pattern: '^[a-zA-Z0-9._-]+$'
+        pattern: '^[a-zA-Z0-9._-][a-zA-Z0-9._-]*$'
         minLength: 1
         maxLength: 255
       example: "analytics-processors"
