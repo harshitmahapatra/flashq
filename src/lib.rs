@@ -333,8 +333,6 @@ impl MessageQueue {
     ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
         let records = self.poll_records_from_offset(topic, current_offset, count)?;
-        let new_offset = current_offset + records.len() as u64;
-        self.update_consumer_group_offset(group_id, topic.to_string(), new_offset)?;
         Ok(records)
     }
 

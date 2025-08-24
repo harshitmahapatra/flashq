@@ -27,7 +27,6 @@ pub struct ProduceResponse {
 
 #[derive(Serialize, Deserialize)]
 pub struct PollQuery {
-    pub count: Option<usize>,
     pub from_offset: Option<u64>,
     pub max_records: Option<usize>,
     pub include_headers: Option<bool>,
@@ -35,7 +34,7 @@ pub struct PollQuery {
 
 impl PollQuery {
     pub fn effective_limit(&self) -> Option<usize> {
-        self.max_records.or(self.count)
+        self.max_records
     }
 
     pub fn should_include_headers(&self) -> bool {
@@ -125,6 +124,13 @@ pub struct ErrorResponse {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct HealthCheckResponse {
+    pub status: String,
+    pub service: String,
+    pub timestamp: u64,
 }
 
 impl ErrorResponse {

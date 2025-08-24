@@ -1,324 +1,84 @@
 # Development Guide
 
-This guide covers development setup, testing, and contribution guidelines for FlashQ.
+Development setup, testing, and contribution guidelines for FlashQ.
 
-## Prerequisites
-
-- **Rust**: Latest stable version (1.70+)
-- **Cargo**: Comes with Rust installation
-- **Git**: For version control
-
-## Development Setup
+## Setup
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd flashq
-
-# Build the project
-cargo build
-
-# Run tests to verify setup
-cargo test
+git clone <repository-url> && cd flashq
+cargo build && cargo test  # Verify setup
 ```
 
 ## Building
 
-### Debug Build (Development)
 ```bash
-# Build all binaries
-cargo build
-
-# Build specific binary
-cargo build --bin server
-cargo build --bin client
-```
-
-### Release Build (Production)
-```bash
-# Build optimized binaries
-cargo build --release
-
-# Build specific optimized binary
-cargo build --release --bin server
-cargo build --release --bin client
-
-# Binaries located in target/release/
+cargo build                    # Debug build
+cargo build --release          # Release build (target/release/)
+cargo build --bin server       # Specific binary
 ```
 
 ## Testing
 
-### Test Categories
+### Test Types
 
-1. **Unit Tests** - Located in `src/lib.rs`, test core functionality
-2. **Integration Tests** - Located in `tests/integration_tests.rs`, test HTTP API end-to-end
+- **Unit** (`src/lib.rs`): Core functionality
+- **Integration** (`tests/*.rs`): HTTP API and CLI client end-to-end
+- **Utilities** (`tests/test_helpers.rs`): Shared infrastructure
 
 ### Running Tests
 
 ```bash
-# Run all tests (unit + integration)
-cargo test
-
-# Run only unit tests
-cargo test --lib
-
-# Run only integration tests  
-cargo test --test integration_tests
-
-# Run specific test
-cargo test test_poll_messages_with_count_limit
-
-# Run tests with output
-cargo test -- --nocapture
-
-# Run tests and show ignored
-cargo test -- --ignored
+cargo test                              # All tests
+cargo test --lib                        # Unit tests only
+cargo test --test server_tests          # Specific integration test
+cargo test test_name                     # Specific test
+cargo test -- --nocapture              # With output
 ```
 
 ### Test Coverage
 
-Current test coverage includes:
-- Record creation and offset assignment
-- FIFO ordering within topics
-- Topic isolation (records don't leak between topics)
-- Polling with count limits
-- Non-destructive polling (records persist)
-- HTTP API endpoints (POST/GET)
-- Error handling for invalid requests with OpenAPI-compliant structured responses
-- Request validation including schema validation, size limits, and pattern matching
-- HTTP status code verification (400, 404, 422, 500)
-- Health check endpoint
-
-### Validation Testing
-
-The project includes comprehensive validation tests for OpenAPI compliance:
-
-```bash
-# Test error response structure
-cargo test test_server_error_handling
-
-# Test request validation limits  
-cargo test test_message_size_and_validation_limits
-
-# Test malformed requests
-cargo test test_malformed_requests
-```
-
-**Validation Test Coverage:**
-- Record size limits (keys: 1024 chars, values: 1MB, headers: 1024 chars each)
-- Batch size limits (1-1000 records per batch request)
-- Topic name pattern validation (`^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`)
-- Consumer group ID pattern validation
-- Query parameter limits (`max_records`: 1-10000, `timeout_ms`: 0-60000)
-- HTTP status code correctness (400, 404, 422, 500)
-- Structured error response format with `error`, `message`, and `details` fields
-- Batch validation with per-record error reporting including field paths
+**Server Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
+**Client Integration:** CLI commands, batch operations, consumer group lifecycle  
+**Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
 
 ## Code Quality
 
-### Linting
 ```bash
-# Run Clippy for code quality suggestions
-cargo clippy
-
-# Run Clippy with all features
-cargo clippy --all-features
-
-# Fail on warnings
-cargo clippy -- -D warnings
-```
-
-### Formatting
-```bash
-# Format code according to Rust standards
-cargo fmt
-
-# Check formatting without modifying files
-cargo fmt -- --check
-```
-
-### Quick Compile Check
-```bash
-# Fast compilation check without building binaries
-cargo check
-
-# Check all targets
-cargo check --all-targets
+cargo clippy                    # Linting
+cargo fmt                       # Format code  
+cargo check                     # Fast compile check
 ```
 
 ## Running During Development
 
-### Interactive Demo
 ```bash
-# Run the educational demo interface
-cargo run --bin flashq
+cargo run --bin flashq          # Interactive demo
+cargo run --bin server          # HTTP server (debug/TRACE logging)
+cargo run --bin server 9090     # Custom port
+./target/release/server 8080    # Production (INFO logging)
+cargo run --bin client -- health # CLI client
 ```
 
-### HTTP Server
-```bash
-# Start server on default port (8080) with TRACE logging
-cargo run --bin server
-
-# Start server on custom port with TRACE logging
-cargo run --bin server 9090
-
-# Production mode with INFO logging (quieter output)
-cargo build --release
-./target/release/server 8080
-
-# Run in background (Linux/macOS)
-cargo run --bin server &
-```
-
-**Logging Levels:**
-- **Debug builds**: TRACE level - shows detailed request/response information
-- **Release builds**: INFO level - production-appropriate minimal logging
-- Automatically detected based on compilation flags
-
-### CLI Client
-```bash
-# Post a record
-cargo run --bin client -- post news "Development record"
-
-# Poll records
-cargo run --bin client -- poll news
-
-# Poll with count limit
-cargo run --bin client -- poll news 5
-
-# Use custom port
-cargo run --bin client -- --port=9090 post test "Custom port"
-```
-
-## Project Structure for Contributors
+## Project Structure
 
 ```
-flashq/
-├── src/
-│   ├── lib.rs              # Core library with MessageQueue and Record types
-│   ├── main.rs             # Main binary entry point  
-│   ├── demo.rs             # Interactive demo module
-│   ├── api.rs              # HTTP API data structures
-│   └── bin/
-│       ├── server.rs       # HTTP server with organized validation constants
-│       └── client.rs       # CLI client implementation
-├── tests/
-│   └── integration_tests.rs # End-to-end API testing including batch operations
-├── docs/                   # Detailed documentation
-├── Cargo.toml              # Project configuration
-└── README.md               # Quick start guide
+src/lib.rs          # Core MessageQueue + Record types
+src/main.rs         # Entry point 
+src/demo.rs         # Interactive demo
+src/api.rs          # HTTP API structures
+src/bin/server.rs   # HTTP server + validation constants
+src/bin/client.rs   # CLI client
+tests/*.rs          # Integration tests
 ```
-
-## Code Organization
-
-### Validation Constants
-
-Validation limits are organized in a `limits` module within `src/bin/server.rs`:
-
-```rust
-mod limits {
-    pub const MAX_KEY_SIZE: usize = 1024;
-    pub const MAX_VALUE_SIZE: usize = 1_048_576;
-    pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
-    pub const MAX_BATCH_SIZE: usize = 1000;
-    pub const MAX_POLL_RECORDS: usize = 10000;
-}
-```
-
-**Benefits:**
-- Clear namespace separation for validation constraints
-- Easy to locate and modify limits
-- Consistent usage with `limits::` prefix throughout code
-- Single source of truth for OpenAPI specification compliance
 
 ## Contribution Guidelines
 
-### Code Style
-- Follow Rust standard formatting (`cargo fmt`)
-- Address all Clippy warnings (`cargo clippy`)
-- Add appropriate documentation for public APIs
-- Include unit tests for new functionality
-- Update integration tests for API changes
-
-### Testing Requirements
-- All new functionality must include tests
-- Maintain or improve test coverage
-- Integration tests for HTTP API changes
-- Performance tests for significant algorithmic changes
-
-### Documentation
-- Update relevant documentation in `docs/` for architectural changes
-- Keep README.md concise and focused on quick start
-- Add inline documentation for complex logic
-- Include usage examples for new features
-
-### Pull Request Process
-1. Create feature branch from main
-2. Implement changes with tests
-3. Run full test suite: `cargo test`
-4. Check code quality: `cargo clippy && cargo fmt --check`
-5. Update documentation as needed
-6. Submit PR with clear description of changes
+1. **Code Style:** `cargo fmt && cargo clippy` 
+2. **Testing:** Include tests for new functionality
+3. **Process:** Feature branch → tests → `cargo test` → PR
 
 ## Debugging
 
-### Logging
-
-The server implements automatic log level detection:
-
-- **Development** (`cargo run --bin server`): TRACE level logging
-  - Shows detailed HTTP request/response information
-  - Helpful for debugging API interactions
-- **Production** (`./target/release/server`): INFO level logging  
-  - Minimal output suitable for production deployment
-  - Shows server startup and critical events only
-
-**For debugging during development:**
-```rust
-// The server uses a built-in logging system
-// Add debug prints in your development if needed
-println!("Debug: record count = {}", records.len());
-```
-
-### Common Issues
-
-**Port Already in Use:**
-```bash
-# Kill process using port 8080
-lsof -ti:8080 | xargs kill
-
-# Or use different port
-cargo run --bin server 8081
-```
-
-**Test Failures:**
-```bash
-# Run specific failing test with output
-cargo test test_name -- --nocapture
-
-# Run tests in single thread to avoid conflicts
-cargo test -- --test-threads=1
-```
-
-## Performance Testing
-
-### Basic Load Testing
-```bash
-# Start server
-cargo run --bin server &
-
-# Use curl in loop for basic testing
-for i in {1..100}; do
-  cargo run --bin client -- post test "Record $i"
-done
-
-# Poll to verify all records received
-cargo run --bin client -- poll test
-```
-
-### Memory Usage
-```bash
-# Monitor memory usage during operation
-cargo run --bin server &
-htop  # or similar system monitor
-```
+**Logging:** Debug builds use TRACE, release builds use INFO  
+**Port conflicts:** `lsof -ti:8080 | xargs kill` or use different port  
+**Test issues:** `cargo test test_name -- --nocapture`

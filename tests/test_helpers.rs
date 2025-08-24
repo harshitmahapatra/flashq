@@ -6,10 +6,21 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tokio::process::Command as TokioCommand;
 use tokio::time::sleep;
 
-static INIT: Once = Once::new();
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
+
+static SERVER_INIT: Once = Once::new();
+static CLIENT_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static CLIENT_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
 pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
     // Bind to port 0 to let the OS choose an available port
@@ -19,7 +30,7 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 }
 
 pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    INIT.call_once(|| {
+    SERVER_INIT.call_once(|| {
         eprintln!("Building server binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "server"])
@@ -48,6 +59,36 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(binary_path)
 }
 
+pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    CLIENT_INIT.call_once(|| {
+        eprintln!("Building client binary for integration tests...");
+        let output = Command::new("cargo")
+            .args(["build", "--bin", "client"])
+            .output()
+            .expect("Failed to build client binary");
+
+        if !output.status.success() {
+            panic!(
+                "Failed to build client binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let binary_path = PathBuf::from("target/debug/client");
+        *CLIENT_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        eprintln!("Client binary built successfully");
+    });
+
+    let binary_path = CLIENT_BINARY_PATH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("Client binary path should be set")
+        .clone();
+
+    Ok(binary_path)
+}
+
 pub fn get_timeout_config() -> (u32, u64) {
     // Returns (max_attempts, sleep_ms)
     if env::var("CI").is_ok() {
@@ -58,9 +99,13 @@ pub fn get_timeout_config() -> (u32, u64) {
     }
 }
 
+// ============================================================================
+// TEST INFRASTRUCTURE
+// ============================================================================
+
 pub struct TestServer {
     process: Child,
-    port: u16,
+    pub port: u16,
 }
 
 impl TestServer {
@@ -157,10 +202,6 @@ impl TestServer {
 
         Ok(false) // All retries failed
     }
-
-    pub fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
 }
 
 impl Drop for TestServer {
@@ -170,28 +211,28 @@ impl Drop for TestServer {
     }
 }
 
-// Helper struct for common test operations
-pub struct TestHelper {
+pub struct TestClient {
     pub client: reqwest::Client,
     pub base_url: String,
 }
 
 #[allow(dead_code)]
-impl TestHelper {
+impl TestClient {
     pub fn new(server: &TestServer) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: server.base_url(),
+            base_url: format!("http://127.0.0.1:{}", server.port),
         }
     }
 
-    // Message operations - updated for new Record structure
+    // ------------------------------------------------------------------------
+    // HTTP API Operations
+    // ------------------------------------------------------------------------
     pub async fn post_message(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        // Legacy helper - converts content to new Record format
         self.post_message_with_record(topic, None, content, None)
             .await
     }
@@ -203,7 +244,7 @@ impl TestHelper {
         value: &str,
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
-        // Convert single record to batch format for new API
+        // Convert single record to batch format
         let message_record = Record {
             key,
             value: value.to_string(),
@@ -235,33 +276,32 @@ impl TestHelper {
             .await
     }
 
-    // Note: Direct topic polling has been removed to align with OpenAPI spec.
-    // Use consumer group endpoints for message consumption.
-
-    /// Helper method for tests that need to verify posted messages
-    /// Creates a temporary consumer group to fetch all messages
+    // Basic polling for testing - creates temporary consumer group
     pub async fn poll_messages_for_testing(
         &self,
         topic: &str,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let group_id = format!("test-{}", std::process::id());
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
 
-        // Create consumer group (ignore if it already exists)
-        let _ = self.create_consumer_group(&group_id).await;
+        // Create consumer group
+        let _ = self.create_consumer_group(&temp_group_id).await;
 
         // Fetch messages
         let response = self
-            .fetch_messages_for_consumer_group(&group_id, topic, count)
+            .fetch_messages_for_consumer_group(&temp_group_id, topic, max_records)
             .await;
 
-        // Clean up consumer group (ignore errors)
-        let _ = self.leave_consumer_group(&group_id).await;
+        // Clean up consumer group
+        let _ = self.leave_consumer_group(&temp_group_id).await;
 
         response
     }
 
-    // Consumer group operations
+    // ------------------------------------------------------------------------
+    // Consumer Group Operations
+    // ------------------------------------------------------------------------
     pub async fn create_consumer_group(
         &self,
         group_id: &str,
@@ -313,38 +353,38 @@ impl TestHelper {
         &self,
         group_id: &str,
         topic: &str,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
+        self.fetch_messages_for_consumer_group_with_options(group_id, topic, None, max_records)
+            .await
+    }
+
+    pub async fn fetch_messages_for_consumer_group_with_options(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_offset: Option<u64>,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut query = Vec::new();
+
+        if let Some(offset) = from_offset {
+            query.push(("from_offset", offset.to_string()));
+        }
+        if let Some(c) = max_records {
+            query.push(("max_records", c.to_string()));
+        }
+
         let mut request = self.client.get(format!(
             "{}/consumer/{}/topics/{}",
             self.base_url, group_id, topic
         ));
-        if let Some(c) = count {
-            request = request.query(&[("count", c.to_string())]);
+
+        if !query.is_empty() {
+            request = request.query(&query);
         }
+
         request.send().await
-    }
-
-    pub async fn fetch_messages_for_consumer_group_from_offset(
-        &self,
-        group_id: &str,
-        topic: &str,
-        from_offset: u64,
-        count: Option<usize>,
-    ) -> reqwest::Result<reqwest::Response> {
-        let mut query = vec![("from_offset", from_offset.to_string())];
-        if let Some(c) = count {
-            query.push(("count", c.to_string()));
-        }
-
-        self.client
-            .get(format!(
-                "{}/consumer/{}/topics/{}",
-                self.base_url, group_id, topic
-            ))
-            .query(&query)
-            .send()
-            .await
     }
 
     pub async fn assert_poll_response(
@@ -378,10 +418,93 @@ impl TestHelper {
         poll_data
     }
 
+    // ------------------------------------------------------------------------
+    // CLI Client Operations
+    // ------------------------------------------------------------------------
+
     pub async fn health_check(&self) -> reqwest::Result<reqwest::Response> {
         self.client
             .get(format!("{}/health", self.base_url))
             .send()
             .await
+    }
+
+    pub async fn post_message_with_client(
+        &self,
+        topic: &str,
+        message: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').next_back().unwrap();
+
+        let output = TokioCommand::new(&client_binary)
+            .args(["--port", port, "producer", "records", topic, message])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Client post failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn poll_messages_with_client(
+        &self,
+        topic: &str,
+        max_records: Option<usize>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').next_back().unwrap();
+
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
+
+        // Create consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "create", &temp_group_id])
+            .output()
+            .await?;
+
+        // Fetch messages
+        let mut args = vec![
+            "--port".to_string(),
+            port.to_string(),
+            "consumer".to_string(),
+            "fetch".to_string(),
+            temp_group_id.clone(),
+            topic.to_string(),
+        ];
+        if let Some(c) = max_records {
+            args.push("--max-records".to_string());
+            args.push(c.to_string());
+        }
+
+        let output = TokioCommand::new(&client_binary)
+            .args(&args)
+            .output()
+            .await?;
+
+        let result = if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            Err(format!(
+                "Client poll failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into())
+        };
+
+        // Clean up consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "leave", &temp_group_id])
+            .output()
+            .await;
+
+        result
     }
 }
