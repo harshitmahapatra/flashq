@@ -6,24 +6,18 @@ FlashQ is a Kafka-inspired message queue system built in Rust with HTTP REST API
 
 ## Features
 
-- **Batch producer API** - Post 1-1000 records per request for efficient throughput
-- **Kafka-style messaging** - Optional record keys and headers for routing/metadata
-- **Topic-based organization** - Records organized by topic strings
-- **Offset-based positioning** - Sequential record positioning within topics
-- **Replay functionality** - Seek to specific offsets for record replay
-- **Consumer groups** - Coordinated consumption with offset management
-- **HTTP REST API** - Easy integration with any HTTP client
-- **Non-destructive polling** - Records persist after being read
-- **FIFO ordering** - Records returned in order they were posted
-- **Thread-safe** - Concurrent posting and polling support
-- **ISO 8601 timestamps** - Human-readable record timestamps
-- **OpenAPI-compliant error handling** - Structured error responses with proper HTTP status codes
-- **Request validation** - Comprehensive validation with detailed error context and field-level reporting
+- **Topic-based messaging** - Records organized by topic with optional keys and headers
+- **Offset-based positioning** - Sequential offsets within topics with replay functionality
+- **Consumer groups** - Offset management for coordinated consumption
+- **Batch operations** - Post up to 1000 records per request
+- **HTTP REST API** - JSON-based endpoints for posting and polling
+- **Thread-safe** - Concurrent access support
+- **Request validation** - Input validation with structured error responses
 
 ## Quick Start
 
 ### Interactive Demo
-Explore the message queue with a user-friendly menu interface:
+Explore the flashq with a user-friendly menu interface:
 
 ```bash
 cargo run --bin flashq
@@ -47,13 +41,30 @@ cargo build --release
 **Use the CLI client:**
 ```bash
 # Post a message
-cargo run --bin client -- post news "Breaking news: Rust is awesome!"
+cargo run --bin client -- producer records news "Breaking news: Rust is awesome!"
 
-# Poll messages from a topic (uses consumer groups with automatic commit)
-cargo run --bin client -- poll news
+# Post with key and headers
+cargo run --bin client -- producer records news "Update message" --key "user123" --header "priority=high" --header "source=mobile"
 
-# Poll with count limit  
-cargo run --bin client -- poll news --count 5
+# Post batch from file
+cargo run --bin client -- producer records news --batch batch_records.json
+
+# Create consumer group and fetch messages
+cargo run --bin client -- consumer create my-group
+cargo run --bin client -- consumer fetch my-group news
+
+# Fetch with options
+cargo run --bin client -- consumer fetch my-group news --max-records 5 --from-offset 10
+
+# Manage consumer group offsets
+cargo run --bin client -- consumer offset get my-group news
+cargo run --bin client -- consumer offset commit my-group news 15
+
+# Leave consumer group
+cargo run --bin client -- consumer leave my-group
+
+# Health check
+cargo run --bin client -- health
 ```
 
 ### HTTP API

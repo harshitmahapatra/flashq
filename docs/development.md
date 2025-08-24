@@ -51,7 +51,9 @@ cargo build --release --bin client
 ### Test Categories
 
 1. **Unit Tests** - Located in `src/lib.rs`, test core functionality
-2. **Integration Tests** - Located in `tests/integration_tests.rs`, test HTTP API end-to-end
+2. **Server Integration Tests** - Located in `tests/server_tests.rs`, `tests/consumer_tests.rs`, `tests/producer_tests.rs` - test HTTP API end-to-end
+3. **Client Integration Tests** - Located in `tests/client_tests.rs` - test CLI client functionality against live server
+4. **Test Utilities** - Located in `tests/test_helpers.rs` - shared test infrastructure
 
 ### Running Tests
 
@@ -62,8 +64,13 @@ cargo test
 # Run only unit tests
 cargo test --lib
 
-# Run only integration tests  
-cargo test --test integration_tests
+# Run only server integration tests  
+cargo test --test server_tests
+cargo test --test consumer_tests
+cargo test --test producer_tests
+
+# Run only client integration tests
+cargo test --test client_tests
 
 # Run specific test
 cargo test test_poll_messages_with_count_limit
@@ -78,16 +85,28 @@ cargo test -- --ignored
 ### Test Coverage
 
 Current test coverage includes:
+
+**Server Integration Tests:**
 - Record creation and offset assignment
 - FIFO ordering within topics
 - Topic isolation (records don't leak between topics)
 - Polling with count limits
 - Non-destructive polling (records persist)
 - HTTP API endpoints (POST/GET)
+- Consumer group operations and offset management
 - Error handling for invalid requests with OpenAPI-compliant structured responses
 - Request validation including schema validation, size limits, and pattern matching
 - HTTP status code verification (400, 404, 422, 500)
 - Health check endpoint
+
+**Client Integration Tests:**
+- CLI client producer commands (`producer records`)
+- CLI client consumer commands (`consumer create/fetch/leave`)  
+- CLI client offset operations (`consumer offset get/commit`)
+- Batch posting with keys, headers, and file input
+- Advanced consumer options (max-records, from-offset, include-headers)
+- Health check command functionality
+- Error handling for invalid CLI commands
 
 ### Validation Testing
 
@@ -177,17 +196,24 @@ cargo run --bin server &
 
 ### CLI Client
 ```bash
-# Post a record
-cargo run --bin client -- post news "Development record"
+# Health check
+cargo run --bin client -- health
 
-# Poll records
-cargo run --bin client -- poll news
+# Producer operations
+cargo run --bin client -- producer records news "Development record"
+cargo run --bin client -- producer records news "Message with metadata" --key "user123" --header "priority=high"
+cargo run --bin client -- producer records news --batch batch_records.json
 
-# Poll with count limit
-cargo run --bin client -- poll news --count 5
+# Consumer group operations  
+cargo run --bin client -- consumer create my-group
+cargo run --bin client -- consumer fetch my-group news
+cargo run --bin client -- consumer fetch my-group news --max-records 5 --from-offset 10
+cargo run --bin client -- consumer offset get my-group news
+cargo run --bin client -- consumer offset commit my-group news 15
+cargo run --bin client -- consumer leave my-group
 
 # Use custom port
-cargo run --bin client -- --port=9090 post test "Custom port"
+cargo run --bin client -- --port=9090 producer records test "Custom port message"
 ```
 
 ## Project Structure for Contributors
@@ -203,7 +229,11 @@ flashq/
 │       ├── server.rs       # HTTP server with organized validation constants
 │       └── client.rs       # CLI client implementation
 ├── tests/
-│   └── integration_tests.rs # End-to-end API testing including batch operations
+│   ├── server_tests.rs      # HTTP server integration tests  
+│   ├── consumer_tests.rs    # Consumer group API tests
+│   ├── producer_tests.rs    # Producer API tests
+│   ├── client_tests.rs      # CLI client functionality tests
+│   └── test_helpers.rs      # Shared test infrastructure
 ├── docs/                   # Detailed documentation
 ├── Cargo.toml              # Project configuration
 └── README.md               # Quick start guide
@@ -307,13 +337,14 @@ cargo test -- --test-threads=1
 # Start server
 cargo run --bin server &
 
-# Use curl in loop for basic testing
+# Use client in loop for basic testing
 for i in {1..100}; do
-  cargo run --bin client -- post test "Record $i"
+  cargo run --bin client -- producer records test "Record $i"
 done
 
-# Poll to verify all records received
-cargo run --bin client -- poll test
+# Create consumer group and fetch to verify all records received
+cargo run --bin client -- consumer create load-test-group
+cargo run --bin client -- consumer fetch load-test-group test
 ```
 
 ### Memory Usage

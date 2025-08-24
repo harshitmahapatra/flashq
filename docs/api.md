@@ -6,6 +6,61 @@ Complete HTTP API documentation for the FlashQ server.
 
 Default server runs on `http://127.0.0.1:8080`
 
+## CLI Client
+
+FlashQ includes a comprehensive CLI client that provides a structured interface for interacting with the server. The client uses subcommands for different operations:
+
+### Producer Operations
+
+```bash
+# Post a simple message
+cargo run --bin client -- producer records news "Breaking news message"
+
+# Post with key and headers
+cargo run --bin client -- producer records news "User update" --key "user123" --header "priority=high" --header "source=mobile"
+
+# Batch post from JSON file
+cargo run --bin client -- producer records news --batch records.json
+
+# Use custom server port
+cargo run --bin client -- --port 9090 producer records news "Custom port message"
+```
+
+### Consumer Operations
+
+```bash
+# Create consumer group
+cargo run --bin client -- consumer create my-group
+
+# Fetch messages for consumer group
+cargo run --bin client -- consumer fetch my-group news
+
+# Fetch with advanced options
+cargo run --bin client -- consumer fetch my-group news --max-records 5 --from-offset 10 --include-headers true
+
+# Leave consumer group  
+cargo run --bin client -- consumer leave my-group
+```
+
+### Consumer Group Offset Management
+
+```bash
+# Get current offset for consumer group
+cargo run --bin client -- consumer offset get my-group news
+
+# Commit (advance) offset for consumer group
+cargo run --bin client -- consumer offset commit my-group news 15
+```
+
+### Health Check
+
+```bash
+# Check server health
+cargo run --bin client -- health
+```
+
+The CLI client includes comprehensive integration tests that verify all command functionality against a running server instance.
+
 ## Server Logging
 
 The server provides different logging levels based on build type:

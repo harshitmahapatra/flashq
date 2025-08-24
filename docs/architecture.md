@@ -8,6 +8,7 @@ The project follows Rust best practices with separate library and binary crates:
 
 ### Core Library (`src/lib.rs`)
 - **Record** struct - Individual record with value, headers, key, and timestamp
+- **RecordWithOffset** - Record with offset and timestamp for polling responses
 - **MessageQueue** struct - Main queue implementation with topic-based organization (handles Record types)  
 - **demo** module - Interactive CLI functionality (exposed publicly)
 - **api** module - HTTP API data structures and serialization types
@@ -15,8 +16,6 @@ The project follows Rust best practices with separate library and binary crates:
 - All unit tests located here
 
 ### API Module (`src/api.rs`)
-- **Record** - Unified record structure used for both requests and internal storage
-- **RecordWithOffset** - Record with offset and timestamp for polling responses
 - **ProduceRequest** - Batch request structure containing array of records
 - **ProduceResponse** - Response with array of offset information
 - **FetchResponse** - Complete poll response with record array
@@ -62,18 +61,42 @@ The demo module provides an educational interactive demonstration:
 - Organized validation constants in `limits` module for maintainability
 
 #### CLI Client Binary (`src/bin/client.rs`)
-- Command-line interface for interacting with HTTP server
-- Support for posting and polling operations
-- Configurable server port
-- Built with reqwest HTTP client
+- Structured command-line interface with producer/consumer subcommands
+- Built with clap for argument parsing and reqwest for HTTP communication
+- Configurable server port with `--port` flag
 
-### Test Suite (`tests/integration_tests.rs`)
-- End-to-end workflow testing with multiple topics
-- HTTP API validation with real server instances
-- FIFO ordering verification 
-- Count parameter testing for polling limits
-- Comprehensive error handling validation including schema validation and edge cases
-- Health check endpoint testing
+**Command Structure:**
+- **Health Check**: `health` - Server status verification
+- **Producer Commands**: `producer records` - Batch record posting with optional keys/headers
+- **Consumer Commands**: `consumer create/fetch/leave` - Consumer group lifecycle management  
+- **Offset Commands**: `consumer offset get/commit` - Consumer group offset operations
+
+**Features:**
+- Batch posting from JSON files using `--batch` parameter
+- Advanced consumer options (max-records, from-offset, include-headers)
+- Comprehensive error handling with user-friendly messages
+- Support for complex headers via `--header key=value` syntax
+
+### Test Suite 
+Comprehensive integration tests across multiple files:
+
+#### Server Tests (`tests/server_tests.rs`, `tests/consumer_tests.rs`, `tests/producer_tests.rs`)
+- End-to-end HTTP API workflow testing with multiple topics
+- FIFO ordering verification and count parameter testing 
+- Consumer group operations and offset management validation
+- Comprehensive error handling including schema validation and edge cases
+- Health check endpoint testing with real server instances
+
+#### Client Integration Tests (`tests/client_tests.rs`)
+- CLI client functionality verification against live server
+- Consumer group operations: create, fetch, offset management, leave
+- Batch posting with advanced options (keys, headers, file-based batches)
+- Health check command validation
+- Error handling for invalid commands and server communication failures
+
+#### Test Utilities (`tests/test_helpers.rs`)
+- Shared test server management and client binary verification
+- Consistent test environment setup across all integration test suites
 
 ## Data Flow
 
