@@ -158,7 +158,7 @@ async fn poll_messages(
 
 async fn handle_error_response(response: reqwest::Response, operation: &str) {
     let status = response.status();
-    
+
     // Try to get the response body as text first
     match response.text().await {
         Ok(body) => {
@@ -169,9 +169,7 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
                 }
                 Err(parse_error) => {
                     println!(
-                        "✗ Server error: {} (failed to parse error response: {})", 
-                        status, 
-                        parse_error
+                        "✗ Server error: {status} (failed to parse error response: {parse_error})"
                     );
                     if !body.is_empty() {
                         println!("   Raw response: {}", body.trim());
@@ -181,9 +179,7 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
         }
         Err(body_error) => {
             println!(
-                "✗ Server error: {} (failed to read response body: {})", 
-                status, 
-                body_error
+                "✗ Server error: {status} (failed to read response body: {body_error})"
             );
         }
     }
