@@ -158,12 +158,33 @@ async fn poll_messages(
 
 async fn handle_error_response(response: reqwest::Response, operation: &str) {
     let status = response.status();
-    match response.json::<ErrorResponse>().await {
-        Ok(error_response) => {
-            println!("✗ Failed to {}: {}", operation, error_response.error);
+    
+    // Try to get the response body as text first
+    match response.text().await {
+        Ok(body) => {
+            // Try to parse as ErrorResponse JSON
+            match serde_json::from_str::<ErrorResponse>(&body) {
+                Ok(error_response) => {
+                    println!("✗ Failed to {}: {}", operation, error_response.error);
+                }
+                Err(parse_error) => {
+                    println!(
+                        "✗ Server error: {} (failed to parse error response: {})", 
+                        status, 
+                        parse_error
+                    );
+                    if !body.is_empty() {
+                        println!("   Raw response: {}", body.trim());
+                    }
+                }
+            }
         }
-        Err(_) => {
-            println!("✗ Server error: {status}");
+        Err(body_error) => {
+            println!(
+                "✗ Server error: {} (failed to read response body: {})", 
+                status, 
+                body_error
+            );
         }
     }
 }

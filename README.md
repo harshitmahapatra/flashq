@@ -4,6 +4,7 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 
 ## Features
 
+- **Batch producer API** - Post 1-1000 records per request for efficient throughput
 - **Kafka-style messaging** - Optional record keys and headers for routing/metadata
 - **Topic-based organization** - Records organized by topic strings
 - **Offset-based positioning** - Sequential record positioning within topics
@@ -15,7 +16,7 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 - **Thread-safe** - Concurrent posting and polling support
 - **ISO 8601 timestamps** - Human-readable record timestamps
 - **OpenAPI-compliant error handling** - Structured error responses with proper HTTP status codes
-- **Request validation** - Schema validation with detailed error messages
+- **Request validation** - Comprehensive validation with detailed error context and field-level reporting
 
 ## Quick Start
 
@@ -55,18 +56,23 @@ cargo run --bin client -- poll news 5
 
 ### HTTP API
 
-Post a simple record:
+Post a single record (batch format):
 ```bash
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
-  -d '{"key": null, "value": "Hello, World!", "headers": null}'
+  -d '{"records": [{"key": null, "value": "Hello, World!", "headers": null}]}'
 ```
 
-Post a record with key and headers:
+Post multiple records in a batch:
 ```bash
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
-  -d '{"key": "user123", "value": "Important update", "headers": {"priority": "high", "source": "mobile"}}'
+  -d '{
+    "records": [
+      {"key": "user123", "value": "Important update", "headers": {"priority": "high", "source": "mobile"}},
+      {"key": "user456", "value": "Another message", "headers": {"priority": "low", "source": "web"}}
+    ]
+  }'
 ```
 
 Poll records:

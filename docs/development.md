@@ -105,12 +105,14 @@ cargo test test_malformed_requests
 ```
 
 **Validation Test Coverage:**
-- Record size limits (keys: 1024 chars, values: 1MB, headers: 1024 chars)
+- Record size limits (keys: 1024 chars, values: 1MB, headers: 1024 chars each)
+- Batch size limits (1-1000 records per batch request)
 - Topic name pattern validation (`^[a-zA-Z0-9._][a-zA-Z0-9._-]*$`)
 - Consumer group ID pattern validation
 - Query parameter limits (`max_records`: 1-10000, `timeout_ms`: 0-60000)
 - HTTP status code correctness (400, 404, 422, 500)
 - Structured error response format with `error`, `message`, and `details` fields
+- Batch validation with per-record error reporting including field paths
 
 ## Code Quality
 
@@ -198,14 +200,36 @@ message-queue-rs/
 │   ├── demo.rs             # Interactive demo module
 │   ├── api.rs              # HTTP API data structures
 │   └── bin/
-│       ├── server.rs       # HTTP server implementation
+│       ├── server.rs       # HTTP server with organized validation constants
 │       └── client.rs       # CLI client implementation
 ├── tests/
-│   └── integration_tests.rs # End-to-end API testing
+│   └── integration_tests.rs # End-to-end API testing including batch operations
 ├── docs/                   # Detailed documentation
 ├── Cargo.toml              # Project configuration
 └── README.md               # Quick start guide
 ```
+
+## Code Organization
+
+### Validation Constants
+
+Validation limits are organized in a `limits` module within `src/bin/server.rs`:
+
+```rust
+mod limits {
+    pub const MAX_KEY_SIZE: usize = 1024;
+    pub const MAX_VALUE_SIZE: usize = 1_048_576;
+    pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
+    pub const MAX_BATCH_SIZE: usize = 1000;
+    pub const MAX_POLL_RECORDS: usize = 10000;
+}
+```
+
+**Benefits:**
+- Clear namespace separation for validation constraints
+- Easy to locate and modify limits
+- Consistent usage with `limits::` prefix throughout code
+- Single source of truth for OpenAPI specification compliance
 
 ## Contribution Guidelines
 

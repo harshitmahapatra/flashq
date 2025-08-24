@@ -32,9 +32,9 @@ Logging level is automatically detected - no manual configuration needed.
 | `GET` | `/consumer/{group_id}/topics/{topic}` | Poll records for a consumer group |
 | `GET` | `/health` | Health check endpoint |
 
-## POST Record
+## POST Records (Batch Producer)
 
-Post a new record to a specified topic.
+Post one or more records to a specified topic in a single batch request.
 
 **Endpoint:** `POST /topics/{topic}/records`
 
@@ -43,32 +43,56 @@ Post a new record to a specified topic.
 Content-Type: application/json
 ```
 
-**Request Body:**
+**Single Record Request Body:**
 ```json
 {
-  "key": null,
-  "value": "Your message content here",
-  "headers": null
+  "records": [
+    {
+      "key": null,
+      "value": "Your message content here",
+      "headers": null
+    }
+  ]
 }
 ```
 
-**Request Body with Key and Headers:**
+**Batch Request Body with Multiple Records:**
 ```json
 {
-  "key": "user123",
-  "value": "Your message content here",
-  "headers": {
-    "priority": "high",
-    "source": "mobile-app"
-  }
+  "records": [
+    {
+      "key": "user123",
+      "value": "First message",
+      "headers": {
+        "priority": "high",
+        "source": "mobile-app"
+      }
+    },
+    {
+      "key": "user456",
+      "value": "Second message",
+      "headers": {
+        "priority": "medium",
+        "source": "web-app"
+      }
+    }
+  ]
 }
 ```
 
-**Success Response (201 Created):**
+**Success Response (200 OK):**
 ```json
 {
-  "offset": 0,
-  "timestamp": "2024-01-15T10:30:45Z"
+  "offsets": [
+    {
+      "offset": 0,
+      "timestamp": "2024-01-15T10:30:45Z"
+    },
+    {
+      "offset": 1,
+      "timestamp": "2024-01-15T10:30:45Z"
+    }
+  ]
 }
 ```
 
@@ -79,25 +103,49 @@ Content-Type: application/json
 }
 ```
 
-**Size Limit Error Response (400 Bad Request):**
+**Batch Size Error Response (400 Bad Request):**
 ```json
 {
-  "error": "Record key exceeds maximum length of 1024 characters (got 1025)"
+  "error": "validation_error",
+  "message": "Batch size exceeds maximum of 1000 records (got 1001)",
+  "details": {
+    "field": "records",
+    "max_size": 1000,
+    "actual_size": 1001
+  }
+}
+```
+
+**Record Validation Error Response (400 Bad Request):**
+```json
+{
+  "error": "validation_error",
+  "message": "Record at index 0 key exceeds maximum length of 1024 characters (got 1025)",
+  "details": {
+    "field": "records[0].key",
+    "max_size": 1024,
+    "actual_size": 1025
+  }
 }
 ```
 
 ### Example with curl
 
 ```bash
-# Simple record
+# Single record in batch format
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
-  -d '{"key": null, "value": "Hello, World!", "headers": null}'
+  -d '{"records": [{"key": null, "value": "Hello, World!", "headers": null}]}'
 
-# Record with key and headers
+# Batch of multiple records
 curl -X POST http://127.0.0.1:8080/topics/news/records \
   -H "Content-Type: application/json" \
-  -d '{"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}}'
+  -d '{
+    "records": [
+      {"key": "user123", "value": "Hello from mobile!", "headers": {"priority": "high", "device": "mobile"}},
+      {"key": "user456", "value": "Another message", "headers": {"priority": "low", "device": "web"}}
+    ]
+  }'
 ```
 
 ## Poll Records
@@ -440,7 +488,8 @@ All API errors return OpenAPI-compliant structured error responses:
 - Consumer group IDs: 1-255 characters, same pattern as topics
 - Record keys: Maximum 1024 characters
 - Record values: Maximum 1MB (1,048,576 bytes)
-- Header values: Maximum 1024 characters each
+- Header values: Maximum 1024 characters each (no limit on header count per record)
+- Batch size: 1-1000 records per batch request
 - Query parameter `max_records`: 1-10000 range
 - Query parameter `timeout_ms`: 0-60000 range
 
