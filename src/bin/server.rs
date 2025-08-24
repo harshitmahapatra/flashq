@@ -109,7 +109,7 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
 
 
 
-fn validate_message_record(record: &MessageRecord, index: usize) -> Result<(), ErrorResponse> {
+fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
     if let Some(key) = &record.key {
         if key.len() > MAX_KEY_SIZE {
             return Err(ErrorResponse::with_details(

@@ -1,4 +1,5 @@
 use message_queue_rs::api::*;
+use message_queue_rs::Record;
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -184,13 +185,13 @@ impl TestHelper {
         }
     }
 
-    // Message operations - updated for new MessageRecord structure
+    // Message operations - updated for new Record structure
     pub async fn post_message(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        // Legacy helper - converts content to new MessageRecord format
+        // Legacy helper - converts content to new Record format
         self.post_message_with_record(topic, None, content, None)
             .await
     }
@@ -203,7 +204,7 @@ impl TestHelper {
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
         // Convert single record to batch format for new API
-        let message_record = MessageRecord {
+        let message_record = Record {
             key,
             value: value.to_string(),
             headers,
@@ -223,7 +224,7 @@ impl TestHelper {
     pub async fn post_batch_messages(
         &self,
         topic: &str,
-        records: Vec<MessageRecord>,
+        records: Vec<Record>,
     ) -> reqwest::Result<reqwest::Response> {
         let produce_request = ProduceRequest { records };
         

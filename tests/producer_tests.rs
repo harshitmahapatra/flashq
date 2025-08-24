@@ -1,6 +1,7 @@
 mod test_helpers;
 
 use message_queue_rs::api::*;
+use message_queue_rs::Record;
 use test_helpers::{TestHelper, TestServer};
 
 #[tokio::test]
@@ -272,7 +273,7 @@ async fn test_batch_message_posting() {
     let topic = "batch_test_topic";
 
     // Test single record batch
-    let single_record = vec![MessageRecord {
+    let single_record = vec![Record {
         key: Some("user1".to_string()),
         value: "First message".to_string(),
         headers: None,
@@ -289,17 +290,17 @@ async fn test_batch_message_posting() {
     headers.insert("source".to_string(), "batch-test".to_string());
     
     let batch_records = vec![
-        MessageRecord {
+        Record {
             key: Some("user2".to_string()),
             value: "Second message".to_string(),
             headers: Some(headers.clone()),
         },
-        MessageRecord {
+        Record {
             key: None,
             value: "Third message".to_string(),
             headers: None,
         },
-        MessageRecord {
+        Record {
             key: Some("user3".to_string()),
             value: "Fourth message".to_string(),
             headers: Some(headers),

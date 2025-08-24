@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use message_queue_rs::api::*;
+use message_queue_rs::Record;
 
 // =============================================================================
 // CLI CONFIGURATION
@@ -55,10 +56,14 @@ async fn main() {
 // =============================================================================
 
 async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, message: &str) {
-    let request = PostRecordRequest {
+    let record = Record {
         key: None,
         value: message.to_string(),
         headers: None,
+    };
+
+    let request = ProduceRequest {
+        records: vec![record],
     };
 
     let url = format!("{server_url}/topics/{topic}/records");
@@ -66,12 +71,16 @@ async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, m
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<PostRecordResponse>().await {
-                    Ok(post_response) => {
-                        println!(
-                            "✓ Posted message to topic '{}' with offset: {}",
-                            topic, post_response.offset
-                        );
+                match response.json::<ProduceResponse>().await {
+                    Ok(produce_response) => {
+                        if let Some(first_offset) = produce_response.offsets.first() {
+                            println!(
+                                "✓ Posted message to topic '{}' with offset: {}",
+                                topic, first_offset.offset
+                            );
+                        } else {
+                            println!("✓ Posted message to topic '{}' (no offset returned)", topic);
+                        }
                     }
                     Err(e) => println!("✗ Failed to parse response: {e}"),
                 }

@@ -1,34 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use crate::Record;
 
 // =============================================================================
 // PRODUCER API TYPES
 // =============================================================================
 
-#[derive(Serialize, Deserialize)]
-pub struct PostRecordRequest {
-    pub key: Option<String>,
-    pub value: String,
-    pub headers: Option<HashMap<String, String>>,
-}
 
-#[derive(Serialize, Deserialize)]
-pub struct PostRecordResponse {
-    pub offset: u64,
-    pub timestamp: String,
-}
 
-// Batch Producer API structures (OpenAPI spec)
-#[derive(Serialize, Deserialize)]
-pub struct MessageRecord {
-    pub key: Option<String>,
-    pub value: String,
-    pub headers: Option<HashMap<String, String>>,
-}
+
+
+
 
 #[derive(Serialize, Deserialize)]
 pub struct ProduceRequest {
-    pub records: Vec<MessageRecord>,
+    pub records: Vec<Record>,
 }
 
 #[derive(Serialize, Deserialize)]
