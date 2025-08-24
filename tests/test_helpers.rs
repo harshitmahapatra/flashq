@@ -213,18 +213,30 @@ impl TestHelper {
             .await
     }
 
-    pub async fn poll_messages(
+    // Note: Direct topic polling has been removed to align with OpenAPI spec.
+    // Use consumer group endpoints for message consumption.
+
+    /// Helper method for tests that need to verify posted messages
+    /// Creates a temporary consumer group to fetch all messages
+    pub async fn poll_messages_for_testing(
         &self,
         topic: &str,
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let mut request = self
-            .client
-            .get(format!("{}/topics/{}/messages", self.base_url, topic));
-        if let Some(c) = count {
-            request = request.query(&[("count", c.to_string())]);
-        }
-        request.send().await
+        let group_id = format!("test-{}", std::process::id());
+
+        // Create consumer group (ignore if it already exists)
+        let _ = self.create_consumer_group(&group_id).await;
+
+        // Fetch messages
+        let response = self
+            .fetch_messages_for_consumer_group(&group_id, topic, count)
+            .await;
+
+        // Clean up consumer group (ignore errors)
+        let _ = self.leave_consumer_group(&group_id).await;
+
+        response
     }
 
     // Consumer group operations

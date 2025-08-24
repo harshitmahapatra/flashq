@@ -89,12 +89,32 @@ async fn poll_messages(
     topic: &str,
     count: Option<usize>,
 ) {
-    let mut url = format!("{server_url}/topics/{topic}/messages");
-    if let Some(c) = count {
-        url.push_str(&format!("?count={c}"));
+    // Generate a unique consumer group ID for this client session
+    let group_id = format!("client-{}", std::process::id());
+
+    // Create consumer group
+    let create_url = format!("{server_url}/consumer/{group_id}");
+    match client.post(&create_url).send().await {
+        Ok(response) => {
+            if !response.status().is_success() {
+                handle_error_response(response, &format!("create consumer group '{group_id}'"))
+                    .await;
+                return;
+            }
+        }
+        Err(e) => {
+            println!("✗ Failed to create consumer group: {e}");
+            return;
+        }
     }
 
-    match client.get(&url).send().await {
+    // Fetch messages from consumer group
+    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
+    if let Some(c) = count {
+        fetch_url.push_str(&format!("?max_records={c}"));
+    }
+
+    match client.get(&fetch_url).send().await {
         Ok(response) => {
             if response.status().is_success() {
                 match response.json::<FetchResponse>().await {
@@ -117,6 +137,10 @@ async fn poll_messages(
         }
         Err(e) => println!("✗ Failed to connect to server: {e}"),
     }
+
+    // Clean up consumer group
+    let delete_url = format!("{server_url}/consumer/{group_id}");
+    let _ = client.delete(&delete_url).send().await;
 }
 
 // =============================================================================

@@ -55,12 +55,6 @@ pub struct RecordResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PollRecordsResponse {
-    pub records: Vec<RecordResponse>,
-    pub count: usize,
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct FetchResponse {
     pub records: Vec<RecordResponse>,
     pub next_offset: u64,

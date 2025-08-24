@@ -244,7 +244,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/topics/{topic}/records", post(post_message))
-        .route("/topics/{topic}/messages", get(poll_messages))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
@@ -363,128 +362,6 @@ async fn post_message(
                 &format!("POST /topics/{topic}/records failed: {error}"),
             );
             let error_response = ErrorResponse::internal_error(&error.to_string());
-            Err((
-                error_to_status_code(&error_response.error),
-                Json(error_response),
-            ))
-        }
-    }
-}
-
-// =============================================================================
-// BASIC CONSUMER ENDPOINTS
-// =============================================================================
-
-async fn poll_messages(
-    State(app_state): State<AppState>,
-    Path(topic): Path<String>,
-    Query(params): Query<PollQuery>,
-) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Validate topic name
-    if let Err(error_response) = validate_topic_name(&topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /topics/{}/records topic validation failed: {}",
-                topic, error_response.message
-            ),
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    // Validate query parameters
-    if let Err(error_response) = validate_poll_query(&params) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /topics/{}/records query validation failed: {}",
-                topic, error_response.message
-            ),
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    let limit = params.effective_limit();
-    let timeout_ms = params.effective_timeout_ms();
-    let include_headers = params.should_include_headers();
-
-    let messages_result = match params.from_offset {
-        Some(offset) => app_state
-            .queue
-            .poll_records_from_offset(&topic, offset, limit),
-        None => app_state.queue.poll_records(&topic, limit),
-    };
-
-    match messages_result {
-        Ok(messages) => {
-            let offset_info = match params.from_offset {
-                Some(offset) => format!(" from_offset: {offset}"),
-                None => String::new(),
-            };
-
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "GET /topics/{}/records - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
-                    topic,
-                    limit,
-                    timeout_ms,
-                    offset_info,
-                    messages.len()
-                ),
-            );
-
-            let message_responses: Vec<RecordResponse> = messages
-                .into_iter()
-                .map(|msg| RecordResponse {
-                    key: msg.record.key,
-                    value: msg.record.value,
-                    headers: if include_headers {
-                        msg.record.headers
-                    } else {
-                        None
-                    },
-                    offset: msg.offset,
-                    timestamp: msg.timestamp,
-                })
-                .collect();
-
-            let next_offset = if let Some(last_message) = message_responses.last() {
-                last_message.offset + 1
-            } else {
-                params
-                    .from_offset
-                    .unwrap_or_else(|| app_state.queue.get_high_water_mark(&topic))
-            };
-
-            let high_water_mark = app_state.queue.get_high_water_mark(&topic);
-            let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
-
-            Ok(Json(response))
-        }
-        Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!("GET /topics/{topic}/records failed: {error}"),
-            );
-
-            // Check if it's a topic not found error
-            let error_response = if error.is_not_found() {
-                ErrorResponse::topic_not_found(&topic)
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
-            };
-
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),

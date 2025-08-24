@@ -139,7 +139,7 @@ async fn test_message_size_and_validation_limits() {
         "Max header value size should be accepted"
     );
 
-    let response = helper.poll_messages(topic, None).await.unwrap();
+    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
@@ -198,7 +198,7 @@ async fn test_concurrent_message_posting() {
         assert!(success, "Concurrent post {index} should succeed");
     }
 
-    let response = helper.poll_messages(topic, None).await.unwrap();
+    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
@@ -216,11 +216,11 @@ async fn test_concurrent_message_posting() {
 
         if let Some(ref headers) = record.headers {
             assert!(
-                headers.contains_key("thread"),
+                headers.contains_key("thread" as &str),
                 "Thread header should be present"
             );
             assert!(
-                headers.contains_key("index"),
+                headers.contains_key("index" as &str),
                 "Index header should be present"
             );
         }
@@ -247,7 +247,10 @@ async fn test_concurrent_message_posting() {
 
     for topic_index in 0..3 {
         let topic_name = format!("concurrent_topic_{topic_index}");
-        let response = helper.poll_messages(&topic_name, None).await.unwrap();
+        let response = helper
+            .poll_messages_for_testing(&topic_name, None)
+            .await
+            .unwrap();
         assert_eq!(response.status(), 200);
         let poll_data: FetchResponse = response.json().await.unwrap();
         assert_eq!(
@@ -328,7 +331,7 @@ async fn test_message_structure_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 200, "Explicit nulls should be accepted");
 
-    let response = helper.poll_messages(topic, None).await.unwrap();
+    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
