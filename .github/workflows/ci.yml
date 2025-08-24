@@ -93,7 +93,7 @@ jobs:
       run: |
         cargo build --bin server
         cargo build --bin client
-        cargo build --bin message-queue-rs
+        cargo build --bin flashq
 
     - name: Build release (on release only)
       if: github.event_name == 'release'
@@ -104,7 +104,7 @@ jobs:
       run: |
         cargo build --release --bin server
         cargo build --release --bin client
-        cargo build --release --bin message-queue-rs
+        cargo build --release --bin flashq
 
   security:
     name: Security Audit
