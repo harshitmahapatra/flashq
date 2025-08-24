@@ -9,10 +9,18 @@ use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tokio::time::sleep;
 
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
+
 static SERVER_INIT: Once = Once::new();
 static CLIENT_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CLIENT_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
 pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
     // Bind to port 0 to let the OS choose an available port
@@ -90,6 +98,10 @@ pub fn get_timeout_config() -> (u32, u64) {
         (30, 500) // 15 seconds locally
     }
 }
+
+// ============================================================================
+// TEST INFRASTRUCTURE
+// ============================================================================
 
 pub struct TestServer {
     process: Child,
@@ -199,14 +211,13 @@ impl Drop for TestServer {
     }
 }
 
-// Helper struct for common test operations
-pub struct TestHelper {
+pub struct TestClient {
     pub client: reqwest::Client,
     pub base_url: String,
 }
 
 #[allow(dead_code)]
-impl TestHelper {
+impl TestClient {
     pub fn new(server: &TestServer) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -214,7 +225,9 @@ impl TestHelper {
         }
     }
 
-    // Message operations - updated for new Record structure
+    // ------------------------------------------------------------------------
+    // HTTP API Operations
+    // ------------------------------------------------------------------------
     pub async fn post_message(
         &self,
         topic: &str,
@@ -231,7 +244,7 @@ impl TestHelper {
         value: &str,
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
-        // Convert single record to batch format for new API
+        // Convert single record to batch format
         let message_record = Record {
             key,
             value: value.to_string(),
@@ -263,9 +276,6 @@ impl TestHelper {
             .await
     }
 
-    // Note: Direct topic polling has been removed to align with OpenAPI spec.
-    // Use consumer group endpoints for message consumption.
-
     // Basic polling for testing - creates temporary consumer group
     pub async fn poll_messages_for_testing(
         &self,
@@ -289,7 +299,9 @@ impl TestHelper {
         response
     }
 
-    // Consumer group operations
+    // ------------------------------------------------------------------------
+    // Consumer Group Operations
+    // ------------------------------------------------------------------------
     pub async fn create_consumer_group(
         &self,
         group_id: &str,
@@ -343,36 +355,36 @@ impl TestHelper {
         topic: &str,
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let mut request = self.client.get(format!(
-            "{}/consumer/{}/topics/{}",
-            self.base_url, group_id, topic
-        ));
-        if let Some(c) = count {
-            request = request.query(&[("count", c.to_string())]);
-        }
-        request.send().await
+        self.fetch_messages_for_consumer_group_with_options(group_id, topic, None, count)
+            .await
     }
 
-    pub async fn fetch_messages_for_consumer_group_from_offset(
+    pub async fn fetch_messages_for_consumer_group_with_options(
         &self,
         group_id: &str,
         topic: &str,
-        from_offset: u64,
+        from_offset: Option<u64>,
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let mut query = vec![("from_offset", from_offset.to_string())];
+        let mut query = Vec::new();
+
+        if let Some(offset) = from_offset {
+            query.push(("from_offset", offset.to_string()));
+        }
         if let Some(c) = count {
             query.push(("count", c.to_string()));
         }
 
-        self.client
-            .get(format!(
-                "{}/consumer/{}/topics/{}",
-                self.base_url, group_id, topic
-            ))
-            .query(&query)
-            .send()
-            .await
+        let mut request = self.client.get(format!(
+            "{}/consumer/{}/topics/{}",
+            self.base_url, group_id, topic
+        ));
+
+        if !query.is_empty() {
+            request = request.query(&query);
+        }
+
+        request.send().await
     }
 
     pub async fn assert_poll_response(
@@ -405,6 +417,10 @@ impl TestHelper {
 
         poll_data
     }
+
+    // ------------------------------------------------------------------------
+    // CLI Client Operations
+    // ------------------------------------------------------------------------
 
     pub async fn health_check(&self) -> reqwest::Result<reqwest::Response> {
         self.client
@@ -478,312 +494,6 @@ impl TestHelper {
         } else {
             Err(format!(
                 "Client poll failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into())
-        };
-
-        // Clean up consumer group
-        let _ = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer", "leave", &temp_group_id])
-            .output()
-            .await;
-
-        result
-    }
-
-    pub async fn create_consumer_group_with_client(
-        &self,
-        group_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer", "create", group_id])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client consumer group create failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn leave_consumer_group_with_client(
-        &self,
-        group_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer", "leave", group_id])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client consumer group leave failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn poll_consumer_group_with_client(
-        &self,
-        group_id: &str,
-        topic: &str,
-        count: Option<usize>,
-        from_offset: Option<u64>,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let mut args = vec![
-            "--port".to_string(),
-            port.to_string(),
-            "consumer".to_string(),
-            "fetch".to_string(),
-            group_id.to_string(),
-            topic.to_string(),
-        ];
-
-        if let Some(c) = count {
-            args.push("--max-records".to_string());
-            args.push(c.to_string());
-        }
-        if let Some(offset) = from_offset {
-            args.push("--from-offset".to_string());
-            args.push(offset.to_string());
-        }
-
-        let output = TokioCommand::new(&client_binary)
-            .args(&args)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client consumer group poll failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn get_consumer_group_offset_with_client(
-        &self,
-        group_id: &str,
-        topic: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer", "offset", "get", group_id, topic])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client get consumer group offset failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn set_consumer_group_offset_with_client(
-        &self,
-        group_id: &str,
-        topic: &str,
-        offset: u64,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args([
-                "--port",
-                port,
-                "consumer",
-                "offset",
-                "commit",
-                group_id,
-                topic,
-                &offset.to_string(),
-            ])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client set consumer group offset failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn health_check_with_client(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "health"])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client health check failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn post_batch_messages_with_client(
-        &self,
-        topic: &str,
-        batch_file_path: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let output = TokioCommand::new(&client_binary)
-            .args([
-                "--port",
-                port,
-                "producer",
-                "records",
-                topic,
-                "--batch",
-                batch_file_path,
-            ])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client batch post failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn post_message_with_key_headers_client(
-        &self,
-        topic: &str,
-        message: &str,
-        key: Option<&str>,
-        headers: Option<&[(&str, &str)]>,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        let mut args = vec![
-            "--port".to_string(),
-            port.to_string(),
-            "producer".to_string(),
-            "records".to_string(),
-            topic.to_string(),
-            message.to_string(),
-        ];
-
-        if let Some(k) = key {
-            args.push("--key".to_string());
-            args.push(k.to_string());
-        }
-
-        if let Some(header_pairs) = headers {
-            for (k, v) in header_pairs {
-                args.push("--header".to_string());
-                args.push(format!("{k}={v}"));
-            }
-        }
-
-        let output = TokioCommand::new(&client_binary)
-            .args(&args)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Client post with key/headers failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .into());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    pub async fn poll_messages_from_offset_with_client(
-        &self,
-        topic: &str,
-        from_offset: u64,
-        count: Option<usize>,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').next_back().unwrap();
-
-        // Create a unique temporary consumer group for this poll operation
-        let temp_group_id = format!("test_poll_offset_{}", std::process::id());
-
-        // Create consumer group
-        let _ = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer", "create", &temp_group_id])
-            .output()
-            .await?;
-
-        // Fetch messages from specific offset
-        let mut args = vec![
-            "--port".to_string(),
-            port.to_string(),
-            "consumer".to_string(),
-            "fetch".to_string(),
-            temp_group_id.clone(),
-            topic.to_string(),
-            "--from-offset".to_string(),
-            from_offset.to_string(),
-        ];
-
-        if let Some(c) = count {
-            args.push("--max-records".to_string());
-            args.push(c.to_string());
-        }
-
-        let output = TokioCommand::new(&client_binary)
-            .args(&args)
-            .output()
-            .await?;
-
-        let result = if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            Err(format!(
-                "Client poll from offset failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )
             .into())

@@ -1,14 +1,14 @@
 mod test_helpers;
 
 use flashq::api::*;
-use test_helpers::{TestHelper, TestServer};
+use test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_consumer_group_operations() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let group_id = "test_group";
 
     let response = helper.create_consumer_group(group_id).await.unwrap();
@@ -28,7 +28,7 @@ async fn test_consumer_group_offset_management() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let group_id = "offset_test_group";
     let topic = "offset_test_topic";
 
@@ -72,7 +72,7 @@ async fn test_consumer_group_message_fetching() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let group_id = "fetch_test_group";
     let topic = "fetch_test_topic";
 
@@ -132,7 +132,7 @@ async fn test_consumer_group_from_offset_fetching() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let group_id = "offset_fetch_group";
     let topic = "offset_fetch_topic";
 
@@ -146,7 +146,7 @@ async fn test_consumer_group_from_offset_fetching() {
     }
 
     let response = helper
-        .fetch_messages_for_consumer_group_from_offset(group_id, topic, 3, Some(3))
+        .fetch_messages_for_consumer_group_with_options(group_id, topic, Some(3), Some(3))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -157,7 +157,7 @@ async fn test_consumer_group_from_offset_fetching() {
     assert_eq!(fetch_response.records[2].offset, 5);
 
     let response = helper
-        .fetch_messages_for_consumer_group_from_offset(group_id, topic, 10, Some(5))
+        .fetch_messages_for_consumer_group_with_options(group_id, topic, Some(10), Some(5))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -170,7 +170,7 @@ async fn test_multiple_consumer_groups() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "multi_group_topic";
 
     for group_id in ["group_a", "group_b", "group_c"] {
@@ -223,7 +223,7 @@ async fn test_consumer_group_error_cases() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
 
     let response = helper
         .get_consumer_group_offset("nonexistent_group", "test_topic")
@@ -249,7 +249,7 @@ async fn test_consumer_group_edge_cases() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let group_id = "edge_case_group";
     let topic = "edge_case_topic";
 

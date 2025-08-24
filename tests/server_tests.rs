@@ -1,13 +1,13 @@
 mod test_helpers;
 
-use test_helpers::{TestHelper, TestServer};
+use test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_health_check() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
 
     let response = helper.health_check().await.unwrap();
     assert_eq!(response.status(), 200);
@@ -23,7 +23,7 @@ async fn test_server_error_handling() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
 
     let response = helper
         .client
@@ -48,7 +48,7 @@ async fn test_malformed_requests() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
 
     let response = helper
         .client

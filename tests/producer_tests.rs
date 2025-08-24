@@ -2,14 +2,14 @@ mod test_helpers;
 
 use flashq::Record;
 use flashq::api::*;
-use test_helpers::{TestHelper, TestServer};
+use test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_post_message_integration() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
 
     let response = helper
         .post_message_with_record("test", None, "Integration test record", None)
@@ -53,7 +53,7 @@ async fn test_message_size_and_validation_limits() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "validation_test_topic";
 
     let max_key = "x".repeat(1024);
@@ -164,7 +164,7 @@ async fn test_client_binary_integration() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "client_test_topic";
 
     // Test posting with client binary
@@ -191,12 +191,12 @@ async fn test_concurrent_message_posting() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "concurrent_posting_topic";
 
     let post_handles: Vec<_> = (0..20)
         .map(|i| {
-            let helper = TestHelper::new(&server);
+            let helper = TestClient::new(&server);
             tokio::spawn(async move {
                 let key = if i % 2 == 0 {
                     Some(format!("key_{i}"))
@@ -261,7 +261,7 @@ async fn test_concurrent_message_posting() {
 
     let multi_topic_handles: Vec<_> = (0..15)
         .map(|i| {
-            let helper = TestHelper::new(&server);
+            let helper = TestClient::new(&server);
             let topic_name = format!("concurrent_topic_{}", i % 3);
             tokio::spawn(async move {
                 let response = helper
@@ -299,7 +299,7 @@ async fn test_batch_message_posting() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "batch_test_topic";
 
     // Test single record batch
@@ -368,7 +368,7 @@ async fn test_message_structure_edge_cases() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
-    let helper = TestHelper::new(&server);
+    let helper = TestClient::new(&server);
     let topic = "edge_case_topic";
 
     let response = helper
