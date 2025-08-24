@@ -16,12 +16,13 @@ async fn test_post_message_integration() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let response_data: PostRecordResponse = response
+    let response_data: ProduceResponse = response
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offset, 0);
-    assert!(response_data.timestamp.contains("T"));
+    assert_eq!(response_data.offsets.len(), 1);
+    assert_eq!(response_data.offsets[0].offset, 0);
+    assert!(response_data.offsets[0].timestamp.contains("T"));
 
     let mut headers = std::collections::HashMap::new();
     headers.insert("source".to_string(), "integration-test".to_string());
@@ -38,11 +39,12 @@ async fn test_post_message_integration() {
         .unwrap();
     assert!(response.status().is_success());
 
-    let response_data: PostRecordResponse = response
+    let response_data: ProduceResponse = response
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offset, 1);
+    assert_eq!(response_data.offsets.len(), 1);
+    assert_eq!(response_data.offsets[0].offset, 1);
 }
 
 #[tokio::test]
@@ -262,6 +264,69 @@ async fn test_concurrent_message_posting() {
 }
 
 #[tokio::test]
+async fn test_batch_message_posting() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "batch_test_topic";
+
+    // Test single record batch
+    let single_record = vec![MessageRecord {
+        key: Some("user1".to_string()),
+        value: "First message".to_string(),
+        headers: None,
+    }];
+
+    let response = helper.post_batch_messages(topic, single_record).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let response_data: ProduceResponse = response.json().await.unwrap();
+    assert_eq!(response_data.offsets.len(), 1);
+    assert_eq!(response_data.offsets[0].offset, 0);
+
+    // Test multiple records batch
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("source".to_string(), "batch-test".to_string());
+    
+    let batch_records = vec![
+        MessageRecord {
+            key: Some("user2".to_string()),
+            value: "Second message".to_string(),
+            headers: Some(headers.clone()),
+        },
+        MessageRecord {
+            key: None,
+            value: "Third message".to_string(),
+            headers: None,
+        },
+        MessageRecord {
+            key: Some("user3".to_string()),
+            value: "Fourth message".to_string(),
+            headers: Some(headers),
+        },
+    ];
+
+    let response = helper.post_batch_messages(topic, batch_records).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let response_data: ProduceResponse = response.json().await.unwrap();
+    assert_eq!(response_data.offsets.len(), 3);
+    assert_eq!(response_data.offsets[0].offset, 1);
+    assert_eq!(response_data.offsets[1].offset, 2);
+    assert_eq!(response_data.offsets[2].offset, 3);
+
+    // Verify all messages were posted correctly
+    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let poll_data: FetchResponse = response.json().await.unwrap();
+    assert_eq!(poll_data.records.len(), 4);
+    
+    assert_eq!(poll_data.records[0].value, "First message");
+    assert_eq!(poll_data.records[1].value, "Second message");
+    assert_eq!(poll_data.records[2].value, "Third message");
+    assert_eq!(poll_data.records[3].value, "Fourth message");
+}
+
+#[tokio::test]
 async fn test_message_structure_edge_cases() {
     let server = TestServer::start()
         .await
@@ -307,24 +372,30 @@ async fn test_message_structure_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 200, "Special headers should be accepted");
 
+    // Test minimal record using new batch format
     let response = helper
         .client
         .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
-            "value": "Minimal record"
+            "records": [{
+                "value": "Minimal record"
+            }]
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 200, "Minimal record should be accepted");
 
+    // Test record with explicit nulls using new batch format
     let response = helper
         .client
         .post(format!("{}/topics/{}/records", helper.base_url, topic))
         .json(&serde_json::json!({
-            "key": null,
-            "value": "Record with explicit nulls",
-            "headers": null
+            "records": [{
+                "key": null,
+                "value": "Record with explicit nulls",
+                "headers": null
+            }]
         }))
         .send()
         .await

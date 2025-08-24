@@ -202,13 +202,34 @@ impl TestHelper {
         value: &str,
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
+        // Convert single record to batch format for new API
+        let message_record = MessageRecord {
+            key,
+            value: value.to_string(),
+            headers,
+        };
+        
+        let produce_request = ProduceRequest {
+            records: vec![message_record],
+        };
+        
         self.client
             .post(format!("{}/topics/{}/records", self.base_url, topic))
-            .json(&PostRecordRequest {
-                key,
-                value: value.to_string(),
-                headers,
-            })
+            .json(&produce_request)
+            .send()
+            .await
+    }
+
+    pub async fn post_batch_messages(
+        &self,
+        topic: &str,
+        records: Vec<MessageRecord>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let produce_request = ProduceRequest { records };
+        
+        self.client
+            .post(format!("{}/topics/{}/records", self.base_url, topic))
+            .json(&produce_request)
             .send()
             .await
     }

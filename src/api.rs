@@ -18,6 +18,30 @@ pub struct PostRecordResponse {
     pub timestamp: String,
 }
 
+// Batch Producer API structures (OpenAPI spec)
+#[derive(Serialize, Deserialize)]
+pub struct MessageRecord {
+    pub key: Option<String>,
+    pub value: String,
+    pub headers: Option<HashMap<String, String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProduceRequest {
+    pub records: Vec<MessageRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct OffsetInfo {
+    pub offset: u64,
+    pub timestamp: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProduceResponse {
+    pub offsets: Vec<OffsetInfo>,
+}
+
 // =============================================================================
 // CONSUMER API TYPES
 // =============================================================================

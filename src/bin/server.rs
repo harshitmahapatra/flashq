@@ -107,44 +107,90 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
     }
 }
 
-fn validate_record_request(request: &PostRecordRequest) -> Result<(), ErrorResponse> {
-    if let Some(key) = &request.key {
+
+
+fn validate_message_record(record: &MessageRecord, index: usize) -> Result<(), ErrorResponse> {
+    if let Some(key) = &record.key {
         if key.len() > MAX_KEY_SIZE {
-            return Err(ErrorResponse::record_size_error(
-                "Record key",
-                MAX_KEY_SIZE,
-                key.len(),
+            return Err(ErrorResponse::with_details(
+                "validation_error",
+                &format!(
+                    "Record at index {} key exceeds maximum length of {} characters (got {})",
+                    index, MAX_KEY_SIZE, key.len()
+                ),
+                serde_json::json!({
+                    "field": format!("records[{}].key", index),
+                    "max_size": MAX_KEY_SIZE,
+                    "actual_size": key.len()
+                }),
             ));
         }
     }
 
-    if request.value.len() > MAX_VALUE_SIZE {
-        return Err(ErrorResponse::record_size_error(
-            "Record value",
-            MAX_VALUE_SIZE,
-            request.value.len(),
+    if record.value.len() > MAX_VALUE_SIZE {
+        return Err(ErrorResponse::with_details(
+            "validation_error",
+            &format!(
+                "Record at index {} value exceeds maximum length of {} characters (got {})",
+                index, MAX_VALUE_SIZE, record.value.len()
+            ),
+            serde_json::json!({
+                "field": format!("records[{}].value", index),
+                "max_size": MAX_VALUE_SIZE,
+                "actual_size": record.value.len()
+            }),
         ));
     }
 
-    if let Some(headers) = &request.headers {
+    if let Some(headers) = &record.headers {
         for (header_key, header_value) in headers {
             if header_value.len() > MAX_HEADER_VALUE_SIZE {
                 return Err(ErrorResponse::with_details(
                     "validation_error",
                     &format!(
-                        "Header '{}' value exceeds maximum length of {} characters (got {})",
-                        header_key,
-                        MAX_HEADER_VALUE_SIZE,
-                        header_value.len()
+                        "Record at index {} header '{}' value exceeds maximum length of {} characters (got {})",
+                        index, header_key, MAX_HEADER_VALUE_SIZE, header_value.len()
                     ),
                     serde_json::json!({
-                        "field": format!("headers.{}", header_key),
+                        "field": format!("records[{}].headers.{}", index, header_key),
                         "max_size": MAX_HEADER_VALUE_SIZE,
                         "actual_size": header_value.len()
                     }),
                 ));
             }
         }
+    }
+
+    Ok(())
+}
+
+fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorResponse> {
+    // Check batch size limits (1-1000 records as per OpenAPI spec)
+    if request.records.is_empty() {
+        return Err(ErrorResponse::invalid_parameter(
+            "records",
+            "At least one record must be provided"
+        ));
+    }
+
+    if request.records.len() > 1000 {
+        return Err(ErrorResponse::with_details(
+            "validation_error",
+            &format!(
+                "Batch size exceeds maximum of 1000 records (got {})",
+                request.records.len()
+            ),
+            serde_json::json!({
+                "field": "records",
+                "max_size": 1000,
+                "actual_size": request.records.len()
+            }),
+        ));
+    }
+
+    // Validate each record in the batch
+    for (index, record) in request.records.iter().enumerate() {
+        validate_message_record(record, index)?;
     }
 
     Ok(())
@@ -250,7 +296,7 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/topics/{topic}/records", post(post_message))
+        .route("/topics/{topic}/records", post(produce_messages))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
@@ -306,11 +352,13 @@ async fn health_check(
 // PRODUCER ENDPOINTS
 // =============================================================================
 
-async fn post_message(
+
+
+async fn produce_messages(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
-    Json(request): Json<PostRecordRequest>,
-) -> Result<Json<PostRecordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Json(request): Json<ProduceRequest>,
+) -> Result<Json<ProduceResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&topic) {
         log(
@@ -327,8 +375,8 @@ async fn post_message(
         ));
     }
 
-    // Validate record request
-    if let Err(error_response) = validate_record_request(&request) {
+    // Validate produce request
+    if let Err(error_response) = validate_produce_request(&request) {
         log(
             app_state.config.log_level,
             LogLevel::Error,
@@ -343,30 +391,45 @@ async fn post_message(
         ));
     }
 
-    let value_for_log = request.value.clone();
-    match app_state.queue.post_record(
-        topic.clone(),
-        Record {
-            key: request.key,
-            value: request.value,
-            headers: request.headers,
-        },
-    ) {
-        Ok(offset) => {
+    let record_count = request.records.len();
+    
+    // Convert MessageRecord to Record
+    let records: Vec<Record> = request.records.into_iter()
+        .map(|msg_record| Record {
+            key: msg_record.key,
+            value: msg_record.value,
+            headers: msg_record.headers,
+        })
+        .collect();
+
+    match app_state.queue.post_records(topic.clone(), records) {
+        Ok(offsets) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!("POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"),
+                &format!(
+                    "POST /topics/{}/records - Posted {} records, offsets: {:?}",
+                    topic, record_count, offsets
+                ),
             );
+            
             let timestamp = chrono::Utc::now().to_rfc3339();
+            let offset_infos: Vec<OffsetInfo> = offsets.into_iter()
+                .map(|offset| OffsetInfo {
+                    offset,
+                    timestamp: timestamp.clone(),
+                })
+                .collect();
 
-            Ok(Json(PostRecordResponse { offset, timestamp }))
+            Ok(Json(ProduceResponse {
+                offsets: offset_infos,
+            }))
         }
         Err(error) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /topics/{topic}/records failed: {error}"),
+                &format!("POST /topics/{}/records failed: {}", topic, error),
             );
             let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((

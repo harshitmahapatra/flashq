@@ -216,6 +216,17 @@ impl MessageQueue {
         Ok(topic_log.append(record))
     }
 
+    pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, String> {
+        let mut topic_log_map = self.topics.lock().unwrap();
+        let topic_log = topic_log_map.entry(topic).or_default();
+        
+        let mut offsets = Vec::new();
+        for record in records {
+            offsets.push(topic_log.append(record));
+        }
+        Ok(offsets)
+    }
+
     pub fn poll_records(
         &self,
         topic: &str,
