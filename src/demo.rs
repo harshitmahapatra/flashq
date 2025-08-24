@@ -6,9 +6,9 @@ pub fn run_interactive_demo() {
     let queue = std::sync::Arc::new(MessageQueue::new());
     let mut topics_created: HashMap<String, usize> = HashMap::new();
 
-    println!("🚀 Message Queue Interactive Demo");
+    println!("⚡ FlashQ Interactive Demo");
     println!("=================================");
-    println!("Welcome to the Rust Message Queue demonstration!");
+    println!("Welcome to the ⚡ FlashQ demonstration!");
     println!("This interactive demo lets you explore the core library functionality.\n");
 
     loop {
@@ -35,7 +35,7 @@ pub fn run_interactive_demo() {
         }
     }
 
-    println!("\n👋 Thank you for using the Message Queue demo!");
+    println!("\n👋 Thank you for using the FlashQ demo!");
 }
 
 fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
@@ -192,7 +192,7 @@ fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
     let demo_messages = [
         "Hello, World!",
         "This is the second message",
-        "Message queue is working great!",
+        "FlashQ is working great!",
     ];
 
     println!(

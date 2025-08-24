@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use message_queue_rs::api::*;
-use message_queue_rs::{Record, RecordWithOffset};
+use flashq::api::*;
+use flashq::{Record, RecordWithOffset};
 
 // =============================================================================
 // CLI CONFIGURATION

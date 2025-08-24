@@ -1,7 +1,7 @@
 mod test_helpers;
 
-use message_queue_rs::Record;
-use message_queue_rs::api::*;
+use flashq::Record;
+use flashq::api::*;
 use test_helpers::{TestHelper, TestServer};
 
 #[tokio::test]

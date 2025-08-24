@@ -1,5 +1,5 @@
-use message_queue_rs::Record;
-use message_queue_rs::api::*;
+use flashq::Record;
+use flashq::api::*;
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;

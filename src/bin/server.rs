@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
+use flashq::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -359,7 +359,7 @@ async fn health_check(
     log(app_state.config.log_level, LogLevel::Trace, "GET /health");
     Ok(Json(HealthCheckResponse {
         status: "healthy".to_string(),
-        service: "message-queue-rs".to_string(),
+        service: "flashq".to_string(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

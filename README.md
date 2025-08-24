@@ -1,6 +1,6 @@
-# Message Queue RS
+# ⚡ FlashQ
 
-A Kafka-inspired message queue system built in Rust with HTTP REST API. Features topic-based messaging with optional keys and headers, offset-based positioning, consumer groups, and concurrent client support.
+FlashQ is a Kafka-inspired message queue system built in Rust with HTTP REST API. Features topic-based messaging with optional keys and headers, offset-based positioning, consumer groups, and concurrent client support.
 
 ## Features
 
@@ -24,7 +24,7 @@ A Kafka-inspired message queue system built in Rust with HTTP REST API. Features
 Explore the message queue with a user-friendly menu interface:
 
 ```bash
-cargo run --bin message-queue-rs
+cargo run --bin flashq
 ```
 
 ### HTTP Server & Client
