@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use message_queue_rs::api::*;
+use message_queue_rs::{Record, RecordWithOffset};
 
 // =============================================================================
 // CLI CONFIGURATION
@@ -55,10 +56,14 @@ async fn main() {
 // =============================================================================
 
 async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, message: &str) {
-    let request = PostRecordRequest {
+    let record = Record {
         key: None,
         value: message.to_string(),
         headers: None,
+    };
+
+    let request = ProduceRequest {
+        records: vec![record],
     };
 
     let url = format!("{server_url}/topics/{topic}/records");
@@ -66,12 +71,16 @@ async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, m
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<PostRecordResponse>().await {
-                    Ok(post_response) => {
-                        println!(
-                            "✓ Posted message to topic '{}' with offset: {}",
-                            topic, post_response.offset
-                        );
+                match response.json::<ProduceResponse>().await {
+                    Ok(produce_response) => {
+                        if let Some(first_offset) = produce_response.offsets.first() {
+                            println!(
+                                "✓ Posted message to topic '{}' with offset: {}",
+                                topic, first_offset.offset
+                            );
+                        } else {
+                            println!("✓ Posted message to topic '{topic}' (no offset returned)");
+                        }
                     }
                     Err(e) => println!("✗ Failed to parse response: {e}"),
                 }
@@ -89,12 +98,32 @@ async fn poll_messages(
     topic: &str,
     count: Option<usize>,
 ) {
-    let mut url = format!("{server_url}/topics/{topic}/messages");
-    if let Some(c) = count {
-        url.push_str(&format!("?count={c}"));
+    // Generate a unique consumer group ID for this client session
+    let group_id = format!("client-{}", std::process::id());
+
+    // Create consumer group
+    let create_url = format!("{server_url}/consumer/{group_id}");
+    match client.post(&create_url).send().await {
+        Ok(response) => {
+            if !response.status().is_success() {
+                handle_error_response(response, &format!("create consumer group '{group_id}'"))
+                    .await;
+                return;
+            }
+        }
+        Err(e) => {
+            println!("✗ Failed to create consumer group: {e}");
+            return;
+        }
     }
 
-    match client.get(&url).send().await {
+    // Fetch messages from consumer group
+    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
+    if let Some(c) = count {
+        fetch_url.push_str(&format!("?max_records={c}"));
+    }
+
+    match client.get(&fetch_url).send().await {
         Ok(response) => {
             if response.status().is_success() {
                 match response.json::<FetchResponse>().await {
@@ -117,6 +146,10 @@ async fn poll_messages(
         }
         Err(e) => println!("✗ Failed to connect to server: {e}"),
     }
+
+    // Clean up consumer group
+    let delete_url = format!("{server_url}/consumer/{group_id}");
+    let _ = client.delete(&delete_url).send().await;
 }
 
 // =============================================================================
@@ -125,27 +158,42 @@ async fn poll_messages(
 
 async fn handle_error_response(response: reqwest::Response, operation: &str) {
     let status = response.status();
-    match response.json::<ErrorResponse>().await {
-        Ok(error_response) => {
-            println!("✗ Failed to {}: {}", operation, error_response.error);
+
+    // Try to get the response body as text first
+    match response.text().await {
+        Ok(body) => {
+            // Try to parse as ErrorResponse JSON
+            match serde_json::from_str::<ErrorResponse>(&body) {
+                Ok(error_response) => {
+                    println!("✗ Failed to {}: {}", operation, error_response.error);
+                }
+                Err(parse_error) => {
+                    println!(
+                        "✗ Server error: {status} (failed to parse error response: {parse_error})"
+                    );
+                    if !body.is_empty() {
+                        println!("   Raw response: {}", body.trim());
+                    }
+                }
+            }
         }
-        Err(_) => {
-            println!("✗ Server error: {status}");
+        Err(body_error) => {
+            println!("✗ Server error: {status} (failed to read response body: {body_error})");
         }
     }
 }
 
-fn print_message(message: &RecordResponse) {
+fn print_message(message: &RecordWithOffset) {
     print!(
         "{} [{}] {}",
-        message.timestamp, message.offset, message.value
+        message.timestamp, message.offset, message.record.value
     );
 
-    if let Some(ref key) = message.key {
+    if let Some(ref key) = message.record.key {
         print!(" (key: {key})");
     }
 
-    if let Some(ref headers) = message.headers {
+    if let Some(ref headers) = message.record.headers {
         if !headers.is_empty() {
             print!(" (headers: {headers:?})");
         }

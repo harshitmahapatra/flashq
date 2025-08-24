@@ -136,7 +136,7 @@ async fn test_consumer_group_from_offset_fetching() {
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 3);
     assert_eq!(fetch_response.records[0].offset, 3);
-    assert_eq!(fetch_response.records[0].value, "Offset Message 3");
+    assert_eq!(fetch_response.records[0].record.value, "Offset Message 3");
     assert_eq!(fetch_response.records[2].offset, 5);
 
     let response = helper
@@ -253,7 +253,7 @@ async fn test_consumer_group_edge_cases() {
     assert_eq!(response.status(), 200);
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 1);
-    assert_eq!(fetch_response.records[0].value, "Single message");
+    assert_eq!(fetch_response.records[0].record.value, "Single message");
 
     helper
         .update_consumer_group_offset(group_id, topic, 1)

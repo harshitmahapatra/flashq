@@ -15,12 +15,14 @@ The project follows Rust best practices with separate library and binary crates:
 - All unit tests located here
 
 ### API Module (`src/api.rs`)
-- **PostRecordRequest** - Request structure for posting records
-- **PostRecordResponse** - Response with record offset and timestamp
-- **RecordResponse** - Individual record in poll responses
+- **Record** - Unified record structure used for both requests and internal storage
+- **RecordWithOffset** - Record with offset and timestamp for polling responses
+- **ProduceRequest** - Batch request structure containing array of records
+- **ProduceResponse** - Response with array of offset information
 - **FetchResponse** - Complete poll response with record array
 - **PollQuery** - Query parameters for polling (count limits, offset positioning)
 - **ErrorResponse** - OpenAPI-compliant structured error responses with semantic error codes
+- **OffsetInfo** - Individual offset and timestamp information in batch responses
 - All structures use serde for JSON serialization/deserialization
 
 ### Binary Crates
@@ -49,12 +51,15 @@ The demo module provides an educational interactive demonstration:
 
 #### HTTP Server Binary (`src/bin/server.rs`)
 - REST API server built with Axum framework
+- Batch producer API supporting 1-1000 records per request
 - Endpoints for posting and polling records
+- Consumer group operations with offset management
 - Health check endpoint for monitoring
 - JSON request/response handling
 - OpenAPI-compliant error handling with structured responses and semantic error codes
 - Request validation with detailed error messages and field-specific context
 - HTTP status code mapping (400, 404, 422, 500) based on error types
+- Organized validation constants in `limits` module for maintainability
 
 #### CLI Client Binary (`src/bin/client.rs`)
 - Command-line interface for interacting with HTTP server

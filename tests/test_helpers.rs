@@ -1,3 +1,4 @@
+use message_queue_rs::Record;
 use message_queue_rs::api::*;
 use std::env;
 use std::net::TcpListener;
@@ -184,13 +185,13 @@ impl TestHelper {
         }
     }
 
-    // Message operations - updated for new MessageRecord structure
+    // Message operations - updated for new Record structure
     pub async fn post_message(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        // Legacy helper - converts content to new MessageRecord format
+        // Legacy helper - converts content to new Record format
         self.post_message_with_record(topic, None, content, None)
             .await
     }
@@ -202,29 +203,62 @@ impl TestHelper {
         value: &str,
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
+        // Convert single record to batch format for new API
+        let message_record = Record {
+            key,
+            value: value.to_string(),
+            headers,
+        };
+
+        let produce_request = ProduceRequest {
+            records: vec![message_record],
+        };
+
         self.client
             .post(format!("{}/topics/{}/records", self.base_url, topic))
-            .json(&PostRecordRequest {
-                key,
-                value: value.to_string(),
-                headers,
-            })
+            .json(&produce_request)
             .send()
             .await
     }
 
-    pub async fn poll_messages(
+    pub async fn post_batch_messages(
+        &self,
+        topic: &str,
+        records: Vec<Record>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let produce_request = ProduceRequest { records };
+
+        self.client
+            .post(format!("{}/topics/{}/records", self.base_url, topic))
+            .json(&produce_request)
+            .send()
+            .await
+    }
+
+    // Note: Direct topic polling has been removed to align with OpenAPI spec.
+    // Use consumer group endpoints for message consumption.
+
+    /// Helper method for tests that need to verify posted messages
+    /// Creates a temporary consumer group to fetch all messages
+    pub async fn poll_messages_for_testing(
         &self,
         topic: &str,
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let mut request = self
-            .client
-            .get(format!("{}/topics/{}/messages", self.base_url, topic));
-        if let Some(c) = count {
-            request = request.query(&[("count", c.to_string())]);
-        }
-        request.send().await
+        let group_id = format!("test-{}", std::process::id());
+
+        // Create consumer group (ignore if it already exists)
+        let _ = self.create_consumer_group(&group_id).await;
+
+        // Fetch messages
+        let response = self
+            .fetch_messages_for_consumer_group(&group_id, topic, count)
+            .await;
+
+        // Clean up consumer group (ignore errors)
+        let _ = self.leave_consumer_group(&group_id).await;
+
+        response
     }
 
     // Consumer group operations
@@ -333,7 +367,7 @@ impl TestHelper {
 
         if let Some(expected) = expected_values {
             for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.records[i].value, *expected_value);
+                assert_eq!(poll_data.records[i].record.value, *expected_value);
                 // Verify timestamp is in ISO 8601 format
                 assert!(poll_data.records[i].timestamp.contains("T"));
                 // Verify offset sequence

@@ -6,9 +6,33 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
+
+// =============================================================================
+// VALIDATION CONSTANTS
+// =============================================================================
+
+/// Validation limits following OpenAPI specification
+///
+/// Note: Header count per record is not limited - only individual header value sizes are validated.
+mod limits {
+    /// Maximum length for record keys in bytes (OpenAPI spec limit)
+    pub const MAX_KEY_SIZE: usize = 1024;
+
+    /// Maximum length for record values in bytes (OpenAPI spec limit: 1MB)
+    pub const MAX_VALUE_SIZE: usize = 1_048_576;
+
+    /// Maximum length for header values in bytes (OpenAPI spec limit)
+    pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
+
+    /// Maximum number of records in a batch produce request (OpenAPI spec limit)
+    pub const MAX_BATCH_SIZE: usize = 1000;
+
+    /// Maximum number of records that can be requested in a single poll operation
+    pub const MAX_POLL_RECORDS: usize = 10000;
+}
 
 // =============================================================================
 // CONFIGURATION & LOGGING
@@ -91,43 +115,98 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
     }
 }
 
-fn validate_record_request(request: &PostRecordRequest) -> Result<(), ErrorResponse> {
-    if let Some(key) = &request.key {
-        if key.len() > 1024 {
-            return Err(ErrorResponse::record_size_error(
-                "Record key",
-                1024,
-                key.len(),
+fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
+    if let Some(key) = &record.key {
+        if key.len() > limits::MAX_KEY_SIZE {
+            return Err(ErrorResponse::with_details(
+                "validation_error",
+                &format!(
+                    "Record at index {} key exceeds maximum length of {} characters (got {})",
+                    index,
+                    limits::MAX_KEY_SIZE,
+                    key.len()
+                ),
+                serde_json::json!({
+                    "field": format!("records[{}].key", index),
+                    "max_size": limits::MAX_KEY_SIZE,
+                    "actual_size": key.len()
+                }),
             ));
         }
     }
 
-    if request.value.len() > 1_048_576 {
-        return Err(ErrorResponse::record_size_error(
-            "Record value",
-            1_048_576,
-            request.value.len(),
+    if record.value.len() > limits::MAX_VALUE_SIZE {
+        return Err(ErrorResponse::with_details(
+            "validation_error",
+            &format!(
+                "Record at index {} value exceeds maximum length of {} characters (got {})",
+                index,
+                limits::MAX_VALUE_SIZE,
+                record.value.len()
+            ),
+            serde_json::json!({
+                "field": format!("records[{}].value", index),
+                "max_size": limits::MAX_VALUE_SIZE,
+                "actual_size": record.value.len()
+            }),
         ));
     }
 
-    if let Some(headers) = &request.headers {
+    // Validate headers if present
+    // Note: We validate individual header value size but do not limit the total number of headers per record
+    if let Some(headers) = &record.headers {
         for (header_key, header_value) in headers {
-            if header_value.len() > 1024 {
+            if header_value.len() > limits::MAX_HEADER_VALUE_SIZE {
                 return Err(ErrorResponse::with_details(
                     "validation_error",
                     &format!(
-                        "Header '{}' value exceeds maximum length of 1024 characters (got {})",
+                        "Record at index {} header '{}' value exceeds maximum length of {} characters (got {})",
+                        index,
                         header_key,
+                        limits::MAX_HEADER_VALUE_SIZE,
                         header_value.len()
                     ),
                     serde_json::json!({
-                        "field": format!("headers.{}", header_key),
-                        "max_size": 1024,
+                        "field": format!("records[{}].headers.{}", index, header_key),
+                        "max_size": limits::MAX_HEADER_VALUE_SIZE,
                         "actual_size": header_value.len()
                     }),
                 ));
             }
         }
+    }
+
+    Ok(())
+}
+
+fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorResponse> {
+    // Check batch size limits (1-MAX_BATCH_SIZE records as per OpenAPI spec)
+    if request.records.is_empty() {
+        return Err(ErrorResponse::invalid_parameter(
+            "records",
+            "At least one record must be provided",
+        ));
+    }
+
+    if request.records.len() > limits::MAX_BATCH_SIZE {
+        return Err(ErrorResponse::with_details(
+            "validation_error",
+            &format!(
+                "Batch size exceeds maximum of {} records (got {})",
+                limits::MAX_BATCH_SIZE,
+                request.records.len()
+            ),
+            serde_json::json!({
+                "field": "records",
+                "max_size": limits::MAX_BATCH_SIZE,
+                "actual_size": request.records.len()
+            }),
+        ));
+    }
+
+    // Validate each record in the batch
+    for (index, record) in request.records.iter().enumerate() {
+        validate_message_record(record, index)?;
     }
 
     Ok(())
@@ -188,20 +267,13 @@ fn validate_consumer_group_id(group_id: &str) -> Result<(), ErrorResponse> {
 fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
     // Validate max_records parameter
     if let Some(max_records) = query.max_records {
-        if !(1..=10000).contains(&max_records) {
+        if !(1..=limits::MAX_POLL_RECORDS).contains(&max_records) {
             return Err(ErrorResponse::invalid_parameter(
                 "max_records",
-                "max_records must be between 1 and 10000",
-            ));
-        }
-    }
-
-    // Validate timeout_ms parameter
-    if let Some(timeout_ms) = query.timeout_ms {
-        if timeout_ms > 60000 {
-            return Err(ErrorResponse::invalid_parameter(
-                "timeout_ms",
-                "timeout_ms must not exceed 60000 milliseconds",
+                &format!(
+                    "max_records must be between 1 and {}",
+                    limits::MAX_POLL_RECORDS
+                ),
             ));
         }
     }
@@ -243,8 +315,7 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/topics/{topic}/records", post(post_message))
-        .route("/topics/{topic}/messages", get(poll_messages))
+        .route("/topics/{topic}/records", post(produce_messages))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
@@ -300,11 +371,11 @@ async fn health_check(
 // PRODUCER ENDPOINTS
 // =============================================================================
 
-async fn post_message(
+async fn produce_messages(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
-    Json(request): Json<PostRecordRequest>,
-) -> Result<Json<PostRecordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Json(request): Json<ProduceRequest>,
+) -> Result<Json<ProduceResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&topic) {
         log(
@@ -321,8 +392,8 @@ async fn post_message(
         ));
     }
 
-    // Validate record request
-    if let Err(error_response) = validate_record_request(&request) {
+    // Validate produce request
+    if let Err(error_response) = validate_produce_request(&request) {
         log(
             app_state.config.log_level,
             LogLevel::Error,
@@ -337,24 +408,41 @@ async fn post_message(
         ));
     }
 
-    let value_for_log = request.value.clone();
-    match app_state.queue.post_record(
-        topic.clone(),
-        Record {
-            key: request.key,
-            value: request.value,
-            headers: request.headers,
-        },
-    ) {
-        Ok(offset) => {
+    let record_count = request.records.len();
+
+    // Convert MessageRecord to Record
+    let records: Vec<Record> = request
+        .records
+        .into_iter()
+        .map(|msg_record| Record {
+            key: msg_record.key,
+            value: msg_record.value,
+            headers: msg_record.headers,
+        })
+        .collect();
+
+    match app_state.queue.post_records(topic.clone(), records) {
+        Ok(offsets) => {
             log(
                 app_state.config.log_level,
                 LogLevel::Trace,
-                &format!("POST /topics/{topic}/records - Offset: {offset} - '{value_for_log}'"),
+                &format!(
+                    "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
+                ),
             );
-            let timestamp = chrono::Utc::now().to_rfc3339();
 
-            Ok(Json(PostRecordResponse { offset, timestamp }))
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let offset_infos: Vec<OffsetInfo> = offsets
+                .into_iter()
+                .map(|offset| OffsetInfo {
+                    offset,
+                    timestamp: timestamp.clone(),
+                })
+                .collect();
+
+            Ok(Json(ProduceResponse {
+                offsets: offset_infos,
+            }))
         }
         Err(error) => {
             log(
@@ -363,128 +451,6 @@ async fn post_message(
                 &format!("POST /topics/{topic}/records failed: {error}"),
             );
             let error_response = ErrorResponse::internal_error(&error.to_string());
-            Err((
-                error_to_status_code(&error_response.error),
-                Json(error_response),
-            ))
-        }
-    }
-}
-
-// =============================================================================
-// BASIC CONSUMER ENDPOINTS
-// =============================================================================
-
-async fn poll_messages(
-    State(app_state): State<AppState>,
-    Path(topic): Path<String>,
-    Query(params): Query<PollQuery>,
-) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Validate topic name
-    if let Err(error_response) = validate_topic_name(&topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /topics/{}/records topic validation failed: {}",
-                topic, error_response.message
-            ),
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    // Validate query parameters
-    if let Err(error_response) = validate_poll_query(&params) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /topics/{}/records query validation failed: {}",
-                topic, error_response.message
-            ),
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    let limit = params.effective_limit();
-    let timeout_ms = params.effective_timeout_ms();
-    let include_headers = params.should_include_headers();
-
-    let messages_result = match params.from_offset {
-        Some(offset) => app_state
-            .queue
-            .poll_records_from_offset(&topic, offset, limit),
-        None => app_state.queue.poll_records(&topic, limit),
-    };
-
-    match messages_result {
-        Ok(messages) => {
-            let offset_info = match params.from_offset {
-                Some(offset) => format!(" from_offset: {offset}"),
-                None => String::new(),
-            };
-
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "GET /topics/{}/records - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
-                    topic,
-                    limit,
-                    timeout_ms,
-                    offset_info,
-                    messages.len()
-                ),
-            );
-
-            let message_responses: Vec<RecordResponse> = messages
-                .into_iter()
-                .map(|msg| RecordResponse {
-                    key: msg.record.key,
-                    value: msg.record.value,
-                    headers: if include_headers {
-                        msg.record.headers
-                    } else {
-                        None
-                    },
-                    offset: msg.offset,
-                    timestamp: msg.timestamp,
-                })
-                .collect();
-
-            let next_offset = if let Some(last_message) = message_responses.last() {
-                last_message.offset + 1
-            } else {
-                params
-                    .from_offset
-                    .unwrap_or_else(|| app_state.queue.get_high_water_mark(&topic))
-            };
-
-            let high_water_mark = app_state.queue.get_high_water_mark(&topic);
-            let response = FetchResponse::new(message_responses, next_offset, high_water_mark);
-
-            Ok(Json(response))
-        }
-        Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!("GET /topics/{topic}/records failed: {error}"),
-            );
-
-            // Check if it's a topic not found error
-            let error_response = if error.is_not_found() {
-                ErrorResponse::topic_not_found(&topic)
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
-            };
-
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -826,7 +792,6 @@ async fn fetch_messages_for_consumer_group(
     }
 
     let limit = query.effective_limit();
-    let timeout_ms = query.effective_timeout_ms();
     let include_headers = query.should_include_headers();
 
     let messages_result = match query.from_offset {
@@ -872,30 +837,31 @@ async fn fetch_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /consumer/{}/topics/{} - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} messages returned",
                     params.group_id,
                     params.topic,
                     limit,
-                    timeout_ms,
                     offset_info,
                     messages.len()
                 ),
             );
 
-            let message_responses: Vec<RecordResponse> = messages
-                .into_iter()
-                .map(|msg| RecordResponse {
-                    key: msg.record.key,
-                    value: msg.record.value,
-                    headers: if include_headers {
-                        msg.record.headers
-                    } else {
-                        None
-                    },
-                    offset: msg.offset,
-                    timestamp: msg.timestamp,
-                })
-                .collect();
+            let message_responses: Vec<RecordWithOffset> = if include_headers {
+                messages
+            } else {
+                messages
+                    .into_iter()
+                    .map(|msg| RecordWithOffset {
+                        record: Record {
+                            key: msg.record.key,
+                            value: msg.record.value,
+                            headers: None,
+                        },
+                        offset: msg.offset,
+                        timestamp: msg.timestamp,
+                    })
+                    .collect()
+            };
 
             let offset_response = app_state
                 .queue
