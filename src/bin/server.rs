@@ -11,6 +11,22 @@ use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
 // =============================================================================
+// VALIDATION CONSTANTS
+// =============================================================================
+
+/// Maximum length for record keys in bytes (OpenAPI spec limit)
+const MAX_KEY_SIZE: usize = 1024;
+
+/// Maximum length for record values in bytes (OpenAPI spec limit: 1MB)
+const MAX_VALUE_SIZE: usize = 1_048_576;
+
+/// Maximum length for header values in bytes (OpenAPI spec limit)
+const MAX_HEADER_VALUE_SIZE: usize = 1024;
+
+/// Maximum number of records that can be requested in a single poll operation
+const MAX_POLL_RECORDS: usize = 10000;
+
+// =============================================================================
 // CONFIGURATION & LOGGING
 // =============================================================================
 
@@ -93,36 +109,37 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
 
 fn validate_record_request(request: &PostRecordRequest) -> Result<(), ErrorResponse> {
     if let Some(key) = &request.key {
-        if key.len() > 1024 {
+        if key.len() > MAX_KEY_SIZE {
             return Err(ErrorResponse::record_size_error(
                 "Record key",
-                1024,
+                MAX_KEY_SIZE,
                 key.len(),
             ));
         }
     }
 
-    if request.value.len() > 1_048_576 {
+    if request.value.len() > MAX_VALUE_SIZE {
         return Err(ErrorResponse::record_size_error(
             "Record value",
-            1_048_576,
+            MAX_VALUE_SIZE,
             request.value.len(),
         ));
     }
 
     if let Some(headers) = &request.headers {
         for (header_key, header_value) in headers {
-            if header_value.len() > 1024 {
+            if header_value.len() > MAX_HEADER_VALUE_SIZE {
                 return Err(ErrorResponse::with_details(
                     "validation_error",
                     &format!(
-                        "Header '{}' value exceeds maximum length of 1024 characters (got {})",
+                        "Header '{}' value exceeds maximum length of {} characters (got {})",
                         header_key,
+                        MAX_HEADER_VALUE_SIZE,
                         header_value.len()
                     ),
                     serde_json::json!({
                         "field": format!("headers.{}", header_key),
-                        "max_size": 1024,
+                        "max_size": MAX_HEADER_VALUE_SIZE,
                         "actual_size": header_value.len()
                     }),
                 ));
@@ -188,10 +205,10 @@ fn validate_consumer_group_id(group_id: &str) -> Result<(), ErrorResponse> {
 fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
     // Validate max_records parameter
     if let Some(max_records) = query.max_records {
-        if !(1..=10000).contains(&max_records) {
+        if !(1..=MAX_POLL_RECORDS).contains(&max_records) {
             return Err(ErrorResponse::invalid_parameter(
                 "max_records",
-                "max_records must be between 1 and 10000",
+                &format!("max_records must be between 1 and {MAX_POLL_RECORDS}"),
             ));
         }
     }
