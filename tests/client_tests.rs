@@ -13,7 +13,7 @@ async fn test_client_consumer_group_operations() {
 
     // Test creating consumer group
     let output = Command::new(&client_binary)
-        .args(["--port", &port, "consumer-group", "create", "test_group"])
+        .args(["--port", &port, "consumer", "create", "test_group"])
         .output()
         .expect("Failed to execute client");
     assert!(
@@ -27,11 +27,11 @@ async fn test_client_consumer_group_operations() {
         .args([
             "--port",
             &port,
-            "consumer-group",
+            "consumer",
             "offset",
+            "get",
             "test_group",
             "test_topic",
-            "--get",
         ])
         .output()
         .expect("Failed to execute client");
@@ -46,11 +46,11 @@ async fn test_client_consumer_group_operations() {
         .args([
             "--port",
             &port,
-            "consumer-group",
+            "consumer",
             "offset",
+            "commit",
             "test_group",
             "test_topic",
-            "--set",
             "5",
         ])
         .output()
@@ -66,8 +66,8 @@ async fn test_client_consumer_group_operations() {
         .args([
             "--port",
             &port,
-            "consumer-group",
-            "poll",
+            "consumer",
+            "fetch",
             "test_group",
             "test_topic",
         ])
@@ -81,7 +81,7 @@ async fn test_client_consumer_group_operations() {
 
     // Test leaving consumer group
     let output = Command::new(&client_binary)
-        .args(["--port", &port, "consumer-group", "leave", "test_group"])
+        .args(["--port", &port, "consumer", "leave", "test_group"])
         .output()
         .expect("Failed to execute client");
     assert!(
@@ -110,7 +110,8 @@ async fn test_client_batch_posting() {
         .args([
             "--port",
             &port,
-            "post",
+            "producer",
+            "records",
             "test_topic",
             "--batch",
             "/tmp/test_batch.json",
@@ -135,7 +136,8 @@ async fn test_client_advanced_post() {
         .args([
             "--port",
             &port,
-            "post",
+            "producer",
+            "records",
             "test_topic",
             "test_message",
             "--key",
@@ -160,16 +162,29 @@ async fn test_client_advanced_poll() {
     let client_binary = ensure_client_binary().unwrap();
     let port = server.port.to_string();
 
+    // First create consumer group
+    let output = Command::new(&client_binary)
+        .args(["--port", &port, "consumer", "create", "test_group"])
+        .output()
+        .expect("Failed to execute client");
+    assert!(
+        output.status.success(),
+        "Failed to create consumer group: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     // Test polling with from_offset
     let output = Command::new(&client_binary)
         .args([
             "--port",
             &port,
-            "poll",
+            "consumer",
+            "fetch",
+            "test_group",
             "test_topic",
             "--from-offset",
             "5",
-            "--count",
+            "--max-records",
             "10",
         ])
         .output()

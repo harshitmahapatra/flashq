@@ -422,7 +422,7 @@ impl TestHelper {
         let port = self.base_url.split(':').last().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "post", topic, message])
+            .args(["--port", port, "producer", "records", topic, message])
             .output()
             .await?;
 
@@ -444,15 +444,27 @@ impl TestHelper {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
         let port = self.base_url.split(':').last().unwrap();
+        
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
 
+        // Create consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "create", &temp_group_id])
+            .output()
+            .await?;
+
+        // Fetch messages
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),
-            "poll".to_string(),
+            "consumer".to_string(),
+            "fetch".to_string(),
+            temp_group_id.clone(),
             topic.to_string(),
         ];
         if let Some(c) = count {
-            args.push("--count".to_string());
+            args.push("--max-records".to_string());
             args.push(c.to_string());
         }
 
@@ -461,15 +473,23 @@ impl TestHelper {
             .output()
             .await?;
 
-        if !output.status.success() {
-            return Err(format!(
+        let result = if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            Err(format!(
                 "Client poll failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )
-            .into());
-        }
+            .into())
+        };
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        // Clean up consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "leave", &temp_group_id])
+            .output()
+            .await;
+
+        result
     }
 
     pub async fn create_consumer_group_with_client(
@@ -480,7 +500,7 @@ impl TestHelper {
         let port = self.base_url.split(':').last().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer-group", "create", group_id])
+            .args(["--port", port, "consumer", "create", group_id])
             .output()
             .await?;
 
@@ -503,7 +523,7 @@ impl TestHelper {
         let port = self.base_url.split(':').last().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "consumer-group", "leave", group_id])
+            .args(["--port", port, "consumer", "leave", group_id])
             .output()
             .await?;
 
@@ -531,14 +551,14 @@ impl TestHelper {
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),
-            "consumer-group".to_string(),
-            "poll".to_string(),
+            "consumer".to_string(),
+            "fetch".to_string(),
             group_id.to_string(),
             topic.to_string(),
         ];
 
         if let Some(c) = count {
-            args.push("--count".to_string());
+            args.push("--max-records".to_string());
             args.push(c.to_string());
         }
         if let Some(offset) = from_offset {
@@ -573,8 +593,8 @@ impl TestHelper {
         let output = TokioCommand::new(&client_binary)
             .args([
                 "--port", port,
-                "consumer-group", "offset",
-                group_id, topic, "--get"
+                "consumer", "offset", "get",
+                group_id, topic
             ])
             .output()
             .await?;
@@ -602,9 +622,8 @@ impl TestHelper {
         let output = TokioCommand::new(&client_binary)
             .args([
                 "--port", port,
-                "consumer-group", "offset",
-                group_id, topic,
-                "--set", &offset.to_string()
+                "consumer", "offset", "commit",
+                group_id, topic, &offset.to_string()
             ])
             .output()
             .await?;
@@ -649,7 +668,7 @@ impl TestHelper {
         let port = self.base_url.split(':').last().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "post", topic, "--batch", batch_file_path])
+            .args(["--port", port, "producer", "records", topic, "--batch", batch_file_path])
             .output()
             .await?;
 
@@ -677,7 +696,8 @@ impl TestHelper {
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),
-            "post".to_string(),
+            "producer".to_string(),
+            "records".to_string(),
             topic.to_string(),
             message.to_string(),
         ];
@@ -718,18 +738,30 @@ impl TestHelper {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
         let port = self.base_url.split(':').last().unwrap();
+        
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_offset_{}", std::process::id());
 
+        // Create consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "create", &temp_group_id])
+            .output()
+            .await?;
+
+        // Fetch messages from specific offset
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),
-            "poll".to_string(),
+            "consumer".to_string(),
+            "fetch".to_string(),
+            temp_group_id.clone(),
             topic.to_string(),
             "--from-offset".to_string(),
             from_offset.to_string(),
         ];
 
         if let Some(c) = count {
-            args.push("--count".to_string());
+            args.push("--max-records".to_string());
             args.push(c.to_string());
         }
 
@@ -738,14 +770,22 @@ impl TestHelper {
             .output()
             .await?;
 
-        if !output.status.success() {
-            return Err(format!(
+        let result = if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            Err(format!(
                 "Client poll from offset failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )
-            .into());
-        }
+            .into())
+        };
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        // Clean up consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "leave", &temp_group_id])
+            .output()
+            .await;
+
+        result
     }
 }

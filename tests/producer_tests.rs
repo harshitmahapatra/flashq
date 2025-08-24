@@ -181,8 +181,9 @@ async fn test_client_binary_integration() {
         
     // Verify the output contains our message
     assert!(output.contains("Hello from client binary!"));
-    assert!(output.contains("✓ Got 1 messages"));
-    assert!(output.contains("Committed offset 1"));
+    assert!(output.contains("Got 1 messages for consumer group"));
+    // With the "do not advance offset on poll" change, next offset remains 0 after fetching the message at offset 0
+    assert!(output.contains("Next offset: 0"));
 }
 
 #[tokio::test]
