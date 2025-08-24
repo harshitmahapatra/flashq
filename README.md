@@ -2,7 +2,7 @@
 
 FlashQ is a Kafka-inspired message queue system built in Rust with HTTP REST API. Features topic-based messaging with optional keys and headers, offset-based positioning, consumer groups, and concurrent client support.
 
-**Note: This is a hobby project made by me for learning rust, it should not be used in production**
+**Note: This is a hobby project made by me for learning rust, it should not be used in production.**
 
 ## Features
 
