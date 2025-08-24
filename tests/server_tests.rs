@@ -14,7 +14,7 @@ async fn test_health_check() {
 
     let health_data: serde_json::Value = response.json().await.unwrap();
     assert_eq!(health_data["status"], "healthy");
-    assert_eq!(health_data["service"], "message-queue-rs");
+    assert_eq!(health_data["service"], "flashq");
     assert!(health_data["timestamp"].as_u64().is_some());
 }
 

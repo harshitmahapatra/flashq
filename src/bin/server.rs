@@ -359,7 +359,7 @@ async fn health_check(
     log(app_state.config.log_level, LogLevel::Trace, "GET /health");
     Ok(Json(HealthCheckResponse {
         status: "healthy".to_string(),
-        service: "message-queue-rs".to_string(),
+        service: "flashq".to_string(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Message Queue RS - Kafka-like Streaming API
+  title: FlashQ - Kafka-like Streaming API
   description: |
     A Kafka-inspired message queue system with offset-based consumption, consumer groups, 
     and streaming semantics while maintaining single-server simplicity.
@@ -19,8 +19,8 @@ info:
     - Consumer group coordination for parallel processing
   version: 1.0.0
   contact:
-    name: Message Queue RS
-    url: https://github.com/harshitmahapatra/message-queue-rs
+    name: FlashQ
+    url: https://github.com/harshitmahapatra/flashq
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
