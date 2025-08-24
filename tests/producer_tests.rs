@@ -166,19 +166,19 @@ async fn test_client_binary_integration() {
         .expect("Failed to start test server");
     let helper = TestHelper::new(&server);
     let topic = "client_test_topic";
-    
+
     // Test posting with client binary
     helper
         .post_message_with_client(topic, "Hello from client binary!")
         .await
         .expect("Failed to post message with client");
-        
+
     // Test polling with client binary
     let output = helper
         .poll_messages_with_client(topic, Some(10))
         .await
         .expect("Failed to poll messages with client");
-        
+
     // Verify the output contains our message
     assert!(output.contains("Hello from client binary!"));
     assert!(output.contains("Got 1 messages for consumer group"));

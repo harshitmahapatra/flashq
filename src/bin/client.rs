@@ -21,10 +21,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Health,
-    
+
     #[command(subcommand)]
     Producer(ProducerCommands),
-    
+
     #[command(subcommand)]
     Consumer(ConsumerCommands),
 }
@@ -114,7 +114,13 @@ async fn handle_producer_command(
     producer_cmd: ProducerCommands,
 ) {
     match producer_cmd {
-        ProducerCommands::Records { topic, message, key, header, batch } => {
+        ProducerCommands::Records {
+            topic,
+            message,
+            key,
+            header,
+            batch,
+        } => {
             if let Some(batch_file) = batch {
                 handle_batch_post(client, server_url, &topic, &batch_file).await;
             } else if let Some(message) = message {
@@ -140,8 +146,22 @@ async fn handle_consumer_command(
         ConsumerCommands::Leave { group_id } => {
             leave_consumer_group_command(client, server_url, &group_id).await;
         }
-        ConsumerCommands::Fetch { group_id, topic, max_records, from_offset, include_headers: _ } => {
-            fetch_consumer_messages_command(client, server_url, &group_id, &topic, max_records, from_offset).await;
+        ConsumerCommands::Fetch {
+            group_id,
+            topic,
+            max_records,
+            from_offset,
+            include_headers: _,
+        } => {
+            fetch_consumer_messages_command(
+                client,
+                server_url,
+                &group_id,
+                &topic,
+                max_records,
+                from_offset,
+            )
+            .await;
         }
         ConsumerCommands::Offset(offset_cmd) => {
             handle_offset_command(client, server_url, offset_cmd).await;
@@ -155,7 +175,12 @@ async fn handle_offset_command(
     offset_cmd: OffsetCommands,
 ) {
     match offset_cmd {
-        OffsetCommands::Commit { group_id, topic, offset, metadata: _ } => {
+        OffsetCommands::Commit {
+            group_id,
+            topic,
+            offset,
+            metadata: _,
+        } => {
             commit_offset_command(client, server_url, &group_id, &topic, offset).await;
         }
         OffsetCommands::Get { group_id, topic } => {
@@ -203,7 +228,9 @@ async fn handle_batch_post(
                                         "Posted {} records to topic '{}' starting at offset: {}",
                                         produce_response.offsets.len(),
                                         topic,
-                                        produce_response.offsets.first()
+                                        produce_response
+                                            .offsets
+                                            .first()
                                             .map(|o| o.offset.to_string())
                                             .unwrap_or_else(|| "unknown".to_string())
                                     );
@@ -211,19 +238,23 @@ async fn handle_batch_post(
                                 Err(e) => println!("Failed to parse response: {e}"),
                             }
                         } else {
-                            handle_error_response(response, &format!("post batch to topic '{topic}'")).await;
+                            handle_error_response(
+                                response,
+                                &format!("post batch to topic '{topic}'"),
+                            )
+                            .await;
                         }
                     }
                     Err(e) => println!("Failed to connect to server: {e}"),
                 }
             }
             Err(e) => {
-                println!("Failed to parse JSON file '{}': {}", batch_file, e);
+                println!("Failed to parse JSON file '{batch_file}': {e}");
                 std::process::exit(1);
             }
         },
         Err(e) => {
-            println!("Failed to read file '{}': {}", batch_file, e);
+            println!("Failed to read file '{batch_file}': {e}");
             std::process::exit(1);
         }
     }
@@ -282,9 +313,10 @@ async fn create_consumer_group_command(client: &reqwest::Client, server_url: &st
     match client.post(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                println!("Created consumer group '{}'", group_id);
+                println!("Created consumer group '{group_id}'");
             } else {
-                handle_error_response(response, &format!("create consumer group '{group_id}'")).await;
+                handle_error_response(response, &format!("create consumer group '{group_id}'"))
+                    .await;
             }
         }
         Err(e) => println!("Failed to connect to server: {e}"),
@@ -296,9 +328,10 @@ async fn leave_consumer_group_command(client: &reqwest::Client, server_url: &str
     match client.delete(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                println!("Left consumer group '{}'", group_id);
+                println!("Left consumer group '{group_id}'");
             } else {
-                handle_error_response(response, &format!("leave consumer group '{group_id}'")).await;
+                handle_error_response(response, &format!("leave consumer group '{group_id}'"))
+                    .await;
             }
         }
         Err(e) => println!("Failed to connect to server: {e}"),
@@ -315,14 +348,14 @@ async fn fetch_consumer_messages_command(
 ) {
     let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
     let mut query_params = Vec::new();
-    
+
     if let Some(c) = max_records {
-        query_params.push(format!("max_records={}", c));
+        query_params.push(format!("max_records={c}"));
     }
     if let Some(offset) = from_offset {
-        query_params.push(format!("from_offset={}", offset));
+        query_params.push(format!("from_offset={offset}"));
     }
-    
+
     if !query_params.is_empty() {
         fetch_url.push_str(&format!("?{}", query_params.join("&")));
     }
@@ -334,23 +367,26 @@ async fn fetch_consumer_messages_command(
                     Ok(fetch_response) => {
                         let message_count = fetch_response.records.len();
                         println!(
-                            "Got {} messages for consumer group '{}' from topic '{}'",
-                            message_count, group_id, topic
+                            "Got {message_count} messages for consumer group '{group_id}' from topic '{topic}'"
                         );
-                        
+
                         for message in fetch_response.records {
                             print_message(&message);
                         }
-                        
+
                         println!("Next offset: {}", fetch_response.next_offset);
                         if let Some(lag) = fetch_response.lag {
-                            println!("Consumer lag: {}", lag);
+                            println!("Consumer lag: {lag}");
                         }
                     }
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                handle_error_response(response, &format!("fetch messages for consumer group '{group_id}' from topic '{topic}'")).await;
+                handle_error_response(
+                    response,
+                    &format!("fetch messages for consumer group '{group_id}' from topic '{topic}'"),
+                )
+                .await;
             }
         }
         Err(e) => println!("Failed to connect to server: {e}"),
@@ -374,11 +410,14 @@ async fn commit_offset_command(
         Ok(response) => {
             if response.status().is_success() {
                 println!(
-                    "Committed offset {} for consumer group '{}' and topic '{}'",
-                    offset, group_id, topic
+                    "Committed offset {offset} for consumer group '{group_id}' and topic '{topic}'"
                 );
             } else {
-                handle_error_response(response, &format!("commit offset for consumer group '{group_id}' and topic '{topic}'")).await;
+                handle_error_response(
+                    response,
+                    &format!("commit offset for consumer group '{group_id}' and topic '{topic}'"),
+                )
+                .await;
             }
         }
         Err(e) => println!("Failed to connect to server: {e}"),
@@ -405,7 +444,11 @@ async fn get_offset_command(
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                handle_error_response(response, &format!("get offset for consumer group '{group_id}' and topic '{topic}'")).await;
+                handle_error_response(
+                    response,
+                    &format!("get offset for consumer group '{group_id}' and topic '{topic}'"),
+                )
+                .await;
             }
         }
         Err(e) => println!("Failed to connect to server: {e}"),
@@ -420,21 +463,17 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     let status = response.status();
 
     match response.text().await {
-        Ok(body) => {
-            match serde_json::from_str::<ErrorResponse>(&body) {
-                Ok(error_response) => {
-                    println!("Failed to {}: {}", operation, error_response.error);
-                }
-                Err(parse_error) => {
-                    println!(
-                        "Server error: {status} (failed to parse error response: {parse_error})"
-                    );
-                    if !body.is_empty() {
-                        println!("   Raw response: {}", body.trim());
-                    }
+        Ok(body) => match serde_json::from_str::<ErrorResponse>(&body) {
+            Ok(error_response) => {
+                println!("Failed to {}: {}", operation, error_response.error);
+            }
+            Err(parse_error) => {
+                println!("Server error: {status} (failed to parse error response: {parse_error})");
+                if !body.is_empty() {
+                    println!("   Raw response: {}", body.trim());
                 }
             }
-        }
+        },
         Err(body_error) => {
             println!("Server error: {status} (failed to read response body: {body_error})");
         }
@@ -460,7 +499,9 @@ fn print_message(message: &RecordWithOffset) {
     println!();
 }
 
-fn parse_headers(header_args: Option<Vec<String>>) -> Option<std::collections::HashMap<String, String>> {
+fn parse_headers(
+    header_args: Option<Vec<String>>,
+) -> Option<std::collections::HashMap<String, String>> {
     header_args.map(|headers| {
         headers
             .iter()
@@ -469,7 +510,7 @@ fn parse_headers(header_args: Option<Vec<String>>) -> Option<std::collections::H
                 match (split.next(), split.next()) {
                     (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
                     _ => {
-                        eprintln!("Warning: Invalid header format '{}', expected KEY=VALUE", h);
+                        eprintln!("Warning: Invalid header format '{h}', expected KEY=VALUE");
                         None
                     }
                 }

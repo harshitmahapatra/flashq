@@ -341,7 +341,7 @@ async fn main() {
     log(
         app_state.config.log_level,
         LogLevel::Info,
-        &format!("Message Queue Server starting on http://{bind_address}"),
+        &format!("FlashQ Server starting on http://{bind_address}"),
     );
 
     axum::serve(listener, app)

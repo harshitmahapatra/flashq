@@ -419,7 +419,7 @@ impl TestHelper {
         message: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
             .args(["--port", port, "producer", "records", topic, message])
@@ -443,8 +443,8 @@ impl TestHelper {
         count: Option<usize>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
-        
+        let port = self.base_url.split(':').next_back().unwrap();
+
         // Create a unique temporary consumer group for this poll operation
         let temp_group_id = format!("test_poll_{}", std::process::id());
 
@@ -497,7 +497,7 @@ impl TestHelper {
         group_id: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
             .args(["--port", port, "consumer", "create", group_id])
@@ -520,7 +520,7 @@ impl TestHelper {
         group_id: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
             .args(["--port", port, "consumer", "leave", group_id])
@@ -546,7 +546,7 @@ impl TestHelper {
         from_offset: Option<u64>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let mut args = vec![
             "--port".to_string(),
@@ -588,14 +588,10 @@ impl TestHelper {
         topic: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args([
-                "--port", port,
-                "consumer", "offset", "get",
-                group_id, topic
-            ])
+            .args(["--port", port, "consumer", "offset", "get", group_id, topic])
             .output()
             .await?;
 
@@ -617,13 +613,18 @@ impl TestHelper {
         offset: u64,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
             .args([
-                "--port", port,
-                "consumer", "offset", "commit",
-                group_id, topic, &offset.to_string()
+                "--port",
+                port,
+                "consumer",
+                "offset",
+                "commit",
+                group_id,
+                topic,
+                &offset.to_string(),
             ])
             .output()
             .await?;
@@ -641,7 +642,7 @@ impl TestHelper {
 
     pub async fn health_check_with_client(&self) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
             .args(["--port", port, "health"])
@@ -665,10 +666,18 @@ impl TestHelper {
         batch_file_path: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let output = TokioCommand::new(&client_binary)
-            .args(["--port", port, "producer", "records", topic, "--batch", batch_file_path])
+            .args([
+                "--port",
+                port,
+                "producer",
+                "records",
+                topic,
+                "--batch",
+                batch_file_path,
+            ])
             .output()
             .await?;
 
@@ -691,7 +700,7 @@ impl TestHelper {
         headers: Option<&[(&str, &str)]>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
+        let port = self.base_url.split(':').next_back().unwrap();
 
         let mut args = vec![
             "--port".to_string(),
@@ -710,7 +719,7 @@ impl TestHelper {
         if let Some(header_pairs) = headers {
             for (k, v) in header_pairs {
                 args.push("--header".to_string());
-                args.push(format!("{}={}", k, v));
+                args.push(format!("{k}={v}"));
             }
         }
 
@@ -737,8 +746,8 @@ impl TestHelper {
         count: Option<usize>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
-        let port = self.base_url.split(':').last().unwrap();
-        
+        let port = self.base_url.split(':').next_back().unwrap();
+
         // Create a unique temporary consumer group for this poll operation
         let temp_group_id = format!("test_poll_offset_{}", std::process::id());
 
