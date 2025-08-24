@@ -54,7 +54,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Endpoint:** `GET /topics/{topic}/messages`
 
 **Query Parameters:**
-- `count`: Maximum records to return
+- `max_records`: Maximum records to return
 - `from_offset`: Start from specific offset (replay)
 
 **Response (200):**
@@ -69,7 +69,9 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
       "timestamp": "2024-01-15T10:30:45Z"
     }
   ],
-  "count": 1
+  "next_offset": 1,
+  "high_water_mark": 5,
+  "lag": 4
 }
 ```
 
@@ -79,7 +81,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Delete:** `DELETE /consumer/{group_id}` → 204 No Content  
 **Get Offset:** `GET /consumer/{group_id}/topics/{topic}/offset`  
 **Set Offset:** `POST /consumer/{group_id}/topics/{topic}/offset` with `{"offset": 10}`  
-**Poll:** `GET /consumer/{group_id}/topics/{topic}?count=5&from_offset=10`
+**Poll:** `GET /consumer/{group_id}/topics/{topic}?max_records=5&from_offset=10`
 
 ## Health Check
 
@@ -92,7 +94,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 - **Record values**: Max 1MB  
 - **Header values**: Max 1024 chars each
 - **Batch size**: 1-1000 records
-- **Query params**: `count` (1-10000), `timeout_ms` (0-60000)
+- **Query params**: `max_records` (1-10000), `timeout_ms` (0-60000)
 
 ## Error Format
 
