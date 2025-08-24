@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers development setup, testing, and contribution guidelines for message-queue-rs.
+This guide covers development setup, testing, and contribution guidelines for FlashQ.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This guide covers development setup, testing, and contribution guidelines for me
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd message-queue-rs
+cd flashq
 
 # Build the project
 cargo build
@@ -151,7 +151,7 @@ cargo check --all-targets
 ### Interactive Demo
 ```bash
 # Run the educational demo interface
-cargo run --bin message-queue-rs
+cargo run --bin flashq
 ```
 
 ### HTTP Server
@@ -193,7 +193,7 @@ cargo run --bin client -- --port=9090 post test "Custom port"
 ## Project Structure for Contributors
 
 ```
-message-queue-rs/
+flashq/
 ├── src/
 │   ├── lib.rs              # Core library with MessageQueue and Record types
 │   ├── main.rs             # Main binary entry point  

@@ -1,3 +1,3 @@
 fn main() {
-    message_queue_rs::demo::run_interactive_demo();
+    flashq::demo::run_interactive_demo();
 }

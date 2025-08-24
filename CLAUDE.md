@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
+FlashQ is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
 
 ## Development Commands
 
 ### Building and Running
 - `cargo build` - Build the project (debug mode)
-- `cargo run --bin message-queue-rs` - Build and run the interactive demo
+- `cargo run --bin flashq` - Build and run the interactive demo
 - `cargo run --bin server` - Build and run the HTTP server
 - `cargo run --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
@@ -78,10 +78,10 @@ The demo module provides an educational interactive demonstration of the message
 **Usage:**
 ```bash
 # Run the interactive demo
-cargo run --bin message-queue-rs
+cargo run --bin flashq
 
 # Or after building
-./target/debug/message-queue-rs
+./target/debug/flashq
 ```
 
 **Menu Options:**

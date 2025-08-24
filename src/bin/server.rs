@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
+use flashq::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 

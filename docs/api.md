@@ -1,6 +1,6 @@
 # API Reference
 
-Complete HTTP API documentation for the message-queue-rs server.
+Complete HTTP API documentation for the FlashQ server.
 
 ## Base URL
 

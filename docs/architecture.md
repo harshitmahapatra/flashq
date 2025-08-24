@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the internal architecture and design decisions of the message-queue-rs project.
+This document describes the internal architecture and design decisions of the FlashQ project.
 
 ## Project Structure
 
