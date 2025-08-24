@@ -178,9 +178,7 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
             }
         }
         Err(body_error) => {
-            println!(
-                "✗ Server error: {status} (failed to read response body: {body_error})"
-            );
+            println!("✗ Server error: {status} (failed to read response body: {body_error})");
         }
     }
 }
