@@ -127,6 +127,13 @@ pub struct ErrorResponse {
     pub details: Option<serde_json::Value>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct HealthCheckResponse {
+    pub status: String,
+    pub service: String,
+    pub timestamp: u64,
+}
+
 impl ErrorResponse {
     pub fn new(error: &str, message: &str) -> Self {
         Self {

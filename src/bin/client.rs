@@ -194,7 +194,14 @@ async fn handle_health_command(client: &reqwest::Client, server_url: &str) {
     match client.get(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
-                println!("Server is healthy");
+                match response.json::<HealthCheckResponse>().await {
+                    Ok(health_response) => {
+                        println!("Server Status: {}", health_response.status);
+                        println!("Service: {}", health_response.service);
+                        println!("Timestamp: {}", health_response.timestamp);
+                    }
+                    Err(_) => println!("Server is healthy (response parsing failed)"),
+                }
             } else {
                 handle_error_response(response, "check server health").await;
             }

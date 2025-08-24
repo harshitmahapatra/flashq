@@ -90,13 +90,6 @@ struct ConsumerGroupIdParams {
     group_id: String,
 }
 
-#[derive(serde::Serialize)]
-struct HealthCheckResponse {
-    status: String,
-    service: String,
-    timestamp: u64,
-}
-
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
