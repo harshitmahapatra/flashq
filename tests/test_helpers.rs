@@ -1,5 +1,5 @@
-use message_queue_rs::api::*;
 use message_queue_rs::Record;
+use message_queue_rs::api::*;
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -209,11 +209,11 @@ impl TestHelper {
             value: value.to_string(),
             headers,
         };
-        
+
         let produce_request = ProduceRequest {
             records: vec![message_record],
         };
-        
+
         self.client
             .post(format!("{}/topics/{}/records", self.base_url, topic))
             .json(&produce_request)
@@ -227,7 +227,7 @@ impl TestHelper {
         records: Vec<Record>,
     ) -> reqwest::Result<reqwest::Response> {
         let produce_request = ProduceRequest { records };
-        
+
         self.client
             .post(format!("{}/topics/{}/records", self.base_url, topic))
             .json(&produce_request)
@@ -367,7 +367,7 @@ impl TestHelper {
 
         if let Some(expected) = expected_values {
             for (i, expected_value) in expected.iter().enumerate() {
-                assert_eq!(poll_data.records[i].value, *expected_value);
+                assert_eq!(poll_data.records[i].record.value, *expected_value);
                 // Verify timestamp is in ISO 8601 format
                 assert!(poll_data.records[i].timestamp.contains("T"));
                 // Verify offset sequence

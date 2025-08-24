@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use message_queue_rs::api::*;
-use message_queue_rs::Record;
+use message_queue_rs::{Record, RecordWithOffset};
 
 // =============================================================================
 // CLI CONFIGURATION
@@ -79,7 +79,7 @@ async fn post_message(client: &reqwest::Client, server_url: &str, topic: &str, m
                                 topic, first_offset.offset
                             );
                         } else {
-                            println!("✓ Posted message to topic '{}' (no offset returned)", topic);
+                            println!("✓ Posted message to topic '{topic}' (no offset returned)");
                         }
                     }
                     Err(e) => println!("✗ Failed to parse response: {e}"),
@@ -168,17 +168,17 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     }
 }
 
-fn print_message(message: &RecordResponse) {
+fn print_message(message: &RecordWithOffset) {
     print!(
         "{} [{}] {}",
-        message.timestamp, message.offset, message.value
+        message.timestamp, message.offset, message.record.value
     );
 
-    if let Some(ref key) = message.key {
+    if let Some(ref key) = message.record.key {
         print!(" (key: {key})");
     }
 
-    if let Some(ref headers) = message.headers {
+    if let Some(ref headers) = message.record.headers {
         if !headers.is_empty() {
             print!(" (headers: {headers:?})");
         }

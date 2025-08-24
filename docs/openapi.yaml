@@ -366,8 +366,15 @@ components:
           description: Number of active consumer groups
           minimum: 0
 
-    # Message Schemas
-    MessageRecord:
+    # Message Schemas - Matching Library Structs
+    # 
+    # These schemas directly correspond to Rust structs in src/lib.rs:
+    # - Record: Basic message structure (key, value, headers)
+    # - RecordWithOffset: Record + offset + timestamp (used for API responses)
+    # 
+    # Note: Previously had separate RecordResponse struct, but consolidated
+    # to reuse library structs for better maintainability.
+    Record:
       type: object
       required:
         - value
@@ -393,9 +400,9 @@ components:
             timestamp: "2024-01-15T10:30:00Z"
             correlation_id: "abc123"
 
-    MessageWithOffset:
+    RecordWithOffset:
       allOf:
-        - $ref: "#/components/schemas/MessageRecord"
+        - $ref: "#/components/schemas/Record"
         - type: object
           required:
             - offset
@@ -427,7 +434,7 @@ components:
           minItems: 1
           maxItems: 1000
           items:
-            $ref: "#/components/schemas/MessageRecord"
+            $ref: "#/components/schemas/Record"
 
     ProduceResponse:
       type: object
@@ -477,7 +484,7 @@ components:
           type: array
           description: Fetched messages with offsets
           items:
-            $ref: "#/components/schemas/MessageWithOffset"
+            $ref: "#/components/schemas/RecordWithOffset"
         next_offset:
           type: integer
           description: Next offset to fetch from

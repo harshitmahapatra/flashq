@@ -1,7 +1,7 @@
 mod test_helpers;
 
-use message_queue_rs::api::*;
 use message_queue_rs::Record;
+use message_queue_rs::api::*;
 use test_helpers::{TestHelper, TestServer};
 
 #[tokio::test]
@@ -152,8 +152,11 @@ async fn test_message_size_and_validation_limits() {
     );
 
     let max_key_record = &poll_data.records[0];
-    assert_eq!(max_key_record.key.as_ref().unwrap(), &max_key);
-    assert_eq!(max_key_record.value, "Valid record with max key size");
+    assert_eq!(max_key_record.record.key.as_ref().unwrap(), &max_key);
+    assert_eq!(
+        max_key_record.record.value,
+        "Valid record with max key size"
+    );
 }
 
 #[tokio::test]
@@ -213,11 +216,11 @@ async fn test_concurrent_message_posting() {
     for (i, record) in poll_data.records.iter().enumerate() {
         assert_eq!(record.offset, i as u64, "Offsets should be sequential");
         assert!(
-            record.value.starts_with("Concurrent record"),
+            record.record.value.starts_with("Concurrent record"),
             "Record content should be preserved"
         );
 
-        if let Some(ref headers) = record.headers {
+        if let Some(ref headers) = record.record.headers {
             assert!(
                 headers.contains_key("thread" as &str),
                 "Thread header should be present"
@@ -279,7 +282,10 @@ async fn test_batch_message_posting() {
         headers: None,
     }];
 
-    let response = helper.post_batch_messages(topic, single_record).await.unwrap();
+    let response = helper
+        .post_batch_messages(topic, single_record)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
     let response_data: ProduceResponse = response.json().await.unwrap();
     assert_eq!(response_data.offsets.len(), 1);
@@ -288,7 +294,7 @@ async fn test_batch_message_posting() {
     // Test multiple records batch
     let mut headers = std::collections::HashMap::new();
     headers.insert("source".to_string(), "batch-test".to_string());
-    
+
     let batch_records = vec![
         Record {
             key: Some("user2".to_string()),
@@ -307,7 +313,10 @@ async fn test_batch_message_posting() {
         },
     ];
 
-    let response = helper.post_batch_messages(topic, batch_records).await.unwrap();
+    let response = helper
+        .post_batch_messages(topic, batch_records)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
     let response_data: ProduceResponse = response.json().await.unwrap();
     assert_eq!(response_data.offsets.len(), 3);
@@ -320,11 +329,11 @@ async fn test_batch_message_posting() {
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_data.records.len(), 4);
-    
-    assert_eq!(poll_data.records[0].value, "First message");
-    assert_eq!(poll_data.records[1].value, "Second message");
-    assert_eq!(poll_data.records[2].value, "Third message");
-    assert_eq!(poll_data.records[3].value, "Fourth message");
+
+    assert_eq!(poll_data.records[0].record.value, "First message");
+    assert_eq!(poll_data.records[1].record.value, "Second message");
+    assert_eq!(poll_data.records[2].record.value, "Third message");
+    assert_eq!(poll_data.records[3].record.value, "Fourth message");
 }
 
 #[tokio::test]
@@ -414,23 +423,23 @@ async fn test_message_structure_edge_cases() {
 
     let records = &poll_data.records;
 
-    assert_eq!(records[0].key.as_deref(), Some(""));
-    assert_eq!(records[0].value, "Record with empty key");
+    assert_eq!(records[0].record.key.as_deref(), Some(""));
+    assert_eq!(records[0].record.value, "Record with empty key");
 
-    assert_eq!(records[1].key.as_ref().unwrap(), &special_key);
-    assert_eq!(records[1].value, "Record with special chars in key");
+    assert_eq!(records[1].record.key.as_ref().unwrap(), &special_key);
+    assert_eq!(records[1].record.value, "Record with special chars in key");
 
-    assert_eq!(records[2].value, "Record with special headers");
-    let headers = records[2].headers.as_ref().unwrap();
+    assert_eq!(records[2].record.value, "Record with special headers");
+    let headers = records[2].record.headers.as_ref().unwrap();
     assert_eq!(headers.get("content-type").unwrap(), "application/json");
     assert_eq!(headers.get("x-custom-header").unwrap(), "");
     assert_eq!(headers.get("unicode-header").unwrap(), "测试数据");
 
-    assert!(records[3].key.is_none());
-    assert!(records[3].headers.is_none());
-    assert_eq!(records[3].value, "Minimal record");
+    assert!(records[3].record.key.is_none());
+    assert!(records[3].record.headers.is_none());
+    assert_eq!(records[3].record.value, "Minimal record");
 
-    assert!(records[4].key.is_none());
-    assert!(records[4].headers.is_none());
-    assert_eq!(records[4].value, "Record with explicit nulls");
+    assert!(records[4].record.key.is_none());
+    assert!(records[4].record.headers.is_none());
+    assert_eq!(records[4].record.value, "Record with explicit nulls");
 }

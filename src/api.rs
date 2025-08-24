@@ -1,16 +1,9 @@
+use crate::{Record, RecordWithOffset};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use crate::Record;
 
 // =============================================================================
 // PRODUCER API TYPES
 // =============================================================================
-
-
-
-
-
-
 
 #[derive(Serialize, Deserialize)]
 pub struct ProduceRequest {
@@ -45,24 +38,14 @@ impl PollQuery {
         self.max_records.or(self.count)
     }
 
-
     pub fn should_include_headers(&self) -> bool {
         self.include_headers.unwrap_or(true)
     }
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct RecordResponse {
-    pub key: Option<String>,
-    pub value: String,
-    pub headers: Option<HashMap<String, String>>,
-    pub offset: u64,
-    pub timestamp: String,
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct FetchResponse {
-    pub records: Vec<RecordResponse>,
+    pub records: Vec<RecordWithOffset>,
     pub next_offset: u64,
     pub high_water_mark: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,7 +53,7 @@ pub struct FetchResponse {
 }
 
 impl FetchResponse {
-    pub fn new(records: Vec<RecordResponse>, next_offset: u64, high_water_mark: u64) -> Self {
+    pub fn new(records: Vec<RecordWithOffset>, next_offset: u64, high_water_mark: u64) -> Self {
         let lag = if high_water_mark >= next_offset {
             Some(high_water_mark - next_offset)
         } else {

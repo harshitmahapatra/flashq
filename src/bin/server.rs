@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use message_queue_rs::{MessageQueue, MessageQueueError, Record, api::*};
+use message_queue_rs::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -107,8 +107,6 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
     }
 }
 
-
-
 fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
     if let Some(key) = &record.key {
         if key.len() > MAX_KEY_SIZE {
@@ -116,7 +114,9 @@ fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorRes
                 "validation_error",
                 &format!(
                     "Record at index {} key exceeds maximum length of {} characters (got {})",
-                    index, MAX_KEY_SIZE, key.len()
+                    index,
+                    MAX_KEY_SIZE,
+                    key.len()
                 ),
                 serde_json::json!({
                     "field": format!("records[{}].key", index),
@@ -132,7 +132,9 @@ fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorRes
             "validation_error",
             &format!(
                 "Record at index {} value exceeds maximum length of {} characters (got {})",
-                index, MAX_VALUE_SIZE, record.value.len()
+                index,
+                MAX_VALUE_SIZE,
+                record.value.len()
             ),
             serde_json::json!({
                 "field": format!("records[{}].value", index),
@@ -149,7 +151,10 @@ fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorRes
                     "validation_error",
                     &format!(
                         "Record at index {} header '{}' value exceeds maximum length of {} characters (got {})",
-                        index, header_key, MAX_HEADER_VALUE_SIZE, header_value.len()
+                        index,
+                        header_key,
+                        MAX_HEADER_VALUE_SIZE,
+                        header_value.len()
                     ),
                     serde_json::json!({
                         "field": format!("records[{}].headers.{}", index, header_key),
@@ -169,7 +174,7 @@ fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorRespons
     if request.records.is_empty() {
         return Err(ErrorResponse::invalid_parameter(
             "records",
-            "At least one record must be provided"
+            "At least one record must be provided",
         ));
     }
 
@@ -352,8 +357,6 @@ async fn health_check(
 // PRODUCER ENDPOINTS
 // =============================================================================
 
-
-
 async fn produce_messages(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
@@ -392,9 +395,11 @@ async fn produce_messages(
     }
 
     let record_count = request.records.len();
-    
+
     // Convert MessageRecord to Record
-    let records: Vec<Record> = request.records.into_iter()
+    let records: Vec<Record> = request
+        .records
+        .into_iter()
         .map(|msg_record| Record {
             key: msg_record.key,
             value: msg_record.value,
@@ -408,13 +413,13 @@ async fn produce_messages(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "POST /topics/{}/records - Posted {} records, offsets: {:?}",
-                    topic, record_count, offsets
+                    "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
                 ),
             );
-            
+
             let timestamp = chrono::Utc::now().to_rfc3339();
-            let offset_infos: Vec<OffsetInfo> = offsets.into_iter()
+            let offset_infos: Vec<OffsetInfo> = offsets
+                .into_iter()
                 .map(|offset| OffsetInfo {
                     offset,
                     timestamp: timestamp.clone(),
@@ -429,7 +434,7 @@ async fn produce_messages(
             log(
                 app_state.config.log_level,
                 LogLevel::Error,
-                &format!("POST /topics/{}/records failed: {}", topic, error),
+                &format!("POST /topics/{topic}/records failed: {error}"),
             );
             let error_response = ErrorResponse::internal_error(&error.to_string());
             Err((
@@ -827,20 +832,22 @@ async fn fetch_messages_for_consumer_group(
                 ),
             );
 
-            let message_responses: Vec<RecordResponse> = messages
-                .into_iter()
-                .map(|msg| RecordResponse {
-                    key: msg.record.key,
-                    value: msg.record.value,
-                    headers: if include_headers {
-                        msg.record.headers
-                    } else {
-                        None
-                    },
-                    offset: msg.offset,
-                    timestamp: msg.timestamp,
-                })
-                .collect();
+            let message_responses: Vec<RecordWithOffset> = if include_headers {
+                messages
+            } else {
+                messages
+                    .into_iter()
+                    .map(|msg| RecordWithOffset {
+                        record: Record {
+                            key: msg.record.key,
+                            value: msg.record.value,
+                            headers: None,
+                        },
+                        offset: msg.offset,
+                        timestamp: msg.timestamp,
+                    })
+                    .collect()
+            };
 
             let offset_response = app_state
                 .queue
