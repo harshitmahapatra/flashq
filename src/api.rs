@@ -27,7 +27,6 @@ pub struct PollQuery {
     pub count: Option<usize>,
     pub from_offset: Option<u64>,
     pub max_records: Option<usize>,
-    pub timeout_ms: Option<u64>,
     pub include_headers: Option<bool>,
 }
 
@@ -36,9 +35,6 @@ impl PollQuery {
         self.max_records.or(self.count)
     }
 
-    pub fn effective_timeout_ms(&self) -> u64 {
-        self.timeout_ms.unwrap_or(1000)
-    }
 
     pub fn should_include_headers(&self) -> bool {
         self.include_headers.unwrap_or(true)

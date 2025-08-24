@@ -196,16 +196,6 @@ fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
         }
     }
 
-    // Validate timeout_ms parameter
-    if let Some(timeout_ms) = query.timeout_ms {
-        if timeout_ms > 60000 {
-            return Err(ErrorResponse::invalid_parameter(
-                "timeout_ms",
-                "timeout_ms must not exceed 60000 milliseconds",
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -703,7 +693,6 @@ async fn fetch_messages_for_consumer_group(
     }
 
     let limit = query.effective_limit();
-    let timeout_ms = query.effective_timeout_ms();
     let include_headers = query.should_include_headers();
 
     let messages_result = match query.from_offset {
@@ -749,11 +738,10 @@ async fn fetch_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /consumer/{}/topics/{} - max_records: {:?}, timeout_ms: {}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} messages returned",
                     params.group_id,
                     params.topic,
                     limit,
-                    timeout_ms,
                     offset_info,
                     messages.len()
                 ),

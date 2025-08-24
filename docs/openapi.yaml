@@ -199,16 +199,6 @@ paths:
             maximum: 10000
             default: 100
           example: 50
-        - name: timeout_ms
-          in: query
-          required: false
-          description: "Maximum time to wait for messages (default: 1000ms)"
-          schema:
-            type: integer
-            minimum: 0
-            maximum: 60000
-            default: 1000
-          example: 5000
         - name: from_offset
           in: query
           required: false
