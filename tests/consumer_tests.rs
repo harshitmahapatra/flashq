@@ -255,8 +255,9 @@ async fn test_consumer_group_edge_cases() {
 
     helper.create_consumer_group(group_id).await.unwrap();
 
+    // Test fetching from non-existent topic (should return 404)
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, Some(0))
+        .fetch_messages_for_consumer_group(group_id, topic, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 404);

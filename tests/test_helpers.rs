@@ -280,7 +280,7 @@ impl TestClient {
     pub async fn poll_messages_for_testing(
         &self,
         topic: &str,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
         // Create a unique temporary consumer group for this poll operation
         let temp_group_id = format!("test_poll_{}", std::process::id());
@@ -290,7 +290,7 @@ impl TestClient {
 
         // Fetch messages
         let response = self
-            .fetch_messages_for_consumer_group(&temp_group_id, topic, count)
+            .fetch_messages_for_consumer_group(&temp_group_id, topic, max_records)
             .await;
 
         // Clean up consumer group
@@ -353,9 +353,9 @@ impl TestClient {
         &self,
         group_id: &str,
         topic: &str,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        self.fetch_messages_for_consumer_group_with_options(group_id, topic, None, count)
+        self.fetch_messages_for_consumer_group_with_options(group_id, topic, None, max_records)
             .await
     }
 
@@ -364,15 +364,15 @@ impl TestClient {
         group_id: &str,
         topic: &str,
         from_offset: Option<u64>,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
         let mut query = Vec::new();
 
         if let Some(offset) = from_offset {
             query.push(("from_offset", offset.to_string()));
         }
-        if let Some(c) = count {
-            query.push(("count", c.to_string()));
+        if let Some(c) = max_records {
+            query.push(("max_records", c.to_string()));
         }
 
         let mut request = self.client.get(format!(
@@ -456,7 +456,7 @@ impl TestClient {
     pub async fn poll_messages_with_client(
         &self,
         topic: &str,
-        count: Option<usize>,
+        max_records: Option<usize>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client_binary = ensure_client_binary()?;
         let port = self.base_url.split(':').next_back().unwrap();
@@ -479,7 +479,7 @@ impl TestClient {
             temp_group_id.clone(),
             topic.to_string(),
         ];
-        if let Some(c) = count {
+        if let Some(c) = max_records {
             args.push("--max-records".to_string());
             args.push(c.to_string());
         }

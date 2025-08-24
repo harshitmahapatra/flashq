@@ -151,7 +151,7 @@ async fn handle_consumer_command(
             topic,
             max_records,
             from_offset,
-            include_headers: _,
+            include_headers,
         } => {
             fetch_consumer_messages_command(
                 client,
@@ -160,6 +160,7 @@ async fn handle_consumer_command(
                 &topic,
                 max_records,
                 from_offset,
+                include_headers,
             )
             .await;
         }
@@ -352,6 +353,7 @@ async fn fetch_consumer_messages_command(
     topic: &str,
     max_records: Option<usize>,
     from_offset: Option<u64>,
+    include_headers: Option<bool>,
 ) {
     let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
     let mut query_params = Vec::new();
@@ -361,6 +363,9 @@ async fn fetch_consumer_messages_command(
     }
     if let Some(offset) = from_offset {
         query_params.push(format!("from_offset={offset}"));
+    }
+    if let Some(headers) = include_headers {
+        query_params.push(format!("include_headers={headers}"));
     }
 
     if !query_params.is_empty() {
