@@ -160,6 +160,32 @@ async fn test_message_size_and_validation_limits() {
 }
 
 #[tokio::test]
+async fn test_client_binary_integration() {
+    let server = TestServer::start()
+        .await
+        .expect("Failed to start test server");
+    let helper = TestHelper::new(&server);
+    let topic = "client_test_topic";
+    
+    // Test posting with client binary
+    helper
+        .post_message_with_client(topic, "Hello from client binary!")
+        .await
+        .expect("Failed to post message with client");
+        
+    // Test polling with client binary
+    let output = helper
+        .poll_messages_with_client(topic, Some(10))
+        .await
+        .expect("Failed to poll messages with client");
+        
+    // Verify the output contains our message
+    assert!(output.contains("Hello from client binary!"));
+    assert!(output.contains("✓ Got 1 messages"));
+    assert!(output.contains("Committed offset 1"));
+}
+
+#[tokio::test]
 async fn test_concurrent_message_posting() {
     let server = TestServer::start()
         .await

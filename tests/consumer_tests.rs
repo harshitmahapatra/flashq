@@ -92,14 +92,16 @@ async fn test_consumer_group_message_fetching() {
     assert_eq!(response.status(), 200);
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 10);
-    assert_eq!(fetch_response.next_offset, 10);
+    assert_eq!(fetch_response.next_offset, 0); // Offset not advanced until commit
     assert_eq!(fetch_response.high_water_mark, 10);
 
+    // Commit offset to 5
     helper
         .update_consumer_group_offset(group_id, topic, 5)
         .await
         .unwrap();
 
+    // Verify offset was advanced after commit
     let response = helper
         .fetch_messages_for_consumer_group(group_id, topic, Some(3))
         .await
@@ -107,7 +109,22 @@ async fn test_consumer_group_message_fetching() {
     assert_eq!(response.status(), 200);
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 3);
-    assert_eq!(fetch_response.next_offset, 8);
+    assert_eq!(fetch_response.next_offset, 5); // Offset reflects committed position
+
+    // Commit to offset 8 and verify it advances
+    helper
+        .update_consumer_group_offset(group_id, topic, 8)
+        .await
+        .unwrap();
+
+    let response = helper
+        .fetch_messages_for_consumer_group(group_id, topic, Some(2))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let fetch_response: FetchResponse = response.json().await.unwrap();
+    assert_eq!(fetch_response.records.len(), 2); // Messages from offset 8-9
+    assert_eq!(fetch_response.next_offset, 8); // Offset advanced to committed position
 }
 
 #[tokio::test]

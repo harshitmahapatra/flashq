@@ -184,7 +184,7 @@ cargo run --bin client -- post news "Development record"
 cargo run --bin client -- poll news
 
 # Poll with count limit
-cargo run --bin client -- poll news 5
+cargo run --bin client -- poll news --count 5
 
 # Use custom port
 cargo run --bin client -- --port=9090 post test "Custom port"

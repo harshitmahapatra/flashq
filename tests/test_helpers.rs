@@ -6,10 +6,13 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tokio::process::Command as TokioCommand;
 use tokio::time::sleep;
 
-static INIT: Once = Once::new();
+static SERVER_INIT: Once = Once::new();
+static CLIENT_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static CLIENT_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
     // Bind to port 0 to let the OS choose an available port
@@ -19,7 +22,7 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 }
 
 pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    INIT.call_once(|| {
+    SERVER_INIT.call_once(|| {
         eprintln!("Building server binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "server"])
@@ -43,6 +46,36 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .unwrap()
         .as_ref()
         .expect("Server binary path should be set")
+        .clone();
+
+    Ok(binary_path)
+}
+
+pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    CLIENT_INIT.call_once(|| {
+        eprintln!("Building client binary for integration tests...");
+        let output = Command::new("cargo")
+            .args(["build", "--bin", "client"])
+            .output()
+            .expect("Failed to build client binary");
+
+        if !output.status.success() {
+            panic!(
+                "Failed to build client binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let binary_path = PathBuf::from("target/debug/client");
+        *CLIENT_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        eprintln!("Client binary built successfully");
+    });
+
+    let binary_path = CLIENT_BINARY_PATH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("Client binary path should be set")
         .clone();
 
     Ok(binary_path)
@@ -157,10 +190,6 @@ impl TestServer {
 
         Ok(false) // All retries failed
     }
-
-    pub fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
 }
 
 impl Drop for TestServer {
@@ -181,7 +210,7 @@ impl TestHelper {
     pub fn new(server: &TestServer) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: server.base_url(),
+            base_url: format!("http://127.0.0.1:{}", server.port),
         }
     }
 
@@ -191,7 +220,6 @@ impl TestHelper {
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        // Legacy helper - converts content to new Record format
         self.post_message_with_record(topic, None, content, None)
             .await
     }
@@ -238,25 +266,25 @@ impl TestHelper {
     // Note: Direct topic polling has been removed to align with OpenAPI spec.
     // Use consumer group endpoints for message consumption.
 
-    /// Helper method for tests that need to verify posted messages
-    /// Creates a temporary consumer group to fetch all messages
+    // Basic polling for testing - creates temporary consumer group
     pub async fn poll_messages_for_testing(
         &self,
         topic: &str,
         count: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        let group_id = format!("test-{}", std::process::id());
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
 
-        // Create consumer group (ignore if it already exists)
-        let _ = self.create_consumer_group(&group_id).await;
+        // Create consumer group
+        let _ = self.create_consumer_group(&temp_group_id).await;
 
         // Fetch messages
         let response = self
-            .fetch_messages_for_consumer_group(&group_id, topic, count)
+            .fetch_messages_for_consumer_group(&temp_group_id, topic, count)
             .await;
 
-        // Clean up consumer group (ignore errors)
-        let _ = self.leave_consumer_group(&group_id).await;
+        // Clean up consumer group
+        let _ = self.leave_consumer_group(&temp_group_id).await;
 
         response
     }
@@ -383,5 +411,64 @@ impl TestHelper {
             .get(format!("{}/health", self.base_url))
             .send()
             .await
+    }
+
+    pub async fn post_message_with_client(
+        &self,
+        topic: &str,
+        message: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').last().unwrap();
+
+        let output = TokioCommand::new(&client_binary)
+            .args(["--port", port, "post", topic, message])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Client post failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn poll_messages_with_client(
+        &self,
+        topic: &str,
+        count: Option<usize>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').last().unwrap();
+
+        let mut args = vec![
+            "--port".to_string(),
+            port.to_string(),
+            "poll".to_string(),
+            topic.to_string(),
+        ];
+        if let Some(c) = count {
+            args.push("--count".to_string());
+            args.push(c.to_string());
+        }
+
+        let output = TokioCommand::new(&client_binary)
+            .args(&args)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Client poll failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 }

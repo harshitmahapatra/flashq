@@ -49,11 +49,11 @@ cargo build --release
 # Post a message
 cargo run --bin client -- post news "Breaking news: Rust is awesome!"
 
-# Poll messages from a topic
+# Poll messages from a topic (uses consumer groups with automatic commit)
 cargo run --bin client -- poll news
 
-# Poll with count limit
-cargo run --bin client -- poll news 5
+# Poll with count limit  
+cargo run --bin client -- poll news --count 5
 ```
 
 ### HTTP API
@@ -96,8 +96,13 @@ curl -X POST http://127.0.0.1:8080/consumer/my-group \
   -H "Content-Type: application/json" \
   -d '{"group_id": "my-group"}'
 
-# Poll records for consumer group (automatically advances offset)
+# Poll records for consumer group (does not advance offset)
 curl http://127.0.0.1:8080/consumer/my-group/topics/news
+
+# Commit offset after processing messages
+curl -X POST http://127.0.0.1:8080/consumer/my-group/topics/news/offset \
+  -H "Content-Type: application/json" \
+  -d '{"offset": 5}'
 
 # Replay from specific offset for consumer group (doesn't advance group offset)  
 curl http://127.0.0.1:8080/consumer/my-group/topics/news?from_offset=5&count=3

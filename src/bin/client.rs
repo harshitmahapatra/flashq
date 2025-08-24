@@ -128,13 +128,27 @@ async fn poll_messages(
             if response.status().is_success() {
                 match response.json::<FetchResponse>().await {
                     Ok(fetch_response) => {
+                        let message_count = fetch_response.records.len();
                         println!(
                             "✓ Got {} messages for topic '{}'",
-                            fetch_response.records.len(),
+                            message_count,
                             topic
                         );
+                        
+                        // Get last offset before consuming records
+                        let commit_offset = if !fetch_response.records.is_empty() {
+                            Some(fetch_response.records.last().unwrap().offset + 1)
+                        } else {
+                            None
+                        };
+                        
                         for message in fetch_response.records {
                             print_message(&message);
+                        }
+                        
+                        // Commit offset after successfully processing messages (Kafka-style)
+                        if let Some(offset) = commit_offset {
+                            commit_consumer_group_offset(client, server_url, &group_id, topic, offset).await;
                         }
                     }
                     Err(e) => println!("✗ Failed to parse response: {e}"),
@@ -150,6 +164,30 @@ async fn poll_messages(
     // Clean up consumer group
     let delete_url = format!("{server_url}/consumer/{group_id}");
     let _ = client.delete(&delete_url).send().await;
+}
+
+async fn commit_consumer_group_offset(
+    client: &reqwest::Client,
+    server_url: &str,
+    group_id: &str,
+    topic: &str,
+    offset: u64,
+) {
+    use flashq::api::UpdateConsumerGroupOffsetRequest;
+    
+    let commit_url = format!("{server_url}/consumer/{group_id}/topics/{topic}/offset");
+    let request = UpdateConsumerGroupOffsetRequest { offset };
+    
+    match client.post(&commit_url).json(&request).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                println!("✓ Committed offset {} for consumer group '{}'", offset, group_id);
+            } else {
+                handle_error_response(response, &format!("commit offset for group '{group_id}'")).await;
+            }
+        }
+        Err(e) => println!("✗ Failed to commit offset: {e}"),
+    }
 }
 
 // =============================================================================

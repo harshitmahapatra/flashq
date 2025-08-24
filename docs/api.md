@@ -337,7 +337,7 @@ curl -X POST http://127.0.0.1:8080/consumer/my-group/topics/news/offset \
 
 ### Poll Records for Consumer Group
 
-Poll records for a consumer group starting from its current offset. The offset is automatically advanced after successful polling.
+Poll records for a consumer group starting from its current offset. The offset remains unchanged until explicitly committed using the update offset endpoint.
 
 **Endpoint:** `GET /consumer/{group_id}/topics/{topic}`
 
