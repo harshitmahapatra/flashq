@@ -9,7 +9,8 @@ fn load_openapi_spec() -> Value {
 }
 
 fn get_response_schema(spec: &Value, path: &str, method: &str, status: &str) -> Value {
-    spec["paths"][path][method]["responses"][status]["content"]["application/json"]["schema"].clone()
+    spec["paths"][path][method]["responses"][status]["content"]["application/json"]["schema"]
+        .clone()
 }
 
 fn resolve_schema_ref(spec: &Value, schema: &Value) -> Value {
@@ -23,7 +24,7 @@ fn resolve_schema_ref(spec: &Value, schema: &Value) -> Value {
 
 fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), String> {
     let resolved_schema = resolve_schema_ref(spec, schema);
-    
+
     if let Some(required) = resolved_schema.get("required").and_then(|v| v.as_array()) {
         for field in required {
             let field_name = field.as_str().unwrap();
@@ -32,8 +33,11 @@ fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), Str
             }
         }
     }
-    
-    if let Some(properties) = resolved_schema.get("properties").and_then(|v| v.as_object()) {
+
+    if let Some(properties) = resolved_schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+    {
         for (field_name, field_schema) in properties {
             if let Some(field_value) = data.get(field_name) {
                 if let Some(field_type) = field_schema.get("type").and_then(|v| v.as_str()) {
@@ -59,7 +63,7 @@ fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), Str
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -68,18 +72,19 @@ async fn test_health_endpoint_compliance() {
     let spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
-    
-    let response = helper.client
+
+    let response = helper
+        .client
         .get(&format!("{}/health", helper.base_url))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), 200);
-    
+
     let response_data: Value = response.json().await.unwrap();
     let schema = get_response_schema(&spec, "/health", "get", "200");
-    
+
     validate_schema(&spec, &schema, &response_data)
         .expect("Health response does not comply with OpenAPI schema");
 }
@@ -89,17 +94,17 @@ async fn test_produce_records_endpoint_compliance() {
     let spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
-    
+
     let response = helper
         .post_record_with_record("test_topic", None, "Test record", None)
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), 200);
-    
+
     let response_data: Value = response.json().await.unwrap();
     let schema = get_response_schema(&spec, "/topics/{topic}/records", "post", "200");
-    
+
     validate_schema(&spec, &schema, &response_data)
         .expect("Produce response does not comply with OpenAPI schema");
 }
@@ -109,17 +114,14 @@ async fn test_consumer_group_create_compliance() {
     let spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
-    
-    let response = helper
-        .create_consumer_group("test_group")
-        .await
-        .unwrap();
-    
+
+    let response = helper.create_consumer_group("test_group").await.unwrap();
+
     assert_eq!(response.status(), 200);
-    
+
     let response_data: Value = response.json().await.unwrap();
     let schema = get_response_schema(&spec, "/consumer/{group-id}", "post", "200");
-    
+
     validate_schema(&spec, &schema, &response_data)
         .expect("Consumer group response does not comply with OpenAPI schema");
 }
@@ -129,23 +131,23 @@ async fn test_consumer_fetch_records_compliance() {
     let spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
-    
+
     let group_id = "fetch_compliance_group";
     let topic = "fetch_compliance_topic";
-    
+
     helper.create_consumer_group(group_id).await.unwrap();
     helper.post_record(topic, "Test record").await.unwrap();
-    
+
     let response = helper
         .fetch_records_for_consumer_group(group_id, topic, Some(10))
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), 200);
-    
+
     let response_data: Value = response.json().await.unwrap();
     let schema = get_response_schema(&spec, "/consumer/{group-id}/topics/{topic}", "get", "200");
-    
+
     validate_schema(&spec, &schema, &response_data)
         .expect("Consumer fetch response does not comply with OpenAPI schema");
 }
@@ -155,17 +157,23 @@ async fn test_error_response_compliance() {
     let _spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
-    
+
     let response = helper
         .fetch_records_for_consumer_group("nonexistent_group", "test_topic", None)
         .await
         .unwrap();
-    
+
     assert!(response.status().is_client_error());
-    
+
     let response_data: Value = response.json().await.unwrap();
-    
+
     // Validate error response structure
-    assert!(response_data.get("error").is_some(), "Missing 'error' field");
-    assert!(response_data.get("message").is_some(), "Missing 'message' field");
+    assert!(
+        response_data.get("error").is_some(),
+        "Missing 'error' field"
+    );
+    assert!(
+        response_data.get("message").is_some(),
+        "Missing 'message' field"
+    );
 }

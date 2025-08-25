@@ -125,11 +125,7 @@ fn poll_records_interactive(queue: &FlashQ) {
             if records.is_empty() {
                 println!("📭 No records found in topic '{topic}'");
             } else {
-                println!(
-                    "📬 Found {} record(s) in topic '{}':",
-                    records.len(),
-                    topic
-                );
+                println!("📬 Found {} record(s) in topic '{}':", records.len(), topic);
                 println!("─────────────────────────────────────");
                 for (i, record) in records.iter().enumerate() {
                     println!("Record {} of {}:", i + 1, records.len());
