@@ -125,7 +125,7 @@ async fn handle_producer_command(
                 handle_batch_post(client, server_url, &topic, &batch_file).await;
             } else if let Some(message) = message {
                 let headers = parse_headers(header);
-                post_messages(client, server_url, &topic, key, &message, headers).await;
+                post_records(client, server_url, &topic, key, &message, headers).await;
             } else {
                 println!("Error: Either provide a message or use --batch with a JSON file");
                 std::process::exit(1);
@@ -268,7 +268,7 @@ async fn handle_batch_post(
     }
 }
 
-async fn post_messages(
+async fn post_records(
     client: &reqwest::Client,
     server_url: &str,
     topic: &str,
@@ -295,11 +295,11 @@ async fn post_messages(
                     Ok(produce_response) => {
                         if let Some(first_offset) = produce_response.offsets.first() {
                             println!(
-                                "Posted message to topic '{}' with offset: {}",
+                                "Posted record to topic '{}' with offset: {}",
                                 topic, first_offset.offset
                             );
                         } else {
-                            println!("Posted message to topic '{topic}' (no offset returned)");
+                            println!("Posted record to topic '{topic}' (no offset returned)");
                         }
                     }
                     Err(e) => println!("Failed to parse response: {e}"),

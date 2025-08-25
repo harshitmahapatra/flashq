@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use flashq::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
+use flashq::{FlashQ, FlashQError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -64,7 +64,7 @@ type AppState = Arc<AppStateInner>;
 
 #[derive(Clone)]
 struct AppStateInner {
-    queue: Arc<MessageQueue>,
+    queue: Arc<FlashQ>,
     config: AppConfig,
 }
 
@@ -303,7 +303,7 @@ async fn main() {
 
     let config = AppConfig { log_level };
     let app_state = Arc::new(AppStateInner {
-        queue: Arc::new(MessageQueue::new()),
+        queue: Arc::new(FlashQ::new()),
         config,
     });
 
@@ -403,7 +403,7 @@ async fn produce_messages(
 
     let record_count = request.records.len();
 
-    // Convert MessageRecord to Record
+    // Convert request records to Record type
     let records: Vec<Record> = request
         .records
         .into_iter()
@@ -633,8 +633,8 @@ async fn get_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                FlashQError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
                 _ => ErrorResponse::internal_error(&error.to_string()),
@@ -716,8 +716,8 @@ async fn commit_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                FlashQError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
                 _ => ErrorResponse::internal_error(&error.to_string()),
@@ -811,8 +811,8 @@ async fn fetch_messages_for_consumer_group(
             ),
         );
         match &error {
-            MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+            FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+            FlashQError::ConsumerGroupNotFound { group_id } => {
                 ErrorResponse::group_not_found(group_id)
             }
             _ => ErrorResponse::internal_error(&error.to_string()),

@@ -228,16 +228,16 @@ impl TestClient {
     // ------------------------------------------------------------------------
     // HTTP API Operations
     // ------------------------------------------------------------------------
-    pub async fn post_message(
+    pub async fn post_record(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        self.post_message_with_record(topic, None, content, None)
+        self.post_record_with_record(topic, None, content, None)
             .await
     }
 
-    pub async fn post_message_with_record(
+    pub async fn post_record_with_record(
         &self,
         topic: &str,
         key: Option<String>,
@@ -245,14 +245,14 @@ impl TestClient {
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
         // Convert single record to batch format
-        let message_record = Record {
+        let record = Record {
             key,
             value: value.to_string(),
             headers,
         };
 
         let produce_request = ProduceRequest {
-            records: vec![message_record],
+            records: vec![record],
         };
 
         self.client
@@ -429,7 +429,7 @@ impl TestClient {
             .await
     }
 
-    pub async fn post_message_with_client(
+    pub async fn post_record_with_client(
         &self,
         topic: &str,
         message: &str,

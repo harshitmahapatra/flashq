@@ -5,14 +5,14 @@ use flashq::api::*;
 use test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
-async fn test_post_message_integration() {
+async fn test_post_record_integration() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
     let helper = TestClient::new(&server);
 
     let response = helper
-        .post_message_with_record("test", None, "Integration test record", None)
+        .post_record_with_record("test", None, "Integration test record", None)
         .await
         .unwrap();
     assert!(response.status().is_success());
@@ -30,7 +30,7 @@ async fn test_post_message_integration() {
     headers.insert("priority".to_string(), "high".to_string());
 
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             "test",
             Some("user123".to_string()),
             "Record with metadata",
@@ -58,7 +58,7 @@ async fn test_message_size_and_validation_limits() {
 
     let max_key = "x".repeat(1024);
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             Some(max_key.clone()),
             "Valid record with max key size",
@@ -70,7 +70,7 @@ async fn test_message_size_and_validation_limits() {
 
     let oversized_key = "x".repeat(1025);
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             Some(oversized_key),
             "Record with oversized key",
@@ -82,7 +82,7 @@ async fn test_message_size_and_validation_limits() {
 
     let oversized_value = "x".repeat(1_048_577);
     let response = helper
-        .post_message_with_record(topic, None, &oversized_value, None)
+        .post_record_with_record(topic, None, &oversized_value, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 400, "Oversized value should be rejected");
@@ -90,7 +90,7 @@ async fn test_message_size_and_validation_limits() {
     let mut oversized_header = std::collections::HashMap::new();
     oversized_header.insert("large_header".to_string(), "z".repeat(1025));
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             None,
             "Record with oversized header",
@@ -106,7 +106,7 @@ async fn test_message_size_and_validation_limits() {
 
     let large_value = "Record content ".repeat(1000);
     let response = helper
-        .post_message_with_record(topic, None, &large_value, None)
+        .post_record_with_record(topic, None, &large_value, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200, "Large record should be accepted");
@@ -116,7 +116,7 @@ async fn test_message_size_and_validation_limits() {
         headers.insert(format!("header_{i}"), format!("value_{i}"));
     }
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             Some("test_key".to_string()),
             "Record with multiple headers",
@@ -133,7 +133,7 @@ async fn test_message_size_and_validation_limits() {
     let mut max_header = std::collections::HashMap::new();
     max_header.insert("large_header".to_string(), "y".repeat(1024));
     let response = helper
-        .post_message_with_record(topic, None, "Record with max header size", Some(max_header))
+        .post_record_with_record(topic, None, "Record with max header size", Some(max_header))
         .await
         .unwrap();
     assert_eq!(
@@ -169,7 +169,7 @@ async fn test_client_binary_integration() {
 
     // Test posting with client binary
     helper
-        .post_message_with_client(topic, "Hello from client binary!")
+        .post_record_with_client(topic, "Hello from client binary!")
         .await
         .expect("Failed to post message with client");
 
@@ -208,7 +208,7 @@ async fn test_concurrent_message_posting() {
                 headers.insert("index".to_string(), i.to_string());
 
                 let response = helper
-                    .post_message_with_record(
+                    .post_record_with_record(
                         topic,
                         key,
                         &format!("Concurrent record {i}"),
@@ -265,7 +265,7 @@ async fn test_concurrent_message_posting() {
             let topic_name = format!("concurrent_topic_{}", i % 3);
             tokio::spawn(async move {
                 let response = helper
-                    .post_message(&topic_name, &format!("Multi-topic record {i}"))
+                    .post_record(&topic_name, &format!("Multi-topic record {i}"))
                     .await
                     .unwrap();
                 (topic_name, response.status() == 200)
@@ -372,14 +372,14 @@ async fn test_message_structure_edge_cases() {
     let topic = "edge_case_topic";
 
     let response = helper
-        .post_message_with_record(topic, Some("".to_string()), "Record with empty key", None)
+        .post_record_with_record(topic, Some("".to_string()), "Record with empty key", None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200, "Empty key should be accepted");
 
     let special_key = "key-with_special.chars@domain.com:123";
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             Some(special_key.to_string()),
             "Record with special chars in key",
@@ -399,7 +399,7 @@ async fn test_message_structure_edge_cases() {
     special_headers.insert("unicode-header".to_string(), "测试数据".to_string());
 
     let response = helper
-        .post_message_with_record(
+        .post_record_with_record(
             topic,
             None,
             "Record with special headers",

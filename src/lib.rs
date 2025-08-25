@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 pub mod demo;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MessageQueueError {
+pub enum FlashQError {
     TopicNotFound {
         topic: String,
     },
@@ -23,17 +23,17 @@ pub enum MessageQueueError {
     },
 }
 
-impl fmt::Display for MessageQueueError {
+impl fmt::Display for FlashQError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageQueueError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
-            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+            FlashQError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
+            FlashQError::ConsumerGroupNotFound { group_id } => {
                 write!(f, "Consumer group {group_id} does not exist")
             }
-            MessageQueueError::ConsumerGroupAlreadyExists { group_id } => {
+            FlashQError::ConsumerGroupAlreadyExists { group_id } => {
                 write!(f, "Consumer group {group_id} already exists")
             }
-            MessageQueueError::InvalidOffset {
+            FlashQError::InvalidOffset {
                 offset,
                 topic,
                 max_offset,
@@ -45,15 +45,15 @@ impl fmt::Display for MessageQueueError {
     }
 }
 
-impl std::error::Error for MessageQueueError {}
+impl std::error::Error for FlashQError {}
 
-impl MessageQueueError {
+impl FlashQError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            MessageQueueError::TopicNotFound { .. }
-                | MessageQueueError::ConsumerGroupNotFound { .. }
-                | MessageQueueError::InvalidOffset { .. }
+            FlashQError::TopicNotFound { .. }
+                | FlashQError::ConsumerGroupNotFound { .. }
+                | FlashQError::InvalidOffset { .. }
         )
     }
 }
@@ -191,20 +191,20 @@ impl ConsumerGroup {
     }
 }
 
-pub struct MessageQueue {
+pub struct FlashQ {
     topics: Arc<Mutex<HashMap<String, TopicLog>>>,
     consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
 }
 
-impl Default for MessageQueue {
+impl Default for FlashQ {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MessageQueue {
+impl FlashQ {
     pub fn new() -> Self {
-        MessageQueue {
+        FlashQ {
             topics: Arc::new(Mutex::new(HashMap::new())),
             consumer_groups: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -231,7 +231,7 @@ impl MessageQueue {
         &self,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.poll_records_from_offset(topic, 0, count)
     }
 
@@ -240,7 +240,7 @@ impl MessageQueue {
         topic: &str,
         offset: u64,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
             Some(topic_log) => Ok(topic_log
@@ -248,20 +248,20 @@ impl MessageQueue {
                 .into_iter()
                 .cloned()
                 .collect()),
-            None => Err(MessageQueueError::TopicNotFound {
+            None => Err(FlashQError::TopicNotFound {
                 topic: topic.to_string(),
             }),
         }
     }
 
-    pub fn create_consumer_group(&self, group_id: String) -> Result<(), MessageQueueError> {
+    pub fn create_consumer_group(&self, group_id: String) -> Result<(), FlashQError> {
         let mut consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.entry(group_id.clone()) {
             Vacant(entry) => {
                 entry.insert(ConsumerGroup::new(group_id));
                 Ok(())
             }
-            Occupied(_) => Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }),
+            Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
         }
     }
 
@@ -269,11 +269,11 @@ impl MessageQueue {
         &self,
         group_id: &str,
         topic: &str,
-    ) -> Result<u64, MessageQueueError> {
+    ) -> Result<u64, FlashQError> {
         let consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.get(group_id) {
             Some(consumer_group) => Ok(consumer_group.get_offset(topic)),
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
@@ -284,19 +284,19 @@ impl MessageQueue {
         group_id: &str,
         topic: String,
         offset: u64,
-    ) -> Result<(), MessageQueueError> {
+    ) -> Result<(), FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         let topic_next_offset = match topic_log_map.get(&topic) {
             Some(topic_log) => topic_log.next_offset(),
             None => {
-                return Err(MessageQueueError::TopicNotFound {
+                return Err(FlashQError::TopicNotFound {
                     topic: topic.clone(),
                 });
             }
         };
 
         if offset > topic_next_offset {
-            return Err(MessageQueueError::InvalidOffset {
+            return Err(FlashQError::InvalidOffset {
                 offset,
                 topic: topic.clone(),
                 max_offset: topic_next_offset,
@@ -309,17 +309,17 @@ impl MessageQueue {
                 consumer_group.set_offset(topic, offset);
                 Ok(())
             }
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
     }
 
-    pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), MessageQueueError> {
+    pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), FlashQError> {
         let mut consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.remove(group_id) {
             Some(_) => Ok(()),
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
@@ -330,7 +330,7 @@ impl MessageQueue {
         group_id: &str,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
         let records = self.poll_records_from_offset(topic, current_offset, count)?;
         Ok(records)
@@ -342,7 +342,7 @@ impl MessageQueue {
         topic: &str,
         offset: u64,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.get_consumer_group_offset(group_id, topic)?;
         self.poll_records_from_offset(topic, offset, count)
     }
@@ -364,9 +364,9 @@ mod tests {
     use std::collections::HashMap;
 
     // Test functions updated to use new Record types
-    // MessageRecord -> Record, RecordWithOffset -> RecordWithOffset
+    // Using Record and RecordWithOffset types
     #[test]
-    fn test_message_record_creation() {
+    fn test_record_creation() {
         let record = Record::new(None, "test content".to_string(), None);
         assert_eq!(record.value, "test content");
         assert!(record.key.is_none());
@@ -405,14 +405,14 @@ mod tests {
 
     #[test]
     fn test_queue_creation() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         // Queue should be created successfully - no panic means success
         drop(queue);
     }
 
     #[test]
     fn test_post_single_message() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let record = Record::new(None, "test message".to_string(), None);
         let result = queue.post_record("test_topic".to_string(), record);
 
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_post_multiple_messages_increment_offset() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "msg1".to_string(), None);
         let record2 = Record::new(None, "msg2".to_string(), None);
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_poll_messages_from_existing_topic() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_poll_messages_with_count_limit() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
@@ -474,14 +474,14 @@ mod tests {
 
     #[test]
     fn test_poll_nonexistent_topic() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let poll_result = queue.poll_records("news", None);
         poll_result.expect_err("Expected error for non-existent topic");
     }
 
     #[test]
     fn test_fifo_ordering() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first".to_string(), None);
         let record2 = Record::new(None, "second".to_string(), None);
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_messages_persist_after_polling() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let record = Record::new(None, "first news".to_string(), None);
         queue.post_record("news".to_string(), record).unwrap();
 
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_different_topics_isolated() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record_a = Record::new(None, "message for A".to_string(), None);
         let record_b = Record::new(None, "message for B".to_string(), None);
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_message_with_key_and_headers() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let mut headers = HashMap::new();
         headers.insert("priority".to_string(), "high".to_string());
         headers.insert("source".to_string(), "test-suite".to_string());
@@ -768,7 +768,7 @@ mod tests {
     // Error Condition Tests
     #[test]
     fn test_consumer_group_already_exists_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         // Create a consumer group
         queue
@@ -779,7 +779,7 @@ mod tests {
         let result = queue.create_consumer_group("existing-group".to_string());
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupAlreadyExists { group_id }) = result {
             assert_eq!(group_id, "existing-group");
         } else {
             panic!("Expected ConsumerGroupAlreadyExists error");
@@ -788,13 +788,13 @@ mod tests {
 
     #[test]
     fn test_consumer_group_not_found_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         // Try to get offset from non-existent group
         let result = queue.get_consumer_group_offset("nonexistent-group", "topic");
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupNotFound { group_id }) = result {
             assert_eq!(group_id, "nonexistent-group");
         } else {
             panic!("Expected ConsumerGroupNotFound error");
@@ -803,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_success() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let group_id = "test-group";
 
         // Create a consumer group
@@ -830,7 +830,7 @@ mod tests {
         let get_result = queue.get_consumer_group_offset(group_id, "topic1");
         assert!(get_result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound {
+        if let Err(FlashQError::ConsumerGroupNotFound {
             group_id: error_group_id,
         }) = get_result
         {
@@ -842,14 +842,14 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_not_found() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let nonexistent_group = "nonexistent-group";
 
         // Try to delete a non-existent consumer group
         let result = queue.delete_consumer_group(nonexistent_group);
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupNotFound { group_id }) = result {
             assert_eq!(group_id, nonexistent_group);
         } else {
             panic!("Expected ConsumerGroupNotFound error");
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_multiple_topics() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let group_id = "multi-topic-group";
 
         // Create a consumer group
@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn test_invalid_offset_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let record = Record::new(None, "test".to_string(), None);
 
         // Post a message to create topic with offset 0
@@ -924,7 +924,7 @@ mod tests {
             queue.update_consumer_group_offset("test-group", "test-topic".to_string(), 999);
 
         assert!(result.is_err());
-        if let Err(MessageQueueError::InvalidOffset {
+        if let Err(FlashQError::InvalidOffset {
             offset,
             topic,
             max_offset,
@@ -940,12 +940,12 @@ mod tests {
 
     #[test]
     fn test_message_queue_error_display() {
-        let topic_error = MessageQueueError::TopicNotFound {
+        let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
         assert_eq!(topic_error.to_string(), "Topic missing does not exist");
 
-        let group_error = MessageQueueError::ConsumerGroupNotFound {
+        let group_error = FlashQError::ConsumerGroupNotFound {
             group_id: "missing-group".to_string(),
         };
         assert_eq!(
@@ -953,7 +953,7 @@ mod tests {
             "Consumer group missing-group does not exist"
         );
 
-        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+        let exists_error = FlashQError::ConsumerGroupAlreadyExists {
             group_id: "existing-group".to_string(),
         };
         assert_eq!(
@@ -961,7 +961,7 @@ mod tests {
             "Consumer group existing-group already exists"
         );
 
-        let offset_error = MessageQueueError::InvalidOffset {
+        let offset_error = FlashQError::InvalidOffset {
             offset: 10,
             topic: "test".to_string(),
             max_offset: 5,
@@ -974,24 +974,24 @@ mod tests {
 
     #[test]
     fn test_message_queue_error_is_not_found() {
-        let topic_error = MessageQueueError::TopicNotFound {
+        let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
         assert!(topic_error.is_not_found());
 
-        let group_error = MessageQueueError::ConsumerGroupNotFound {
+        let group_error = FlashQError::ConsumerGroupNotFound {
             group_id: "missing".to_string(),
         };
         assert!(group_error.is_not_found());
 
-        let offset_error = MessageQueueError::InvalidOffset {
+        let offset_error = FlashQError::InvalidOffset {
             offset: 10,
             topic: "test".to_string(),
             max_offset: 5,
         };
         assert!(offset_error.is_not_found());
 
-        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+        let exists_error = FlashQError::ConsumerGroupAlreadyExists {
             group_id: "existing".to_string(),
         };
         assert!(!exists_error.is_not_found());

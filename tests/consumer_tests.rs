@@ -36,7 +36,7 @@ async fn test_consumer_group_offset_management() {
 
     for i in 0..5 {
         helper
-            .post_message(topic, &format!("Message {i}"))
+            .post_record(topic, &format!("Message {i}"))
             .await
             .unwrap();
     }
@@ -80,7 +80,7 @@ async fn test_consumer_group_message_fetching() {
 
     for i in 0..10 {
         helper
-            .post_message(topic, &format!("Group Message {i}"))
+            .post_record(topic, &format!("Group Message {i}"))
             .await
             .unwrap();
     }
@@ -140,7 +140,7 @@ async fn test_consumer_group_from_offset_fetching() {
 
     for i in 0..8 {
         helper
-            .post_message(topic, &format!("Offset Message {i}"))
+            .post_record(topic, &format!("Offset Message {i}"))
             .await
             .unwrap();
     }
@@ -179,7 +179,7 @@ async fn test_multiple_consumer_groups() {
 
     for i in 0..6 {
         helper
-            .post_message(topic, &format!("Multi Group Message {i}"))
+            .post_record(topic, &format!("Multi Group Message {i}"))
             .await
             .unwrap();
     }
@@ -262,7 +262,7 @@ async fn test_consumer_group_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 404);
 
-    helper.post_message(topic, "Single message").await.unwrap();
+    helper.post_record(topic, "Single message").await.unwrap();
 
     let response = helper
         .fetch_messages_for_consumer_group(group_id, topic, Some(1))
