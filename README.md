@@ -61,6 +61,7 @@ cargo clippy && cargo fmt     # Code quality
 
 - **[API Reference](docs/api.md)** - Complete HTTP API documentation
 - **[Architecture](docs/architecture.md)** - Internal design and project structure
+- **[Development Guide](docs/development.md)** - Development workflow and contribution guidelines
 
 ## License
 
