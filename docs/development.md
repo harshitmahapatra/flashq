@@ -62,7 +62,7 @@ cargo run --bin client -- health # CLI client
 ## Project Structure
 
 ```
-src/lib.rs          # Core MessageQueue + Record types
+src/lib.rs          # Core FlashQ + Record types
 src/main.rs         # Entry point 
 src/demo.rs         # Interactive demo
 src/api.rs          # HTTP API structures

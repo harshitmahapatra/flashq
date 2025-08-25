@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired message queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
+FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
 
 ## Development Commands
 
@@ -39,7 +39,7 @@ FlashQ is a Kafka-inspired message queue implementation with HTTP API endpoints,
 ## Project Structure
 
 Following Rust best practices with library and binary crates:
-- `src/lib.rs` - Library crate containing core message queue functionality
+- `src/lib.rs` - Library crate containing core record queue functionality
 - `src/main.rs` - Lightweight binary entry point (delegates to demo module)
 - `src/demo.rs` - Interactive demo module with CLI functionality  
 - `src/bin/server.rs` - HTTP server implementation with REST API
@@ -50,7 +50,7 @@ Following Rust best practices with library and binary crates:
 ### Library Crate (`src/lib.rs`)
 - `Record` struct - Record payload with optional key and headers
 - `RecordWithOffset` struct - Record with offset and ISO 8601 timestamp
-- `MessageQueue` struct - Main queue implementation with topic-based organization
+- `FlashQ` struct - Main queue implementation with topic-based organization
 - `TopicLog` struct - Append-only log storage for records within topics
 - Consumer group management with offset tracking
 - `demo` module - Interactive CLI functionality (exposed publicly)
@@ -64,7 +64,7 @@ Following Rust best practices with library and binary crates:
 - **`src/bin/client.rs`** - Command-line client for interacting with the HTTP server
 
 ### Interactive Demo (`src/demo.rs`)
-The demo module provides an educational interactive demonstration of the message queue library:
+The demo module provides an educational interactive demonstration of the record queue library:
 
 **Features:**
 - **Menu-driven interface** - 5 clear options with emoji-based visual feedback

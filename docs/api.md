@@ -7,7 +7,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/topics/{topic}/records` | Post records to topic |
-| `GET` | `/topics/{topic}/messages` | Poll records from topic |
+| `GET` | `/topics/{topic}/records` | Poll records from topic |
 | `POST` | `/consumer/{group_id}` | Create consumer group |
 | `DELETE` | `/consumer/{group_id}` | Delete consumer group |
 | `GET/POST` | `/consumer/{group_id}/topics/{topic}/offset` | Get/set consumer group offset |
@@ -24,7 +24,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
   "records": [
     {
       "key": "user123",              // Optional (max 1024 chars)
-      "value": "Message content",    // Required (max 1MB)
+      "value": "Record content",    // Required (max 1MB)
       "headers": {"priority": "high"} // Optional (values max 1024 chars)
     }
   ]
@@ -51,7 +51,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 
 ## Poll Records
 
-**Endpoint:** `GET /topics/{topic}/messages`
+**Endpoint:** `GET /topics/{topic}/records`
 
 **Query Parameters:**
 - `max_records`: Maximum records to return

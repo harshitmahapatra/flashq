@@ -68,7 +68,7 @@ async fn test_consumer_group_offset_management() {
 }
 
 #[tokio::test]
-async fn test_consumer_group_message_fetching() {
+async fn test_consumer_group_record_fetching() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
@@ -86,7 +86,7 @@ async fn test_consumer_group_message_fetching() {
     }
 
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, None)
+        .fetch_records_for_consumer_group(group_id, topic, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -103,7 +103,7 @@ async fn test_consumer_group_message_fetching() {
 
     // Verify offset was advanced after commit
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, Some(3))
+        .fetch_records_for_consumer_group(group_id, topic, Some(3))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -118,7 +118,7 @@ async fn test_consumer_group_message_fetching() {
         .unwrap();
 
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, Some(2))
+        .fetch_records_for_consumer_group(group_id, topic, Some(2))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -146,7 +146,7 @@ async fn test_consumer_group_from_offset_fetching() {
     }
 
     let response = helper
-        .fetch_messages_for_consumer_group_with_options(group_id, topic, Some(3), Some(3))
+        .fetch_records_for_consumer_group_with_options(group_id, topic, Some(3), Some(3))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -157,7 +157,7 @@ async fn test_consumer_group_from_offset_fetching() {
     assert_eq!(fetch_response.records[2].offset, 5);
 
     let response = helper
-        .fetch_messages_for_consumer_group_with_options(group_id, topic, Some(10), Some(5))
+        .fetch_records_for_consumer_group_with_options(group_id, topic, Some(10), Some(5))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -236,7 +236,7 @@ async fn test_consumer_group_error_cases() {
     assert!(response.is_err() || !response.unwrap().status().is_success());
 
     let response = helper
-        .fetch_messages_for_consumer_group("nonexistent_group", "test_topic", None)
+        .fetch_records_for_consumer_group("nonexistent_group", "test_topic", None)
         .await;
     assert!(response.is_err() || !response.unwrap().status().is_success());
 
@@ -257,7 +257,7 @@ async fn test_consumer_group_edge_cases() {
 
     // Test fetching from non-existent topic (should return 404)
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, None)
+        .fetch_records_for_consumer_group(group_id, topic, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 404);
@@ -265,7 +265,7 @@ async fn test_consumer_group_edge_cases() {
     helper.post_record(topic, "Single message").await.unwrap();
 
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, Some(1))
+        .fetch_records_for_consumer_group(group_id, topic, Some(1))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -279,7 +279,7 @@ async fn test_consumer_group_edge_cases() {
         .unwrap();
 
     let response = helper
-        .fetch_messages_for_consumer_group(group_id, topic, None)
+        .fetch_records_for_consumer_group(group_id, topic, None)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);

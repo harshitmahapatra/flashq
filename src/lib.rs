@@ -374,29 +374,29 @@ mod tests {
     }
 
     #[test]
-    fn test_message_record_with_key_and_headers() {
+    fn test_record_with_key_and_headers() {
         let mut headers = HashMap::new();
         headers.insert("source".to_string(), "test".to_string());
 
         let record = Record::new(
             Some("user123".to_string()),
-            "test message".to_string(),
+            "test record".to_string(),
             Some(headers.clone()),
         );
 
         assert_eq!(record.key.as_ref().unwrap(), "user123");
-        assert_eq!(record.value, "test message");
+        assert_eq!(record.value, "test record");
         assert_eq!(record.headers.as_ref().unwrap(), &headers);
     }
 
     #[test]
-    fn test_message_with_offset_creation() {
+    fn test_record_with_offset_creation() {
         let record = Record::new(None, "test content".to_string(), None);
-        let message_with_offset = RecordWithOffset::from_record(record.clone(), 42);
+        let record_with_offset = RecordWithOffset::from_record(record.clone(), 42);
 
-        assert_eq!(message_with_offset.record.value, "test content");
-        assert_eq!(message_with_offset.offset, 42);
-        assert!(message_with_offset.timestamp.contains("T")); // ISO 8601 format
+        assert_eq!(record_with_offset.record.value, "test content");
+        assert_eq!(record_with_offset.offset, 42);
+        assert!(record_with_offset.timestamp.contains("T")); // ISO 8601 format
     }
 
     // =============================================================================
@@ -533,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_with_key_and_headers() {
+    fn test_queue_record_with_key_and_headers() {
         let queue = FlashQ::new();
         let mut headers = HashMap::new();
         headers.insert("priority".to_string(), "high".to_string());
@@ -730,7 +730,7 @@ mod tests {
 
     // Serialization Tests
     #[test]
-    fn test_message_record_serialization() {
+    fn test_record_record_serialization() {
         let mut headers = HashMap::new();
         headers.insert("test".to_string(), "value".to_string());
 
@@ -747,16 +747,16 @@ mod tests {
     }
 
     #[test]
-    fn test_message_with_offset_serialization() {
+    fn test_record_with_offset_serialization() {
         let record = Record::new(None, "test".to_string(), None);
-        let message_with_offset = RecordWithOffset::from_record(record, 42);
+        let record_with_offset = RecordWithOffset::from_record(record, 42);
 
-        let json = serde_json::to_string(&message_with_offset).expect("Should serialize");
+        let json = serde_json::to_string(&record_with_offset).expect("Should serialize");
         let deserialized: RecordWithOffset =
             serde_json::from_str(&json).expect("Should deserialize");
 
-        assert_eq!(message_with_offset.record, deserialized.record);
-        assert_eq!(message_with_offset.offset, deserialized.offset);
+        assert_eq!(record_with_offset.record, deserialized.record);
+        assert_eq!(record_with_offset.offset, deserialized.offset);
         // Note: timestamp might differ slightly due to precision, so we just check it's present
         assert!(!deserialized.timestamp.is_empty());
     }
@@ -939,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_queue_error_display() {
+    fn test_record_queue_error_display() {
         let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
@@ -973,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_queue_error_is_not_found() {
+    fn test_record_queue_error_is_not_found() {
         let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };

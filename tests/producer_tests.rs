@@ -49,7 +49,7 @@ async fn test_post_record_integration() {
 }
 
 #[tokio::test]
-async fn test_message_size_and_validation_limits() {
+async fn test_record_size_and_validation_limits() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
@@ -142,7 +142,7 @@ async fn test_message_size_and_validation_limits() {
         "Max header value size should be accepted"
     );
 
-    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
+    let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
@@ -175,7 +175,7 @@ async fn test_client_binary_integration() {
 
     // Test polling with client binary
     let output = helper
-        .poll_messages_with_client(topic, Some(10))
+        .poll_records_with_client(topic, Some(10))
         .await
         .expect("Failed to poll messages with client");
 
@@ -187,7 +187,7 @@ async fn test_client_binary_integration() {
 }
 
 #[tokio::test]
-async fn test_concurrent_message_posting() {
+async fn test_concurrent_record_posting() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
@@ -231,7 +231,7 @@ async fn test_concurrent_message_posting() {
         assert!(success, "Concurrent post {index} should succeed");
     }
 
-    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
+    let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(
@@ -249,11 +249,11 @@ async fn test_concurrent_message_posting() {
 
         if let Some(ref headers) = record.record.headers {
             assert!(
-                headers.contains_key("thread" as &str),
+                headers.contains_key("thread"),
                 "Thread header should be present"
             );
             assert!(
-                headers.contains_key("index" as &str),
+                headers.contains_key("index"),
                 "Index header should be present"
             );
         }
@@ -281,7 +281,7 @@ async fn test_concurrent_message_posting() {
     for topic_index in 0..3 {
         let topic_name = format!("concurrent_topic_{topic_index}");
         let response = helper
-            .poll_messages_for_testing(&topic_name, None)
+            .poll_records_for_testing(&topic_name, None)
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
@@ -295,7 +295,7 @@ async fn test_concurrent_message_posting() {
 }
 
 #[tokio::test]
-async fn test_batch_message_posting() {
+async fn test_batch_record_posting() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
@@ -310,7 +310,7 @@ async fn test_batch_message_posting() {
     }];
 
     let response = helper
-        .post_batch_messages(topic, single_record)
+        .post_batch_records(topic, single_record)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -341,7 +341,7 @@ async fn test_batch_message_posting() {
     ];
 
     let response = helper
-        .post_batch_messages(topic, batch_records)
+        .post_batch_records(topic, batch_records)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -352,7 +352,7 @@ async fn test_batch_message_posting() {
     assert_eq!(response_data.offsets[2].offset, 3);
 
     // Verify all messages were posted correctly
-    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
+    let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_data.records.len(), 4);
@@ -364,7 +364,7 @@ async fn test_batch_message_posting() {
 }
 
 #[tokio::test]
-async fn test_message_structure_edge_cases() {
+async fn test_record_structure_edge_cases() {
     let server = TestServer::start()
         .await
         .expect("Failed to start test server");
@@ -439,7 +439,7 @@ async fn test_message_structure_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 200, "Explicit nulls should be accepted");
 
-    let response = helper.poll_messages_for_testing(topic, None).await.unwrap();
+    let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(

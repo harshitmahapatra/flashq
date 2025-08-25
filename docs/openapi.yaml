@@ -2,14 +2,14 @@ openapi: 3.0.3
 info:
   title: FlashQ - Kafka-like Streaming API
   description: |
-    A Kafka-inspired message queue system with offset-based consumption, consumer groups, 
+    A Kafka-inspired record queue system with offset-based consumption, consumer groups, 
     and streaming semantics while maintaining single-server simplicity.
 
     ## Features
-    - Topic-based message organization
-    - Offset-based consumption for message replay
+    - Topic-based record organization
+    - Offset-based consumption for record replay
     - Consumer groups for independent consumption tracking
-    - Message keys and headers for routing and metadata
+    - Record keys and headers for routing and metadata
     - FIFO ordering guarantees within topics
 
     ## API Design Principles
@@ -36,7 +36,7 @@ paths:
   /health:
     get:
       summary: Health check endpoint
-      description: Returns the health status of the message queue server
+      description: Returns the health status of the record queue server
       operationId: healthCheck
       tags:
         - Health
@@ -55,11 +55,11 @@ paths:
   # Producer APIs
   /topics/{topic}/records:
     post:
-      summary: Produce messages to a topic
+      summary: Produce records to a topic
       description: |
-        Publish one or more messages to the specified topic. Messages are appended 
+        Publish one or more records to the specified topic. Records are appended 
         to the topic log and assigned sequential offsets.
-      operationId: produceMessages
+      operationId: produceRecords
       tags:
         - Producer
       parameters:
@@ -71,8 +71,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ProduceRequest"
             examples:
-              single-message:
-                summary: Single message
+              single-record:
+                summary: Single record
                 value:
                   records:
                     - key: "user123"
@@ -80,8 +80,8 @@ paths:
                       headers:
                         source: "auth-service"
                         timestamp: "2024-01-15T10:30:00Z"
-              multiple-messages:
-                summary: Multiple messages
+              multiple-records:
+                summary: Multiple records
                 value:
                   records:
                     - key: "user123"
@@ -94,7 +94,7 @@ paths:
                         source: "auth-service"
       responses:
         "200":
-          description: Messages successfully produced
+          description: Records successfully produced
           content:
             application/json:
               schema:
@@ -108,14 +108,14 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "422":
-          description: Invalid message format
+          description: Invalid record format
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "validation_error"
-                message: "Message value cannot be empty"
+                message: "Record value cannot be empty"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -179,11 +179,11 @@ paths:
   # Consumer APIs
   /consumer/{group-id}/topics/{topic}:
     get:
-      summary: Fetch messages from current offset
+      summary: Fetch records from current offset
       description: |
-        Fetch messages from the topic starting at the consumer group's current offset.
+        Fetch records from the topic starting at the consumer group's current offset.
         Automatically advances the offset after successful fetch.
-      operationId: fetchMessages
+      operationId: fetchRecords
       tags:
         - Consumer
       parameters:
@@ -210,21 +210,21 @@ paths:
         - name: include_headers
           in: query
           required: false
-          description: "Whether to include message headers in the response (default: true)"
+          description: "Whether to include record headers in the response (default: true)"
           schema:
             type: boolean
             default: true
           example: true
       responses:
         "200":
-          description: Messages fetched successfully
+          description: Records fetched successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/FetchResponse"
               examples:
-                with-messages:
-                  summary: Successful fetch with messages
+                with-records:
+                  summary: Successful fetch with records
                   value:
                     records:
                       - offset: 142
@@ -242,7 +242,7 @@ paths:
                     next_offset: 144
                     high_water_mark: 200
                 empty-fetch:
-                  summary: No new messages available
+                  summary: No new records available
                   value:
                     records: []
                     next_offset: 144
@@ -267,7 +267,7 @@ paths:
       summary: Commit offset
       description: |
         Commit the current offset for the consumer group on the specified topic.
-        This marks messages up to this offset as processed.
+        This marks records up to this offset as processed.
       operationId: commitOffset
       tags:
         - Consumer
@@ -366,10 +366,10 @@ components:
           description: Number of active consumer groups
           minimum: 0
 
-    # Message Schemas - Matching Library Structs
+    # Record Schemas - Matching Library Structs
     # 
     # These schemas directly correspond to Rust structs in src/lib.rs:
-    # - Record: Basic message structure (key, value, headers)
+    # - Record: Basic record structure (key, value, headers)
     # - RecordWithOffset: Record + offset + timestamp (used for API responses)
     # 
     # Note: Previously had separate RecordResponse struct, but consolidated
@@ -381,12 +381,12 @@ components:
       properties:
         key:
           type: string
-          description: Optional message key for partitioning/routing
+          description: Optional record key for partitioning/routing
           maxLength: 1024
           example: "user123"
         value:
           type: string
-          description: Message payload content
+          description: Record payload content
           maxLength: 1048576 # 1MB limit
           example: "User logged in"
         headers:
@@ -416,7 +416,7 @@ components:
             timestamp:
               type: string
               format: date-time
-              description: Server-assigned timestamp when message was stored
+              description: Server-assigned timestamp when record was stored
               example: "2024-01-15T10:30:00.123Z"
 
     # Producer Request/Response
@@ -428,7 +428,7 @@ components:
         records:
           type: array
           description: |
-            Array of messages to produce. Limited to 1000 messages per batch to prevent 
+            Array of records to produce. Limited to 1000 records per batch to prevent 
             memory exhaustion and ensure reasonable response times while supporting 
             high-throughput scenarios.
           minItems: 1
@@ -443,7 +443,7 @@ components:
       properties:
         offsets:
           type: array
-          description: Assigned offsets for each produced message
+          description: Assigned offsets for each produced record
           items:
             type: object
             required:
@@ -452,13 +452,13 @@ components:
             properties:
               offset:
                 type: integer
-                description: Assigned offset for the message
+                description: Assigned offset for the record
                 minimum: 0
                 example: 142
               timestamp:
                 type: string
                 format: date-time
-                description: Server timestamp when message was stored
+                description: Server timestamp when record was stored
                 example: "2024-01-15T10:30:00.123Z"
 
     # Consumer Group Schemas
@@ -482,7 +482,7 @@ components:
       properties:
         records:
           type: array
-          description: Fetched messages with offsets
+          description: Fetched records with offsets
           items:
             $ref: "#/components/schemas/RecordWithOffset"
         next_offset:
@@ -495,7 +495,7 @@ components:
           minimum: 0
         lag:
           type: integer
-          description: Number of messages behind high water mark (optional, can be calculated as high_water_mark - next_offset)
+          description: Number of records behind high water mark (optional, can be calculated as high_water_mark - next_offset)
           minimum: 0
 
     # Offset Management
@@ -561,7 +561,7 @@ components:
           example: 200
         lag:
           type: integer
-          description: Number of messages behind
+          description: Number of records behind
           minimum: 0
           example: 50
         last_commit_time:
@@ -584,7 +584,7 @@ components:
         message:
           type: string
           description: Human-readable error message
-          example: "Message value cannot be empty"
+          example: "Record value cannot be empty"
         details:
           type: object
           description: Additional error details
@@ -640,6 +640,6 @@ tags:
   - name: Health
     description: Health check and system status
   - name: Producer
-    description: Message production endpoints
+    description: Record production endpoints
   - name: Consumer
-    description: Consumer group management, message consumption and offset management
+    description: Consumer group management, record consumption and offset management

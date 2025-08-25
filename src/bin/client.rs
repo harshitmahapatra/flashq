@@ -153,7 +153,7 @@ async fn handle_consumer_command(
             from_offset,
             include_headers,
         } => {
-            fetch_consumer_messages_command(
+            fetch_consumer_records_command(
                 client,
                 server_url,
                 &group_id,
@@ -346,7 +346,7 @@ async fn leave_consumer_group_command(client: &reqwest::Client, server_url: &str
     }
 }
 
-async fn fetch_consumer_messages_command(
+async fn fetch_consumer_records_command(
     client: &reqwest::Client,
     server_url: &str,
     group_id: &str,
@@ -383,7 +383,7 @@ async fn fetch_consumer_messages_command(
                         );
 
                         for message in fetch_response.records {
-                            print_message(&message);
+                            print_record(&message);
                         }
 
                         println!("Next offset: {}", fetch_response.next_offset);
@@ -492,7 +492,7 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     }
 }
 
-fn print_message(message: &RecordWithOffset) {
+fn print_record(message: &RecordWithOffset) {
     print!(
         "{} [{}] {}",
         message.timestamp, message.offset, message.record.value

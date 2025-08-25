@@ -108,7 +108,7 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
     }
 }
 
-fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
+fn validate_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
     if let Some(key) = &record.key {
         if key.len() > limits::MAX_KEY_SIZE {
             return Err(ErrorResponse::with_details(
@@ -199,7 +199,7 @@ fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorRespons
 
     // Validate each record in the batch
     for (index, record) in request.records.iter().enumerate() {
-        validate_message_record(record, index)?;
+        validate_record(record, index)?;
     }
 
     Ok(())
@@ -308,13 +308,13 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/topics/{topic}/records", post(produce_messages))
+        .route("/topics/{topic}/records", post(produce_records))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
             "/consumer/{group_id}/topics/{topic}",
-            get(fetch_messages_for_consumer_group),
+            get(fetch_records_for_consumer_group),
         )
         .route(
             "/consumer/{group_id}/topics/{topic}/offset",
@@ -364,7 +364,7 @@ async fn health_check(
 // PRODUCER ENDPOINTS
 // =============================================================================
 
-async fn produce_messages(
+async fn produce_records(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Json(request): Json<ProduceRequest>,
@@ -731,7 +731,7 @@ async fn commit_consumer_group_offset(
     }
 }
 
-async fn fetch_messages_for_consumer_group(
+async fn fetch_records_for_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,

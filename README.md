@@ -1,6 +1,6 @@
 # ⚡ FlashQ
 
-A Kafka-inspired message queue system built in Rust with HTTP REST API.
+A Kafka-inspired record queue system built in Rust with HTTP REST API.
 
 **Note: This is a hobby project for learning Rust - not for production use.**
 
@@ -31,7 +31,7 @@ cargo run --bin server 9090      # Custom port
 
 **Basic client usage:**
 ```bash
-# Post message
+# Post record
 cargo run --bin client -- producer records news "Hello, World!"
 
 # Create and use consumer group
@@ -47,7 +47,7 @@ curl -X POST http://127.0.0.1:8080/topics/news/records \
   -d '{"records": [{"value": "Hello, World!"}]}'
 
 # Poll records  
-curl http://127.0.0.1:8080/topics/news/messages
+curl http://127.0.0.1:8080/topics/news/records
 ```
 
 ## Development
