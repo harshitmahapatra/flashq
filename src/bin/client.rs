@@ -492,17 +492,17 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     }
 }
 
-fn print_record(message: &RecordWithOffset) {
+fn print_record(record: &RecordWithOffset) {
     print!(
         "{} [{}] {}",
-        message.timestamp, message.offset, message.record.value
+        record.timestamp, record.offset, record.record.value
     );
 
-    if let Some(ref key) = message.record.key {
+    if let Some(ref key) = record.record.key {
         print!(" (key: {key})");
     }
 
-    if let Some(ref headers) = message.record.headers {
+    if let Some(ref headers) = record.record.headers {
         if !headers.is_empty() {
             print!(" (headers: {headers:?})");
         }
