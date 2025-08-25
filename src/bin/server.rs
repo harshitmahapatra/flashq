@@ -787,7 +787,7 @@ async fn fetch_records_for_consumer_group(
     let limit = query.effective_limit();
     let include_headers = query.should_include_headers();
 
-    let messages_result = match query.from_offset {
+    let records_result = match query.from_offset {
         Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
             &params.group_id,
             &params.topic,
@@ -819,8 +819,8 @@ async fn fetch_records_for_consumer_group(
         }
     };
 
-    match messages_result {
-        Ok(messages) => {
+    match records_result {
+        Ok(records) => {
             let offset_info = match query.from_offset {
                 Some(offset) => format!(" from_offset: {offset}"),
                 None => String::new(),
@@ -830,19 +830,19 @@ async fn fetch_records_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} records returned",
                     params.group_id,
                     params.topic,
                     limit,
                     offset_info,
-                    messages.len()
+                    records.len()
                 ),
             );
 
-            let message_responses: Vec<RecordWithOffset> = if include_headers {
-                messages
+            let record_responses: Vec<RecordWithOffset> = if include_headers {
+                records
             } else {
-                messages
+                records
                     .into_iter()
                     .map(|msg| RecordWithOffset {
                         record: Record {
@@ -864,7 +864,7 @@ async fn fetch_records_for_consumer_group(
                 Ok(next_offset) => {
                     let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
                     let response =
-                        FetchResponse::new(message_responses, next_offset, high_water_mark);
+                        FetchResponse::new(record_responses, next_offset, high_water_mark);
                     Ok(Json(response))
                 }
                 Err(error) => {

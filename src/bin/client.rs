@@ -377,13 +377,13 @@ async fn fetch_consumer_records_command(
             if response.status().is_success() {
                 match response.json::<FetchResponse>().await {
                     Ok(fetch_response) => {
-                        let message_count = fetch_response.records.len();
+                        let record_count = fetch_response.records.len();
                         println!(
-                            "Got {message_count} messages for consumer group '{group_id}' from topic '{topic}'"
+                            "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
                         );
 
-                        for message in fetch_response.records {
-                            print_record(&message);
+                        for record in fetch_response.records {
+                            print_record(&record);
                         }
 
                         println!("Next offset: {}", fetch_response.next_offset);
@@ -396,7 +396,7 @@ async fn fetch_consumer_records_command(
             } else {
                 handle_error_response(
                     response,
-                    &format!("fetch messages for consumer group '{group_id}' from topic '{topic}'"),
+                    &format!("fetch records for consumer group '{group_id}' from topic '{topic}'"),
                 )
                 .await;
             }
