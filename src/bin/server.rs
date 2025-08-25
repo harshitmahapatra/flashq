@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use flashq::{MessageQueue, MessageQueueError, Record, RecordWithOffset, api::*};
+use flashq::{FlashQ, FlashQError, Record, RecordWithOffset, api::*};
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -64,7 +64,7 @@ type AppState = Arc<AppStateInner>;
 
 #[derive(Clone)]
 struct AppStateInner {
-    queue: Arc<MessageQueue>,
+    queue: Arc<FlashQ>,
     config: AppConfig,
 }
 
@@ -108,7 +108,7 @@ fn error_to_status_code(error_code: &str) -> StatusCode {
     }
 }
 
-fn validate_message_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
+fn validate_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
     if let Some(key) = &record.key {
         if key.len() > limits::MAX_KEY_SIZE {
             return Err(ErrorResponse::with_details(
@@ -199,7 +199,7 @@ fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorRespons
 
     // Validate each record in the batch
     for (index, record) in request.records.iter().enumerate() {
-        validate_message_record(record, index)?;
+        validate_record(record, index)?;
     }
 
     Ok(())
@@ -303,18 +303,18 @@ async fn main() {
 
     let config = AppConfig { log_level };
     let app_state = Arc::new(AppStateInner {
-        queue: Arc::new(MessageQueue::new()),
+        queue: Arc::new(FlashQ::new()),
         config,
     });
 
     let app = Router::new()
-        .route("/topics/{topic}/records", post(produce_messages))
+        .route("/topics/{topic}/records", post(produce_records))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
             "/consumer/{group_id}/topics/{topic}",
-            get(fetch_messages_for_consumer_group),
+            get(fetch_records_for_consumer_group),
         )
         .route(
             "/consumer/{group_id}/topics/{topic}/offset",
@@ -364,7 +364,7 @@ async fn health_check(
 // PRODUCER ENDPOINTS
 // =============================================================================
 
-async fn produce_messages(
+async fn produce_records(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,
     Json(request): Json<ProduceRequest>,
@@ -403,7 +403,7 @@ async fn produce_messages(
 
     let record_count = request.records.len();
 
-    // Convert MessageRecord to Record
+    // Convert request records to Record type
     let records: Vec<Record> = request
         .records
         .into_iter()
@@ -633,8 +633,8 @@ async fn get_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                FlashQError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
                 _ => ErrorResponse::internal_error(&error.to_string()),
@@ -716,8 +716,8 @@ async fn commit_consumer_group_offset(
             );
 
             let error_response = match &error {
-                MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                MessageQueueError::ConsumerGroupNotFound { group_id } => {
+                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+                FlashQError::ConsumerGroupNotFound { group_id } => {
                     ErrorResponse::group_not_found(group_id)
                 }
                 _ => ErrorResponse::internal_error(&error.to_string()),
@@ -731,7 +731,7 @@ async fn commit_consumer_group_offset(
     }
 }
 
-async fn fetch_messages_for_consumer_group(
+async fn fetch_records_for_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
     Query(query): Query<PollQuery>,
@@ -787,7 +787,7 @@ async fn fetch_messages_for_consumer_group(
     let limit = query.effective_limit();
     let include_headers = query.should_include_headers();
 
-    let messages_result = match query.from_offset {
+    let records_result = match query.from_offset {
         Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
             &params.group_id,
             &params.topic,
@@ -811,16 +811,16 @@ async fn fetch_messages_for_consumer_group(
             ),
         );
         match &error {
-            MessageQueueError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+            FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
+            FlashQError::ConsumerGroupNotFound { group_id } => {
                 ErrorResponse::group_not_found(group_id)
             }
             _ => ErrorResponse::internal_error(&error.to_string()),
         }
     };
 
-    match messages_result {
-        Ok(messages) => {
+    match records_result {
+        Ok(records) => {
             let offset_info = match query.from_offset {
                 Some(offset) => format!(" from_offset: {offset}"),
                 None => String::new(),
@@ -830,19 +830,19 @@ async fn fetch_messages_for_consumer_group(
                 app_state.config.log_level,
                 LogLevel::Trace,
                 &format!(
-                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} messages returned",
+                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} records returned",
                     params.group_id,
                     params.topic,
                     limit,
                     offset_info,
-                    messages.len()
+                    records.len()
                 ),
             );
 
-            let message_responses: Vec<RecordWithOffset> = if include_headers {
-                messages
+            let record_responses: Vec<RecordWithOffset> = if include_headers {
+                records
             } else {
-                messages
+                records
                     .into_iter()
                     .map(|msg| RecordWithOffset {
                         record: Record {
@@ -864,7 +864,7 @@ async fn fetch_messages_for_consumer_group(
                 Ok(next_offset) => {
                     let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
                     let response =
-                        FetchResponse::new(message_responses, next_offset, high_water_mark);
+                        FetchResponse::new(record_responses, next_offset, high_water_mark);
                     Ok(Json(response))
                 }
                 Err(error) => {

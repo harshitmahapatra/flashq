@@ -228,16 +228,16 @@ impl TestClient {
     // ------------------------------------------------------------------------
     // HTTP API Operations
     // ------------------------------------------------------------------------
-    pub async fn post_message(
+    pub async fn post_record(
         &self,
         topic: &str,
         content: &str,
     ) -> reqwest::Result<reqwest::Response> {
-        self.post_message_with_record(topic, None, content, None)
+        self.post_record_with_record(topic, None, content, None)
             .await
     }
 
-    pub async fn post_message_with_record(
+    pub async fn post_record_with_record(
         &self,
         topic: &str,
         key: Option<String>,
@@ -245,14 +245,14 @@ impl TestClient {
         headers: Option<std::collections::HashMap<String, String>>,
     ) -> reqwest::Result<reqwest::Response> {
         // Convert single record to batch format
-        let message_record = Record {
+        let record = Record {
             key,
             value: value.to_string(),
             headers,
         };
 
         let produce_request = ProduceRequest {
-            records: vec![message_record],
+            records: vec![record],
         };
 
         self.client
@@ -262,7 +262,7 @@ impl TestClient {
             .await
     }
 
-    pub async fn post_batch_messages(
+    pub async fn post_batch_records(
         &self,
         topic: &str,
         records: Vec<Record>,
@@ -277,7 +277,7 @@ impl TestClient {
     }
 
     // Basic polling for testing - creates temporary consumer group
-    pub async fn poll_messages_for_testing(
+    pub async fn poll_records_for_testing(
         &self,
         topic: &str,
         max_records: Option<usize>,
@@ -288,9 +288,9 @@ impl TestClient {
         // Create consumer group
         let _ = self.create_consumer_group(&temp_group_id).await;
 
-        // Fetch messages
+        // Fetch records
         let response = self
-            .fetch_messages_for_consumer_group(&temp_group_id, topic, max_records)
+            .fetch_records_for_consumer_group(&temp_group_id, topic, max_records)
             .await;
 
         // Clean up consumer group
@@ -349,17 +349,17 @@ impl TestClient {
             .await
     }
 
-    pub async fn fetch_messages_for_consumer_group(
+    pub async fn fetch_records_for_consumer_group(
         &self,
         group_id: &str,
         topic: &str,
         max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        self.fetch_messages_for_consumer_group_with_options(group_id, topic, None, max_records)
+        self.fetch_records_for_consumer_group_with_options(group_id, topic, None, max_records)
             .await
     }
 
-    pub async fn fetch_messages_for_consumer_group_with_options(
+    pub async fn fetch_records_for_consumer_group_with_options(
         &self,
         group_id: &str,
         topic: &str,
@@ -429,7 +429,7 @@ impl TestClient {
             .await
     }
 
-    pub async fn post_message_with_client(
+    pub async fn post_record_with_client(
         &self,
         topic: &str,
         message: &str,
@@ -453,7 +453,7 @@ impl TestClient {
         Ok(())
     }
 
-    pub async fn poll_messages_with_client(
+    pub async fn poll_records_with_client(
         &self,
         topic: &str,
         max_records: Option<usize>,
@@ -470,7 +470,7 @@ impl TestClient {
             .output()
             .await?;
 
-        // Fetch messages
+        // Fetch records
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),

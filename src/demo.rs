@@ -1,9 +1,9 @@
-use crate::{MessageQueue, Record};
+use crate::{FlashQ, Record};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
 pub fn run_interactive_demo() {
-    let queue = std::sync::Arc::new(MessageQueue::new());
+    let queue = std::sync::Arc::new(FlashQ::new());
     let mut topics_created: HashMap<String, usize> = HashMap::new();
 
     println!("⚡ FlashQ Interactive Demo");
@@ -13,8 +13,8 @@ pub fn run_interactive_demo() {
 
     loop {
         println!("\n📋 Menu Options:");
-        println!("1) Post a message");
-        println!("2) Poll messages from a topic");
+        println!("1) Post a record");
+        println!("2) Poll records from a topic");
         println!("3) View all topics");
         println!("4) Run quick demo");
         println!("5) Exit");
@@ -24,8 +24,8 @@ pub fn run_interactive_demo() {
         let mut input = String::new();
         match io::stdin().read_line(&mut input) {
             Ok(_) => match input.trim() {
-                "1" => post_message_interactive(&queue, &mut topics_created),
-                "2" => poll_messages_interactive(&queue),
+                "1" => post_record_interactive(&queue, &mut topics_created),
+                "2" => poll_records_interactive(&queue),
                 "3" => view_topics(&topics_created),
                 "4" => run_demo(&queue, &mut topics_created),
                 "5" => break,
@@ -38,7 +38,7 @@ pub fn run_interactive_demo() {
     println!("\n👋 Thank you for using the FlashQ demo!");
 }
 
-fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
+fn post_record_interactive(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
     print!("📝 Enter topic name: ");
     io::stdout().flush().unwrap();
     let mut topic = String::new();
@@ -53,17 +53,17 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
         return;
     }
 
-    print!("💬 Enter message content: ");
+    print!("💬 Enter record content: ");
     io::stdout().flush().unwrap();
     let mut content = String::new();
     if io::stdin().read_line(&mut content).is_err() {
-        println!("❌ Error reading message content.");
+        println!("❌ Error reading record content.");
         return;
     }
     let content = content.trim().to_string();
 
     if content.is_empty() {
-        println!("❌ Message content cannot be empty!");
+        println!("❌ Record content cannot be empty!");
         return;
     }
 
@@ -74,18 +74,18 @@ fn post_message_interactive(queue: &MessageQueue, topics_created: &mut HashMap<S
     };
 
     match queue.post_record(topic.clone(), record) {
-        Ok(message_id) => {
+        Ok(record_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
-            println!("✅ Message posted successfully!");
+            println!("✅ Record posted successfully!");
             println!("   📌 Topic: {topic}");
-            println!("   🆔 Message ID: {message_id}");
+            println!("   🆔 Record ID: {record_id}");
             println!("   📄 Content: \"{content}\"");
         }
-        Err(e) => println!("❌ Failed to post message: {e}"),
+        Err(e) => println!("❌ Failed to post record: {e}"),
     }
 }
 
-fn poll_messages_interactive(queue: &MessageQueue) {
+fn poll_records_interactive(queue: &FlashQ) {
     print!("📝 Enter topic name to poll from: ");
     io::stdout().flush().unwrap();
     let mut topic = String::new();
@@ -100,7 +100,7 @@ fn poll_messages_interactive(queue: &MessageQueue) {
         return;
     }
 
-    print!("🔢 Enter max number of messages (or press Enter for all): ");
+    print!("🔢 Enter max number of records (or press Enter for all): ");
     io::stdout().flush().unwrap();
     let mut count_str = String::new();
     if io::stdin().read_line(&mut count_str).is_err() {
@@ -121,29 +121,25 @@ fn poll_messages_interactive(queue: &MessageQueue) {
     };
 
     match queue.poll_records(&topic, count) {
-        Ok(messages) => {
-            if messages.is_empty() {
-                println!("📭 No messages found in topic '{topic}'");
+        Ok(records) => {
+            if records.is_empty() {
+                println!("📭 No records found in topic '{topic}'");
             } else {
-                println!(
-                    "📬 Found {} message(s) in topic '{}':",
-                    messages.len(),
-                    topic
-                );
+                println!("📬 Found {} record(s) in topic '{}':", records.len(), topic);
                 println!("─────────────────────────────────────");
-                for (i, message) in messages.iter().enumerate() {
-                    println!("Message {} of {}:", i + 1, messages.len());
-                    println!("  🏷️  Offset: {}", message.offset);
+                for (i, record) in records.iter().enumerate() {
+                    println!("Record {} of {}:", i + 1, records.len());
+                    println!("  🏷️  Offset: {}", record.offset);
 
                     // Display key if present
-                    if let Some(ref key) = message.record.key {
+                    if let Some(ref key) = record.record.key {
                         println!("  🔑 Key: \"{key}\"");
                     }
 
-                    println!("  📄 Value: \"{}\"", message.record.value);
+                    println!("  📄 Value: \"{}\"", record.record.value);
 
                     // Display headers if present
-                    if let Some(ref headers) = message.record.headers
+                    if let Some(ref headers) = record.record.headers
                         && !headers.is_empty()
                     {
                         println!("  🏷️  Headers:");
@@ -152,85 +148,85 @@ fn poll_messages_interactive(queue: &MessageQueue) {
                         }
                     }
 
-                    println!("  ⏰ Timestamp: {}", message.timestamp);
-                    if i < messages.len() - 1 {
+                    println!("  ⏰ Timestamp: {}", record.timestamp);
+                    if i < records.len() - 1 {
                         println!();
                     }
                 }
                 println!("─────────────────────────────────────");
             }
         }
-        Err(e) => println!("❌ Failed to poll messages: {e}"),
+        Err(e) => println!("❌ Failed to poll records: {e}"),
     }
 }
 
 fn view_topics(topics_created: &HashMap<String, usize>) {
     if topics_created.is_empty() {
         println!("📭 No topics have been created yet.");
-        println!("💡 Tip: Use option 1 to post a message and create a topic!");
+        println!("💡 Tip: Use option 1 to post a record and create a topic!");
     } else {
         println!("📋 Topics created in this session:");
         println!("─────────────────────────────────────");
         for (topic, count) in topics_created {
             println!(
-                "  📌 {} ({} message{})",
+                "  📌 {} ({} record{})",
                 topic,
                 count,
                 if *count == 1 { "" } else { "s" }
             );
         }
         println!("─────────────────────────────────────");
-        println!("💡 Tip: Use option 2 to poll messages from any topic!");
+        println!("💡 Tip: Use option 2 to poll records from any topic!");
     }
 }
 
-fn run_demo(queue: &MessageQueue, topics_created: &mut HashMap<String, usize>) {
+fn run_demo(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
     println!("🎬 Running quick demonstration...");
     println!("─────────────────────────────────────");
 
     let demo_topic = "demo".to_string();
-    let demo_messages = [
+    let demo_records = [
         "Hello, World!",
-        "This is the second message",
+        "This is the second record",
         "FlashQ is working great!",
     ];
 
     println!(
-        "📝 Posting {} demo messages to topic '{}'...",
-        demo_messages.len(),
+        "📝 Posting {} demo records to topic '{}'...",
+        demo_records.len(),
         demo_topic
     );
 
-    for (i, content) in demo_messages.iter().enumerate() {
+    for (i, content) in demo_records.iter().enumerate() {
         let record = Record {
             key: None,
             value: content.to_string(),
             headers: None,
         };
         match queue.post_record(demo_topic.clone(), record) {
-            Ok(message_id) => {
-                println!("  ✅ Message {} posted (ID: {})", i + 1, message_id);
+            Ok(record_id) => {
+                println!("  ✅ Record {} posted (ID: {})", i + 1, record_id);
                 *topics_created.entry(demo_topic.clone()).or_insert(0) += 1;
             }
-            Err(e) => println!("  ❌ Failed to post message {}: {}", i + 1, e),
+            Err(e) => println!("  ❌ Failed to post record {}: {}", i + 1, e),
         }
     }
 
-    println!("\n📬 Polling all messages from topic '{demo_topic}'...");
+    println!("\n📬 Polling all records from topic '{demo_topic}'...");
     match queue.poll_records(&demo_topic, None) {
-        Ok(messages) => {
-            println!("📋 Retrieved {} message(s):", messages.len());
-            for (i, message) in messages.iter().enumerate() {
+        Ok(records) => {
+            println!("📋 Retrieved {} record(s):", records.len());
+            for (i, record) in records.iter().enumerate() {
                 println!(
                     "  {}. \"{}\" (Offset: {}, Time: {})",
                     i + 1,
-                    message.record.value,
-                    message.offset,
-                    message.timestamp
+                    record.record.value,
+                    record.offset,
+                    record.timestamp
                 );
             }
         }
-        Err(e) => println!("❌ Failed to poll messages: {e}"),
+        Err(e) => println!("❌ Failed to poll records: {e}"),
     }
 
     println!("─────────────────────────────────────");

@@ -7,7 +7,7 @@ Internal architecture and design overview of FlashQ.
 ```mermaid
 graph TD
     A[CLI Client] -->|HTTP| B[HTTP Server]
-    C[Interactive Demo] --> D[MessageQueue]
+    C[Interactive Demo] --> D[FlashQ]
     B --> D
     D --> E[TopicLog 1]
     D --> F[TopicLog 2]
@@ -25,8 +25,8 @@ graph TD
 ## Project Structure
 
 **Core Components:**
-- `MessageQueue`: Topic-based record storage with offset tracking
-- `Record/RecordWithOffset`: Message structures for requests/responses  
+- `FlashQ`: Topic-based record storage with offset tracking
+- `Record/RecordWithOffset`: Record structures for requests/responses  
 - HTTP server: REST API with validation and consumer groups
 - CLI client: Structured command interface
 - Interactive demo: Educational exploration tool
@@ -42,7 +42,7 @@ graph TD
 sequenceDiagram
     participant C as Client
     participant S as Server  
-    participant Q as MessageQueue
+    participant Q as FlashQ
     participant T as TopicLog
     
     C->>S: POST /topics/news/records
@@ -52,7 +52,7 @@ sequenceDiagram
     Q-->>S: success response
     S-->>C: {"offsets": [...]}
     
-    C->>S: GET /topics/news/messages
+    C->>S: GET /topics/news/records
     S->>Q: poll_records()  
     Q->>T: get records from offset
     T-->>Q: [RecordWithOffset...]
@@ -77,7 +77,7 @@ graph LR
     E[Consumer Group] --> F[HashMap topic→offset]
     
     subgraph "Thread Safety"
-        G[Arc Mutex MessageQueue] 
+        G[Arc Mutex FlashQ] 
         H[Arc Mutex ConsumerGroups]
     end
     

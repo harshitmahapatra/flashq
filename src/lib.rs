@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 pub mod demo;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MessageQueueError {
+pub enum FlashQError {
     TopicNotFound {
         topic: String,
     },
@@ -23,17 +23,17 @@ pub enum MessageQueueError {
     },
 }
 
-impl fmt::Display for MessageQueueError {
+impl fmt::Display for FlashQError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageQueueError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
-            MessageQueueError::ConsumerGroupNotFound { group_id } => {
+            FlashQError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
+            FlashQError::ConsumerGroupNotFound { group_id } => {
                 write!(f, "Consumer group {group_id} does not exist")
             }
-            MessageQueueError::ConsumerGroupAlreadyExists { group_id } => {
+            FlashQError::ConsumerGroupAlreadyExists { group_id } => {
                 write!(f, "Consumer group {group_id} already exists")
             }
-            MessageQueueError::InvalidOffset {
+            FlashQError::InvalidOffset {
                 offset,
                 topic,
                 max_offset,
@@ -45,15 +45,15 @@ impl fmt::Display for MessageQueueError {
     }
 }
 
-impl std::error::Error for MessageQueueError {}
+impl std::error::Error for FlashQError {}
 
-impl MessageQueueError {
+impl FlashQError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            MessageQueueError::TopicNotFound { .. }
-                | MessageQueueError::ConsumerGroupNotFound { .. }
-                | MessageQueueError::InvalidOffset { .. }
+            FlashQError::TopicNotFound { .. }
+                | FlashQError::ConsumerGroupNotFound { .. }
+                | FlashQError::InvalidOffset { .. }
         )
     }
 }
@@ -191,20 +191,20 @@ impl ConsumerGroup {
     }
 }
 
-pub struct MessageQueue {
+pub struct FlashQ {
     topics: Arc<Mutex<HashMap<String, TopicLog>>>,
     consumer_groups: Arc<Mutex<HashMap<String, ConsumerGroup>>>,
 }
 
-impl Default for MessageQueue {
+impl Default for FlashQ {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MessageQueue {
+impl FlashQ {
     pub fn new() -> Self {
-        MessageQueue {
+        FlashQ {
             topics: Arc::new(Mutex::new(HashMap::new())),
             consumer_groups: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -231,7 +231,7 @@ impl MessageQueue {
         &self,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.poll_records_from_offset(topic, 0, count)
     }
 
@@ -240,7 +240,7 @@ impl MessageQueue {
         topic: &str,
         offset: u64,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
             Some(topic_log) => Ok(topic_log
@@ -248,20 +248,20 @@ impl MessageQueue {
                 .into_iter()
                 .cloned()
                 .collect()),
-            None => Err(MessageQueueError::TopicNotFound {
+            None => Err(FlashQError::TopicNotFound {
                 topic: topic.to_string(),
             }),
         }
     }
 
-    pub fn create_consumer_group(&self, group_id: String) -> Result<(), MessageQueueError> {
+    pub fn create_consumer_group(&self, group_id: String) -> Result<(), FlashQError> {
         let mut consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.entry(group_id.clone()) {
             Vacant(entry) => {
                 entry.insert(ConsumerGroup::new(group_id));
                 Ok(())
             }
-            Occupied(_) => Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }),
+            Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
         }
     }
 
@@ -269,11 +269,11 @@ impl MessageQueue {
         &self,
         group_id: &str,
         topic: &str,
-    ) -> Result<u64, MessageQueueError> {
+    ) -> Result<u64, FlashQError> {
         let consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.get(group_id) {
             Some(consumer_group) => Ok(consumer_group.get_offset(topic)),
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
@@ -284,19 +284,19 @@ impl MessageQueue {
         group_id: &str,
         topic: String,
         offset: u64,
-    ) -> Result<(), MessageQueueError> {
+    ) -> Result<(), FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         let topic_next_offset = match topic_log_map.get(&topic) {
             Some(topic_log) => topic_log.next_offset(),
             None => {
-                return Err(MessageQueueError::TopicNotFound {
+                return Err(FlashQError::TopicNotFound {
                     topic: topic.clone(),
                 });
             }
         };
 
         if offset > topic_next_offset {
-            return Err(MessageQueueError::InvalidOffset {
+            return Err(FlashQError::InvalidOffset {
                 offset,
                 topic: topic.clone(),
                 max_offset: topic_next_offset,
@@ -309,17 +309,17 @@ impl MessageQueue {
                 consumer_group.set_offset(topic, offset);
                 Ok(())
             }
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
     }
 
-    pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), MessageQueueError> {
+    pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), FlashQError> {
         let mut consumer_group_map = self.consumer_groups.lock().unwrap();
         match consumer_group_map.remove(group_id) {
             Some(_) => Ok(()),
-            None => Err(MessageQueueError::ConsumerGroupNotFound {
+            None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
         }
@@ -330,7 +330,7 @@ impl MessageQueue {
         group_id: &str,
         topic: &str,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
         let records = self.poll_records_from_offset(topic, current_offset, count)?;
         Ok(records)
@@ -342,7 +342,7 @@ impl MessageQueue {
         topic: &str,
         offset: u64,
         count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, MessageQueueError> {
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.get_consumer_group_offset(group_id, topic)?;
         self.poll_records_from_offset(topic, offset, count)
     }
@@ -364,9 +364,9 @@ mod tests {
     use std::collections::HashMap;
 
     // Test functions updated to use new Record types
-    // MessageRecord -> Record, RecordWithOffset -> RecordWithOffset
+    // Using Record and RecordWithOffset types
     #[test]
-    fn test_message_record_creation() {
+    fn test_record_creation() {
         let record = Record::new(None, "test content".to_string(), None);
         assert_eq!(record.value, "test content");
         assert!(record.key.is_none());
@@ -374,29 +374,29 @@ mod tests {
     }
 
     #[test]
-    fn test_message_record_with_key_and_headers() {
+    fn test_record_with_key_and_headers() {
         let mut headers = HashMap::new();
         headers.insert("source".to_string(), "test".to_string());
 
         let record = Record::new(
             Some("user123".to_string()),
-            "test message".to_string(),
+            "test record".to_string(),
             Some(headers.clone()),
         );
 
         assert_eq!(record.key.as_ref().unwrap(), "user123");
-        assert_eq!(record.value, "test message");
+        assert_eq!(record.value, "test record");
         assert_eq!(record.headers.as_ref().unwrap(), &headers);
     }
 
     #[test]
-    fn test_message_with_offset_creation() {
+    fn test_record_with_offset_creation() {
         let record = Record::new(None, "test content".to_string(), None);
-        let message_with_offset = RecordWithOffset::from_record(record.clone(), 42);
+        let record_with_offset = RecordWithOffset::from_record(record.clone(), 42);
 
-        assert_eq!(message_with_offset.record.value, "test content");
-        assert_eq!(message_with_offset.offset, 42);
-        assert!(message_with_offset.timestamp.contains("T")); // ISO 8601 format
+        assert_eq!(record_with_offset.record.value, "test content");
+        assert_eq!(record_with_offset.offset, 42);
+        assert!(record_with_offset.timestamp.contains("T")); // ISO 8601 format
     }
 
     // =============================================================================
@@ -405,24 +405,24 @@ mod tests {
 
     #[test]
     fn test_queue_creation() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         // Queue should be created successfully - no panic means success
         drop(queue);
     }
 
     #[test]
-    fn test_post_single_message() {
-        let queue = MessageQueue::new();
-        let record = Record::new(None, "test message".to_string(), None);
+    fn test_post_single_record() {
+        let queue = FlashQ::new();
+        let record = Record::new(None, "test record".to_string(), None);
         let result = queue.post_record("test_topic".to_string(), record);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0); // First message should have offset 0
+        assert_eq!(result.unwrap(), 0); // First record should have offset 0
     }
 
     #[test]
-    fn test_post_multiple_messages_increment_offset() {
-        let queue = MessageQueue::new();
+    fn test_post_multiple_records_increment_offset() {
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "msg1".to_string(), None);
         let record2 = Record::new(None, "msg2".to_string(), None);
@@ -440,8 +440,8 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_messages_from_existing_topic() {
-        let queue = MessageQueue::new();
+    fn test_poll_records_from_existing_topic() {
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
@@ -449,17 +449,17 @@ mod tests {
         queue.post_record("news".to_string(), record1).unwrap();
         queue.post_record("news".to_string(), record2).unwrap();
 
-        let messages = queue.poll_records("news", None).unwrap();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].record.value, "first news");
-        assert_eq!(messages[1].record.value, "second news");
-        assert_eq!(messages[0].offset, 0);
-        assert_eq!(messages[1].offset, 1);
+        let records = queue.poll_records("news", None).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].record.value, "first news");
+        assert_eq!(records[1].record.value, "second news");
+        assert_eq!(records[0].offset, 0);
+        assert_eq!(records[1].offset, 1);
     }
 
     #[test]
-    fn test_poll_messages_with_count_limit() {
-        let queue = MessageQueue::new();
+    fn test_poll_records_with_count_limit() {
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
@@ -467,21 +467,21 @@ mod tests {
         queue.post_record("news".to_string(), record1).unwrap();
         queue.post_record("news".to_string(), record2).unwrap();
 
-        let messages = queue.poll_records("news", Some(1)).unwrap();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].record.value, "first news");
+        let records = queue.poll_records("news", Some(1)).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record.value, "first news");
     }
 
     #[test]
     fn test_poll_nonexistent_topic() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let poll_result = queue.poll_records("news", None);
         poll_result.expect_err("Expected error for non-existent topic");
     }
 
     #[test]
     fn test_fifo_ordering() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         let record1 = Record::new(None, "first".to_string(), None);
         let record2 = Record::new(None, "second".to_string(), None);
@@ -491,69 +491,69 @@ mod tests {
         queue.post_record("ordered".to_string(), record2).unwrap();
         queue.post_record("ordered".to_string(), record3).unwrap();
 
-        let messages = queue.poll_records("ordered", None).unwrap();
-        assert_eq!(messages[0].record.value, "first");
-        assert_eq!(messages[1].record.value, "second");
-        assert_eq!(messages[2].record.value, "third");
+        let records = queue.poll_records("ordered", None).unwrap();
+        assert_eq!(records[0].record.value, "first");
+        assert_eq!(records[1].record.value, "second");
+        assert_eq!(records[2].record.value, "third");
 
         // Verify timestamps are in ascending order (FIFO)
-        assert!(messages[0].timestamp <= messages[1].timestamp);
-        assert!(messages[1].timestamp <= messages[2].timestamp);
+        assert!(records[0].timestamp <= records[1].timestamp);
+        assert!(records[1].timestamp <= records[2].timestamp);
     }
 
     #[test]
-    fn test_messages_persist_after_polling() {
-        let queue = MessageQueue::new();
+    fn test_records_persist_after_polling() {
+        let queue = FlashQ::new();
         let record = Record::new(None, "first news".to_string(), None);
         queue.post_record("news".to_string(), record).unwrap();
 
-        let first_polling_messages = queue.poll_records("news", None).unwrap();
-        let second_polling_messages = queue.poll_records("news", None).unwrap();
+        let first_polling_records = queue.poll_records("news", None).unwrap();
+        let second_polling_records = queue.poll_records("news", None).unwrap();
 
-        assert_eq!(first_polling_messages[0], second_polling_messages[0]);
+        assert_eq!(first_polling_records[0], second_polling_records[0]);
     }
 
     #[test]
     fn test_different_topics_isolated() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
-        let record_a = Record::new(None, "message for A".to_string(), None);
-        let record_b = Record::new(None, "message for B".to_string(), None);
+        let record_a = Record::new(None, "record for A".to_string(), None);
+        let record_b = Record::new(None, "record for B".to_string(), None);
 
         queue.post_record("topic_a".to_string(), record_a).unwrap();
         queue.post_record("topic_b".to_string(), record_b).unwrap();
 
-        let messages_a = queue.poll_records("topic_a", None).unwrap();
-        let messages_b = queue.poll_records("topic_b", None).unwrap();
+        let records_in_topic_a = queue.poll_records("topic_a", None).unwrap();
+        let records_in_topic_b = queue.poll_records("topic_b", None).unwrap();
 
-        assert_eq!(messages_a.len(), 1);
-        assert_eq!(messages_b.len(), 1);
-        assert_eq!(messages_a[0].record.value, "message for A");
-        assert_eq!(messages_b[0].record.value, "message for B");
+        assert_eq!(records_in_topic_a.len(), 1);
+        assert_eq!(records_in_topic_b.len(), 1);
+        assert_eq!(records_in_topic_a[0].record.value, "record for A");
+        assert_eq!(records_in_topic_b[0].record.value, "record for B");
     }
 
     #[test]
-    fn test_message_with_key_and_headers() {
-        let queue = MessageQueue::new();
+    fn test_queue_record_with_key_and_headers() {
+        let queue = FlashQ::new();
         let mut headers = HashMap::new();
         headers.insert("priority".to_string(), "high".to_string());
         headers.insert("source".to_string(), "test-suite".to_string());
 
         let record = Record::new(
             Some("user456".to_string()),
-            "message with metadata".to_string(),
+            "record with metadata".to_string(),
             Some(headers.clone()),
         );
 
         queue
             .post_record("metadata_topic".to_string(), record)
             .unwrap();
-        let messages = queue.poll_records("metadata_topic", None).unwrap();
+        let records = queue.poll_records("metadata_topic", None).unwrap();
 
-        assert_eq!(messages.len(), 1);
-        let msg = &messages[0];
+        assert_eq!(records.len(), 1);
+        let msg = &records[0];
         assert_eq!(msg.record.key.as_ref().unwrap(), "user456");
-        assert_eq!(msg.record.value, "message with metadata");
+        assert_eq!(msg.record.value, "record with metadata");
         assert_eq!(msg.record.headers.as_ref().unwrap(), &headers);
         assert_eq!(msg.offset, 0);
     }
@@ -571,9 +571,9 @@ mod tests {
     }
 
     #[test]
-    fn test_topic_log_append_single_message() {
+    fn test_topic_log_append_single_record() {
         let mut log = TopicLog::new();
-        let record = Record::new(None, "first message".to_string(), None);
+        let record = Record::new(None, "first record".to_string(), None);
         let offset = log.append(record);
 
         assert_eq!(offset, 0);
@@ -582,11 +582,11 @@ mod tests {
     }
 
     #[test]
-    fn test_topic_log_append_multiple_messages() {
+    fn test_topic_log_append_multiple_records() {
         let mut log = TopicLog::new();
-        let record1 = Record::new(None, "message 1".to_string(), None);
-        let record2 = Record::new(None, "message 2".to_string(), None);
-        let record3 = Record::new(None, "message 3".to_string(), None);
+        let record1 = Record::new(None, "record 1".to_string(), None);
+        let record2 = Record::new(None, "record 2".to_string(), None);
+        let record3 = Record::new(None, "record 3".to_string(), None);
 
         let offset1 = log.append(record1);
         let offset2 = log.append(record2);
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn test_topic_log_get_messages_from_beginning() {
+    fn test_topic_log_get_records_from_beginning() {
         let mut log = TopicLog::new();
         let record1 = Record::new(None, "first".to_string(), None);
         let record2 = Record::new(None, "second".to_string(), None);
@@ -610,15 +610,15 @@ mod tests {
         log.append(record2);
         log.append(record3);
 
-        let messages = log.get_records_from_offset(0, None);
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0].record.value, "first");
-        assert_eq!(messages[1].record.value, "second");
-        assert_eq!(messages[2].record.value, "third");
+        let records = log.get_records_from_offset(0, None);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].record.value, "first");
+        assert_eq!(records[1].record.value, "second");
+        assert_eq!(records[2].record.value, "third");
     }
 
     #[test]
-    fn test_topic_log_get_messages_from_middle_offset() {
+    fn test_topic_log_get_records_from_middle_offset() {
         let mut log = TopicLog::new();
         let record1 = Record::new(None, "first".to_string(), None);
         let record2 = Record::new(None, "second".to_string(), None);
@@ -628,14 +628,14 @@ mod tests {
         log.append(record2);
         log.append(record3);
 
-        let messages = log.get_records_from_offset(1, None);
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].record.value, "second");
-        assert_eq!(messages[1].record.value, "third");
+        let records = log.get_records_from_offset(1, None);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].record.value, "second");
+        assert_eq!(records[1].record.value, "third");
     }
 
     #[test]
-    fn test_topic_log_get_messages_with_count_limit() {
+    fn test_topic_log_get_records_with_count_limit() {
         let mut log = TopicLog::new();
         let record1 = Record::new(None, "first".to_string(), None);
         let record2 = Record::new(None, "second".to_string(), None);
@@ -645,24 +645,24 @@ mod tests {
         log.append(record2);
         log.append(record3);
 
-        let messages = log.get_records_from_offset(0, Some(2));
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].record.value, "first");
-        assert_eq!(messages[1].record.value, "second");
+        let records = log.get_records_from_offset(0, Some(2));
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].record.value, "first");
+        assert_eq!(records[1].record.value, "second");
     }
 
     #[test]
-    fn test_topic_log_get_messages_beyond_log() {
+    fn test_topic_log_get_records_beyond_log() {
         let mut log = TopicLog::new();
-        let record = Record::new(None, "only message".to_string(), None);
+        let record = Record::new(None, "only record".to_string(), None);
         log.append(record);
 
-        let messages = log.get_records_from_offset(5, None);
-        assert_eq!(messages.len(), 0);
+        let records = log.get_records_from_offset(5, None);
+        assert_eq!(records.len(), 0);
     }
 
     #[test]
-    fn test_topic_log_message_offsets_match() {
+    fn test_topic_log_record_offsets_match() {
         let mut log = TopicLog::new();
         let record1 = Record::new(None, "msg1".to_string(), None);
         let record2 = Record::new(None, "msg2".to_string(), None);
@@ -670,9 +670,9 @@ mod tests {
         let offset1 = log.append(record1);
         let offset2 = log.append(record2);
 
-        let messages = log.get_records_from_offset(0, None);
-        assert_eq!(messages[0].offset, offset1);
-        assert_eq!(messages[1].offset, offset2);
+        let records = log.get_records_from_offset(0, None);
+        assert_eq!(records[0].offset, offset1);
+        assert_eq!(records[1].offset, offset2);
     }
 
     // =============================================================================
@@ -730,7 +730,7 @@ mod tests {
 
     // Serialization Tests
     #[test]
-    fn test_message_record_serialization() {
+    fn test_record_record_serialization() {
         let mut headers = HashMap::new();
         headers.insert("test".to_string(), "value".to_string());
 
@@ -747,16 +747,16 @@ mod tests {
     }
 
     #[test]
-    fn test_message_with_offset_serialization() {
+    fn test_record_with_offset_serialization() {
         let record = Record::new(None, "test".to_string(), None);
-        let message_with_offset = RecordWithOffset::from_record(record, 42);
+        let record_with_offset = RecordWithOffset::from_record(record, 42);
 
-        let json = serde_json::to_string(&message_with_offset).expect("Should serialize");
+        let json = serde_json::to_string(&record_with_offset).expect("Should serialize");
         let deserialized: RecordWithOffset =
             serde_json::from_str(&json).expect("Should deserialize");
 
-        assert_eq!(message_with_offset.record, deserialized.record);
-        assert_eq!(message_with_offset.offset, deserialized.offset);
+        assert_eq!(record_with_offset.record, deserialized.record);
+        assert_eq!(record_with_offset.offset, deserialized.offset);
         // Note: timestamp might differ slightly due to precision, so we just check it's present
         assert!(!deserialized.timestamp.is_empty());
     }
@@ -768,7 +768,7 @@ mod tests {
     // Error Condition Tests
     #[test]
     fn test_consumer_group_already_exists_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         // Create a consumer group
         queue
@@ -779,7 +779,7 @@ mod tests {
         let result = queue.create_consumer_group("existing-group".to_string());
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupAlreadyExists { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupAlreadyExists { group_id }) = result {
             assert_eq!(group_id, "existing-group");
         } else {
             panic!("Expected ConsumerGroupAlreadyExists error");
@@ -788,13 +788,13 @@ mod tests {
 
     #[test]
     fn test_consumer_group_not_found_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
 
         // Try to get offset from non-existent group
         let result = queue.get_consumer_group_offset("nonexistent-group", "topic");
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupNotFound { group_id }) = result {
             assert_eq!(group_id, "nonexistent-group");
         } else {
             panic!("Expected ConsumerGroupNotFound error");
@@ -803,14 +803,14 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_success() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let group_id = "test-group";
 
         // Create a consumer group
         queue.create_consumer_group(group_id.to_string()).unwrap();
 
-        // Create topic by posting a message
-        let record = Record::new(None, "test message".to_string(), None);
+        // Create topic by posting a record
+        let record = Record::new(None, "test record".to_string(), None);
         queue.post_record("topic1".to_string(), record).unwrap();
 
         // Set an offset to verify the group exists
@@ -830,7 +830,7 @@ mod tests {
         let get_result = queue.get_consumer_group_offset(group_id, "topic1");
         assert!(get_result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound {
+        if let Err(FlashQError::ConsumerGroupNotFound {
             group_id: error_group_id,
         }) = get_result
         {
@@ -842,14 +842,14 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_not_found() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let nonexistent_group = "nonexistent-group";
 
         // Try to delete a non-existent consumer group
         let result = queue.delete_consumer_group(nonexistent_group);
         assert!(result.is_err());
 
-        if let Err(MessageQueueError::ConsumerGroupNotFound { group_id }) = result {
+        if let Err(FlashQError::ConsumerGroupNotFound { group_id }) = result {
             assert_eq!(group_id, nonexistent_group);
         } else {
             panic!("Expected ConsumerGroupNotFound error");
@@ -858,16 +858,16 @@ mod tests {
 
     #[test]
     fn test_delete_consumer_group_multiple_topics() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let group_id = "multi-topic-group";
 
         // Create a consumer group
         queue.create_consumer_group(group_id.to_string()).unwrap();
 
-        // Create topics by posting messages
-        let record1 = Record::new(None, "test message 1".to_string(), None);
-        let record2 = Record::new(None, "test message 2".to_string(), None);
-        let record3 = Record::new(None, "test message 3".to_string(), None);
+        // Create topics by posting records
+        let record1 = Record::new(None, "test record 1".to_string(), None);
+        let record2 = Record::new(None, "test record 2".to_string(), None);
+        let record3 = Record::new(None, "test record 3".to_string(), None);
 
         queue.post_record("topic1".to_string(), record1).unwrap();
         queue.post_record("topic2".to_string(), record2).unwrap();
@@ -910,13 +910,13 @@ mod tests {
 
     #[test]
     fn test_invalid_offset_error() {
-        let queue = MessageQueue::new();
+        let queue = FlashQ::new();
         let record = Record::new(None, "test".to_string(), None);
 
-        // Post a message to create topic with offset 0
+        // Post a record to create topic with offset 0
         queue.post_record("test-topic".to_string(), record).unwrap();
 
-        // Create consumer group and try to set invalid offset (beyond available messages)
+        // Create consumer group and try to set invalid offset (beyond available records)
         queue
             .create_consumer_group("test-group".to_string())
             .unwrap();
@@ -924,7 +924,7 @@ mod tests {
             queue.update_consumer_group_offset("test-group", "test-topic".to_string(), 999);
 
         assert!(result.is_err());
-        if let Err(MessageQueueError::InvalidOffset {
+        if let Err(FlashQError::InvalidOffset {
             offset,
             topic,
             max_offset,
@@ -932,20 +932,20 @@ mod tests {
         {
             assert_eq!(offset, 999);
             assert_eq!(topic, "test-topic");
-            assert_eq!(max_offset, 1); // Next offset after one message
+            assert_eq!(max_offset, 1); // Next offset after one record
         } else {
             panic!("Expected InvalidOffset error");
         }
     }
 
     #[test]
-    fn test_message_queue_error_display() {
-        let topic_error = MessageQueueError::TopicNotFound {
+    fn test_record_queue_error_display() {
+        let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
         assert_eq!(topic_error.to_string(), "Topic missing does not exist");
 
-        let group_error = MessageQueueError::ConsumerGroupNotFound {
+        let group_error = FlashQError::ConsumerGroupNotFound {
             group_id: "missing-group".to_string(),
         };
         assert_eq!(
@@ -953,7 +953,7 @@ mod tests {
             "Consumer group missing-group does not exist"
         );
 
-        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+        let exists_error = FlashQError::ConsumerGroupAlreadyExists {
             group_id: "existing-group".to_string(),
         };
         assert_eq!(
@@ -961,7 +961,7 @@ mod tests {
             "Consumer group existing-group already exists"
         );
 
-        let offset_error = MessageQueueError::InvalidOffset {
+        let offset_error = FlashQError::InvalidOffset {
             offset: 10,
             topic: "test".to_string(),
             max_offset: 5,
@@ -973,25 +973,25 @@ mod tests {
     }
 
     #[test]
-    fn test_message_queue_error_is_not_found() {
-        let topic_error = MessageQueueError::TopicNotFound {
+    fn test_record_queue_error_is_not_found() {
+        let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
         assert!(topic_error.is_not_found());
 
-        let group_error = MessageQueueError::ConsumerGroupNotFound {
+        let group_error = FlashQError::ConsumerGroupNotFound {
             group_id: "missing".to_string(),
         };
         assert!(group_error.is_not_found());
 
-        let offset_error = MessageQueueError::InvalidOffset {
+        let offset_error = FlashQError::InvalidOffset {
             offset: 10,
             topic: "test".to_string(),
             max_offset: 5,
         };
         assert!(offset_error.is_not_found());
 
-        let exists_error = MessageQueueError::ConsumerGroupAlreadyExists {
+        let exists_error = FlashQError::ConsumerGroupAlreadyExists {
             group_id: "existing".to_string(),
         };
         assert!(!exists_error.is_not_found());

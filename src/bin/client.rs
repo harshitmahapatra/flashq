@@ -125,7 +125,7 @@ async fn handle_producer_command(
                 handle_batch_post(client, server_url, &topic, &batch_file).await;
             } else if let Some(message) = message {
                 let headers = parse_headers(header);
-                post_messages(client, server_url, &topic, key, &message, headers).await;
+                post_records(client, server_url, &topic, key, &message, headers).await;
             } else {
                 println!("Error: Either provide a message or use --batch with a JSON file");
                 std::process::exit(1);
@@ -153,7 +153,7 @@ async fn handle_consumer_command(
             from_offset,
             include_headers,
         } => {
-            fetch_consumer_messages_command(
+            fetch_consumer_records_command(
                 client,
                 server_url,
                 &group_id,
@@ -268,7 +268,7 @@ async fn handle_batch_post(
     }
 }
 
-async fn post_messages(
+async fn post_records(
     client: &reqwest::Client,
     server_url: &str,
     topic: &str,
@@ -295,11 +295,11 @@ async fn post_messages(
                     Ok(produce_response) => {
                         if let Some(first_offset) = produce_response.offsets.first() {
                             println!(
-                                "Posted message to topic '{}' with offset: {}",
+                                "Posted record to topic '{}' with offset: {}",
                                 topic, first_offset.offset
                             );
                         } else {
-                            println!("Posted message to topic '{topic}' (no offset returned)");
+                            println!("Posted record to topic '{topic}' (no offset returned)");
                         }
                     }
                     Err(e) => println!("Failed to parse response: {e}"),
@@ -346,7 +346,7 @@ async fn leave_consumer_group_command(client: &reqwest::Client, server_url: &str
     }
 }
 
-async fn fetch_consumer_messages_command(
+async fn fetch_consumer_records_command(
     client: &reqwest::Client,
     server_url: &str,
     group_id: &str,
@@ -377,13 +377,13 @@ async fn fetch_consumer_messages_command(
             if response.status().is_success() {
                 match response.json::<FetchResponse>().await {
                     Ok(fetch_response) => {
-                        let message_count = fetch_response.records.len();
+                        let record_count = fetch_response.records.len();
                         println!(
-                            "Got {message_count} messages for consumer group '{group_id}' from topic '{topic}'"
+                            "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
                         );
 
-                        for message in fetch_response.records {
-                            print_message(&message);
+                        for record in fetch_response.records {
+                            print_record(&record);
                         }
 
                         println!("Next offset: {}", fetch_response.next_offset);
@@ -396,7 +396,7 @@ async fn fetch_consumer_messages_command(
             } else {
                 handle_error_response(
                     response,
-                    &format!("fetch messages for consumer group '{group_id}' from topic '{topic}'"),
+                    &format!("fetch records for consumer group '{group_id}' from topic '{topic}'"),
                 )
                 .await;
             }
@@ -492,17 +492,17 @@ async fn handle_error_response(response: reqwest::Response, operation: &str) {
     }
 }
 
-fn print_message(message: &RecordWithOffset) {
+fn print_record(record: &RecordWithOffset) {
     print!(
         "{} [{}] {}",
-        message.timestamp, message.offset, message.record.value
+        record.timestamp, record.offset, record.record.value
     );
 
-    if let Some(ref key) = message.record.key {
+    if let Some(ref key) = record.record.key {
         print!(" (key: {key})");
     }
 
-    if let Some(ref headers) = message.record.headers {
+    if let Some(ref headers) = record.record.headers {
         if !headers.is_empty() {
             print!(" (headers: {headers:?})");
         }
