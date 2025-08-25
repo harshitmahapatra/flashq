@@ -169,14 +169,14 @@ fn view_topics(topics_created: &HashMap<String, usize>) {
         println!("─────────────────────────────────────");
         for (topic, count) in topics_created {
             println!(
-                "  📌 {} ({} message{})",
+                "  📌 {} ({} record{})",
                 topic,
                 count,
                 if *count == 1 { "" } else { "s" }
             );
         }
         println!("─────────────────────────────────────");
-        println!("💡 Tip: Use option 2 to poll messages from any topic!");
+        println!("💡 Tip: Use option 2 to poll records from any topic!");
     }
 }
 
