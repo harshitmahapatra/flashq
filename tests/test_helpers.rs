@@ -288,7 +288,7 @@ impl TestClient {
         // Create consumer group
         let _ = self.create_consumer_group(&temp_group_id).await;
 
-        // Fetch messages
+        // Fetch records
         let response = self
             .fetch_records_for_consumer_group(&temp_group_id, topic, max_records)
             .await;
@@ -470,7 +470,7 @@ impl TestClient {
             .output()
             .await?;
 
-        // Fetch messages
+        // Fetch records
         let mut args = vec![
             "--port".to_string(),
             port.to_string(),

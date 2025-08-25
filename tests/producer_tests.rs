@@ -171,18 +171,18 @@ async fn test_client_binary_integration() {
     helper
         .post_record_with_client(topic, "Hello from client binary!")
         .await
-        .expect("Failed to post message with client");
+        .expect("Failed to post record with client");
 
     // Test polling with client binary
     let output = helper
         .poll_records_with_client(topic, Some(10))
         .await
-        .expect("Failed to poll messages with client");
+        .expect("Failed to poll records with client");
 
-    // Verify the output contains our message
+    // Verify the output contains our record
     assert!(output.contains("Hello from client binary!"));
-    assert!(output.contains("Got 1 messages for consumer group"));
-    // With the "do not advance offset on poll" change, next offset remains 0 after fetching the message at offset 0
+    assert!(output.contains("Got 1 records for consumer group"));
+    // With the "do not advance offset on poll" change, next offset remains 0 after fetching the record at offset 0
     assert!(output.contains("Next offset: 0"));
 }
 
@@ -305,7 +305,7 @@ async fn test_batch_record_posting() {
     // Test single record batch
     let single_record = vec![Record {
         key: Some("user1".to_string()),
-        value: "First message".to_string(),
+        value: "First record".to_string(),
         headers: None,
     }];
 
@@ -325,17 +325,17 @@ async fn test_batch_record_posting() {
     let batch_records = vec![
         Record {
             key: Some("user2".to_string()),
-            value: "Second message".to_string(),
+            value: "Second record".to_string(),
             headers: Some(headers.clone()),
         },
         Record {
             key: None,
-            value: "Third message".to_string(),
+            value: "Third record".to_string(),
             headers: None,
         },
         Record {
             key: Some("user3".to_string()),
-            value: "Fourth message".to_string(),
+            value: "Fourth record".to_string(),
             headers: Some(headers),
         },
     ];
@@ -351,16 +351,16 @@ async fn test_batch_record_posting() {
     assert_eq!(response_data.offsets[1].offset, 2);
     assert_eq!(response_data.offsets[2].offset, 3);
 
-    // Verify all messages were posted correctly
+    // Verify all records were posted correctly
     let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     assert_eq!(response.status(), 200);
     let poll_data: FetchResponse = response.json().await.unwrap();
     assert_eq!(poll_data.records.len(), 4);
 
-    assert_eq!(poll_data.records[0].record.value, "First message");
-    assert_eq!(poll_data.records[1].record.value, "Second message");
-    assert_eq!(poll_data.records[2].record.value, "Third message");
-    assert_eq!(poll_data.records[3].record.value, "Fourth message");
+    assert_eq!(poll_data.records[0].record.value, "First record");
+    assert_eq!(poll_data.records[1].record.value, "Second record");
+    assert_eq!(poll_data.records[2].record.value, "Third record");
+    assert_eq!(poll_data.records[3].record.value, "Fourth record");
 }
 
 #[tokio::test]

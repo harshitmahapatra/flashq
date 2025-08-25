@@ -36,7 +36,7 @@ async fn test_consumer_group_offset_management() {
 
     for i in 0..5 {
         helper
-            .post_record(topic, &format!("Message {i}"))
+            .post_record(topic, &format!("Record {i}"))
             .await
             .unwrap();
     }
@@ -80,7 +80,7 @@ async fn test_consumer_group_record_fetching() {
 
     for i in 0..10 {
         helper
-            .post_record(topic, &format!("Group Message {i}"))
+            .post_record(topic, &format!("Group Record {i}"))
             .await
             .unwrap();
     }
@@ -123,7 +123,7 @@ async fn test_consumer_group_record_fetching() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let fetch_response: FetchResponse = response.json().await.unwrap();
-    assert_eq!(fetch_response.records.len(), 2); // Messages from offset 8-9
+    assert_eq!(fetch_response.records.len(), 2); // Records from offset 8-9
     assert_eq!(fetch_response.next_offset, 8); // Offset advanced to committed position
 }
 
@@ -140,7 +140,7 @@ async fn test_consumer_group_from_offset_fetching() {
 
     for i in 0..8 {
         helper
-            .post_record(topic, &format!("Offset Message {i}"))
+            .post_record(topic, &format!("Offset Record {i}"))
             .await
             .unwrap();
     }
@@ -153,7 +153,7 @@ async fn test_consumer_group_from_offset_fetching() {
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 3);
     assert_eq!(fetch_response.records[0].offset, 3);
-    assert_eq!(fetch_response.records[0].record.value, "Offset Message 3");
+    assert_eq!(fetch_response.records[0].record.value, "Offset Record 3");
     assert_eq!(fetch_response.records[2].offset, 5);
 
     let response = helper
@@ -179,7 +179,7 @@ async fn test_multiple_consumer_groups() {
 
     for i in 0..6 {
         helper
-            .post_record(topic, &format!("Multi Group Message {i}"))
+            .post_record(topic, &format!("Multi Group Record {i}"))
             .await
             .unwrap();
     }
@@ -262,7 +262,7 @@ async fn test_consumer_group_edge_cases() {
         .unwrap();
     assert_eq!(response.status(), 404);
 
-    helper.post_record(topic, "Single message").await.unwrap();
+    helper.post_record(topic, "Single record").await.unwrap();
 
     let response = helper
         .fetch_records_for_consumer_group(group_id, topic, Some(1))
@@ -271,7 +271,7 @@ async fn test_consumer_group_edge_cases() {
     assert_eq!(response.status(), 200);
     let fetch_response: FetchResponse = response.json().await.unwrap();
     assert_eq!(fetch_response.records.len(), 1);
-    assert_eq!(fetch_response.records[0].record.value, "Single message");
+    assert_eq!(fetch_response.records[0].record.value, "Single record");
 
     helper
         .update_consumer_group_offset(group_id, topic, 1)
