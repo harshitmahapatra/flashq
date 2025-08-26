@@ -1,7 +1,7 @@
 //! CLI interface implementation for FlashQ HTTP client
 
 use clap::{Parser, Subcommand};
-use super::{client::*, common::parse_headers};
+use super::{client::*, types::parse_headers};
 
 // =============================================================================
 // CLI CONFIGURATION STRUCTS
