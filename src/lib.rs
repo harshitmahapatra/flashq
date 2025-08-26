@@ -133,16 +133,18 @@ impl FlashQ {
             consumer_groups: Arc::new(Mutex::new(HashMap::new())),
             storage_backend,
         };
-        
+
         // For file backends, recover existing topics and consumer groups from disk
         queue.recover_existing_topics().unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to recover existing topics: {}", e);
+            eprintln!("Warning: Failed to recover existing topics: {e}");
         });
-        
-        queue.recover_existing_consumer_groups().unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to recover existing consumer groups: {}", e);
-        });
-        
+
+        queue
+            .recover_existing_consumer_groups()
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to recover existing consumer groups: {e}");
+            });
+
         queue
     }
 
@@ -202,7 +204,7 @@ impl FlashQ {
                     .storage_backend
                     .create_consumer_group(&group_id)
                     .map_err(|e| FlashQError::ConsumerGroupAlreadyExists {
-                        group_id: format!("Failed to create consumer group: {}", e),
+                        group_id: format!("Failed to create consumer group: {e}"),
                     })?;
                 entry.insert(consumer_group);
                 Ok(())
@@ -279,13 +281,13 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
         let records = self.poll_records_from_offset(topic, current_offset, count)?;
-        
+
         // Record that this consumer group has accessed this topic (with offset 0 if first time)
         // This ensures the topic appears in the consumer group's JSON file
         if current_offset == 0 {
             self.update_consumer_group_offset(group_id, topic.to_string(), 0)?;
         }
-        
+
         Ok(records)
     }
 
@@ -311,25 +313,25 @@ impl FlashQ {
     /// Recover existing topics from disk for file storage backends
     fn recover_existing_topics(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::fs;
-        
+
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
             storage::StorageBackend::File(_) => std::path::PathBuf::from("./data"),
             storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };
-        
+
         // Check if data directory exists
         if !data_dir.exists() {
             return Ok(());
         }
-        
+
         // Scan for .log files
         let entries = fs::read_dir(&data_dir)?;
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            
+
             if let Some(extension) = path.extension() {
                 if extension == "log" {
                     if let Some(file_name) = path.file_stem() {
@@ -344,40 +346,42 @@ impl FlashQ {
                 }
             }
         }
-        
+
         Ok(())
     }
 
     /// Recover existing consumer groups from disk for file storage backends  
     fn recover_existing_consumer_groups(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::fs;
-        
+
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
             storage::StorageBackend::File(_) => std::path::PathBuf::from("./data"),
             storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };
-        
+
         let consumer_groups_dir = data_dir.join("consumer_groups");
-        
+
         // Check if consumer groups directory exists
         if !consumer_groups_dir.exists() {
             return Ok(());
         }
-        
+
         // Scan for .json files (consumer group files)
         let entries = fs::read_dir(&consumer_groups_dir)?;
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            
+
             if let Some(extension) = path.extension() {
                 if extension == "json" {
                     if let Some(file_name) = path.file_stem() {
                         if let Some(group_id) = file_name.to_str() {
                             // Create ConsumerGroup for this group
-                            if let Ok(consumer_group) = self.storage_backend.create_consumer_group(group_id) {
+                            if let Ok(consumer_group) =
+                                self.storage_backend.create_consumer_group(group_id)
+                            {
                                 let mut consumer_groups = self.consumer_groups.lock().unwrap();
                                 consumer_groups.insert(group_id.to_string(), consumer_group);
                             }
@@ -386,7 +390,7 @@ impl FlashQ {
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -682,32 +686,40 @@ mod tests {
         let record3 = Record::new(None, "msg3".to_string(), None);
 
         queue.post_record(topic.to_string(), record1).unwrap();
-        queue.post_record(topic.to_string(), record2).unwrap();  
+        queue.post_record(topic.to_string(), record2).unwrap();
         queue.post_record(topic.to_string(), record3).unwrap();
 
         // Initial offset should be 0
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
 
         // Poll records - offset should remain 0 (polling doesn't advance offset)
-        let records = queue.poll_records_for_consumer_group(group_id, topic, Some(2)).unwrap();
+        let records = queue
+            .poll_records_for_consumer_group(group_id, topic, Some(2))
+            .unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "msg1");
-        assert_eq!(records[1].record.value, "msg2"); 
+        assert_eq!(records[1].record.value, "msg2");
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
 
         // Poll again - should return same records since offset hasn't advanced
-        let records = queue.poll_records_for_consumer_group(group_id, topic, Some(2)).unwrap();
+        let records = queue
+            .poll_records_for_consumer_group(group_id, topic, Some(2))
+            .unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "msg1");
         assert_eq!(records[1].record.value, "msg2");
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
 
         // Now commit offset to 2 (after consuming first 2 records)
-        queue.update_consumer_group_offset(group_id, topic.to_string(), 2).unwrap();
+        queue
+            .update_consumer_group_offset(group_id, topic.to_string(), 2)
+            .unwrap();
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 2);
 
         // Poll again - should now return the remaining record
-        let records = queue.poll_records_for_consumer_group(group_id, topic, None).unwrap();
+        let records = queue
+            .poll_records_for_consumer_group(group_id, topic, None)
+            .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record.value, "msg3");
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 2); // Still 2 until explicitly committed

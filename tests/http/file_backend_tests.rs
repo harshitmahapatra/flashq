@@ -77,7 +77,7 @@ async fn test_file_backend_persistence_across_restarts() {
         .as_nanos();
     let test_id = format!("{}_{}", std::process::id(), timestamp);
     let shared_data_dir = std::env::temp_dir().join(format!("flashq_persistence_test_{test_id}"));
-    
+
     let topic = unique_topic();
     let group_id = unique_consumer_group();
 
@@ -118,7 +118,7 @@ async fn test_file_backend_persistence_across_restarts() {
         assert_eq!(fetch_data.records.len(), 2);
         assert_eq!(fetch_data.records[0].record.value, "Message 1");
         assert_eq!(fetch_data.records[1].record.value, "Message 2");
-        
+
         // Debug: Check what files were created
         eprintln!("DEBUG: Files in data directory after first server:");
         if shared_data_dir.exists() {
@@ -167,7 +167,7 @@ async fn test_file_backend_persistence_across_restarts() {
 
         if fetch_response.status().is_success() {
             let fetch_data: FetchResponse = fetch_response.json().await.unwrap_or_else(|e| {
-                eprintln!("Failed to parse successful fetch response: {:?}", e);
+                eprintln!("Failed to parse successful fetch response: {e:?}");
                 panic!("Should parse fetch response");
             });
             // ... rest of your assertions
@@ -178,7 +178,7 @@ async fn test_file_backend_persistence_across_restarts() {
             assert_eq!(fetch_data.records[1].offset, 1);
         } else {
             let error_text = fetch_response.text().await.expect("Should get error text");
-            eprintln!("Error response: {}", error_text);
+            eprintln!("Error response: {error_text}");
             panic!("Fetch request failed");
         }
 
@@ -216,15 +216,15 @@ async fn test_file_backend_creates_data_directory() {
 
     // Get the temp data directory from the server
     let data_dir = server.data_dir().expect("Should have temp data directory");
-    
+
     // Verify data directory was created
     assert!(data_dir.exists(), "Data directory should be created");
     assert!(data_dir.is_dir(), "Data path should be a directory");
 
     // Verify topic log file was created
-    let topic_file = data_dir.join(format!("{}.log", topic));
+    let topic_file = data_dir.join(format!("{topic}.log"));
     assert!(topic_file.exists(), "Topic log file should be created");
-    
+
     // Temp directory will be cleaned up automatically when server drops
 }
 
@@ -242,7 +242,7 @@ async fn test_file_backend_consumer_groups() {
     // Post some records
     for i in 0..3 {
         client
-            .post_record(&topic, &format!("Message {}", i))
+            .post_record(&topic, &format!("Message {i}"))
             .await
             .expect("Should post record successfully");
     }
@@ -311,7 +311,7 @@ async fn test_memory_vs_file_backend_consistency() {
 
     // Post same records to both backends
     for i in 0..3 {
-        let message = format!("Consistency test message {}", i);
+        let message = format!("Consistency test message {i}");
 
         let memory_response = memory_client
             .post_record(&topic, &message)

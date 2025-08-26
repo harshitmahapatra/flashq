@@ -407,7 +407,7 @@ impl ConsumerGroup for FileConsumerGroup {
 
         // Persist to disk immediately on every change
         if let Err(e) = self.persist_to_disk() {
-            eprintln!("Warning: Failed to persist consumer group state: {}", e);
+            eprintln!("Warning: Failed to persist consumer group state: {e}");
         }
     }
 

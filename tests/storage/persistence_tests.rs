@@ -40,8 +40,8 @@ fn test_file_storage_persistence() {
         assert_eq!(records[1].record.value, "persistent_value2");
         assert_eq!(records[0].offset, 0);
         assert_eq!(records[1].offset, 1);
-        
-        // Now post a new record - should continue with correct offset  
+
+        // Now post a new record - should continue with correct offset
         let record3 = Record::new(None, "new_value".to_string(), None);
         let offset = queue.post_record(topic_name.clone(), record3).unwrap();
         assert_eq!(offset, 2); // Should start from offset 2 (after the recovered records)
@@ -97,13 +97,28 @@ fn test_topic_recovery_on_startup() {
             sync_mode: SyncMode::Immediate,
             data_dir: temp_dir.clone(),
         });
-        
+
         // Post to topic1
-        queue.post_record(topic1.clone(), Record::new(None, "topic1_msg1".to_string(), None)).unwrap();
-        queue.post_record(topic1.clone(), Record::new(None, "topic1_msg2".to_string(), None)).unwrap();
-        
-        // Post to topic2  
-        queue.post_record(topic2.clone(), Record::new(None, "topic2_msg1".to_string(), None)).unwrap();
+        queue
+            .post_record(
+                topic1.clone(),
+                Record::new(None, "topic1_msg1".to_string(), None),
+            )
+            .unwrap();
+        queue
+            .post_record(
+                topic1.clone(),
+                Record::new(None, "topic1_msg2".to_string(), None),
+            )
+            .unwrap();
+
+        // Post to topic2
+        queue
+            .post_record(
+                topic2.clone(),
+                Record::new(None, "topic2_msg1".to_string(), None),
+            )
+            .unwrap();
     } // Queue goes out of scope
 
     // Create new queue instance - should automatically discover and load all existing topics
@@ -118,12 +133,12 @@ fn test_topic_recovery_on_startup() {
         assert_eq!(topic1_records.len(), 2);
         assert_eq!(topic1_records[0].record.value, "topic1_msg1");
         assert_eq!(topic1_records[1].record.value, "topic1_msg2");
-        
+
         // Should be able to poll from topic2 immediately (tests topic recovery)
         let topic2_records = queue.poll_records(&topic2, None).unwrap();
         assert_eq!(topic2_records.len(), 1);
         assert_eq!(topic2_records[0].record.value, "topic2_msg1");
-        
+
         // High water marks should be correct after recovery
         assert_eq!(queue.get_high_water_mark(&topic1), 2);
         assert_eq!(queue.get_high_water_mark(&topic2), 1);
@@ -133,7 +148,7 @@ fn test_topic_recovery_on_startup() {
     std::fs::remove_dir_all(&temp_dir).ok();
 }
 
-#[test] 
+#[test]
 fn test_consumer_group_recovery_on_startup() {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,23 +166,33 @@ fn test_consumer_group_recovery_on_startup() {
             sync_mode: SyncMode::Immediate,
             data_dir: temp_dir.clone(),
         });
-        
+
         // Post some records
         for i in 0..5 {
-            queue.post_record(topic.clone(), Record::new(None, format!("msg{}", i), None)).unwrap();
+            queue
+                .post_record(topic.clone(), Record::new(None, format!("msg{i}"), None))
+                .unwrap();
         }
-        
+
         // Create consumer groups and commit different offsets
         queue.create_consumer_group(group1.clone()).unwrap();
         queue.create_consumer_group(group2.clone()).unwrap();
-        
+
         // Group1 consumes first 2 records and commits offset 2
-        queue.poll_records_for_consumer_group(&group1, &topic, Some(2)).unwrap();
-        queue.update_consumer_group_offset(&group1, topic.clone(), 2).unwrap();
-        
-        // Group2 consumes first 3 records and commits offset 3  
-        queue.poll_records_for_consumer_group(&group2, &topic, Some(3)).unwrap();
-        queue.update_consumer_group_offset(&group2, topic.clone(), 3).unwrap();
+        queue
+            .poll_records_for_consumer_group(&group1, &topic, Some(2))
+            .unwrap();
+        queue
+            .update_consumer_group_offset(&group1, topic.clone(), 2)
+            .unwrap();
+
+        // Group2 consumes first 3 records and commits offset 3
+        queue
+            .poll_records_for_consumer_group(&group2, &topic, Some(3))
+            .unwrap();
+        queue
+            .update_consumer_group_offset(&group2, topic.clone(), 3)
+            .unwrap();
     } // Queue goes out of scope
 
     // Create new queue instance - should automatically recover consumer groups
@@ -180,14 +205,18 @@ fn test_consumer_group_recovery_on_startup() {
         // Should be able to get consumer group offsets immediately (tests consumer group recovery)
         assert_eq!(queue.get_consumer_group_offset(&group1, &topic).unwrap(), 2);
         assert_eq!(queue.get_consumer_group_offset(&group2, &topic).unwrap(), 3);
-        
+
         // Should be able to poll from correct offsets
-        let group1_records = queue.poll_records_for_consumer_group(&group1, &topic, None).unwrap();
+        let group1_records = queue
+            .poll_records_for_consumer_group(&group1, &topic, None)
+            .unwrap();
         assert_eq!(group1_records.len(), 3); // Records 2, 3, 4 (offsets 2-4)
         assert_eq!(group1_records[0].record.value, "msg2");
         assert_eq!(group1_records[0].offset, 2);
-        
-        let group2_records = queue.poll_records_for_consumer_group(&group2, &topic, None).unwrap();
+
+        let group2_records = queue
+            .poll_records_for_consumer_group(&group2, &topic, None)
+            .unwrap();
         assert_eq!(group2_records.len(), 2); // Records 3, 4 (offsets 3-4)
         assert_eq!(group2_records[0].record.value, "msg3");
         assert_eq!(group2_records[0].offset, 3);
@@ -214,8 +243,13 @@ fn test_recovery_with_no_existing_data() {
 
     // Should be able to post and poll normally
     let topic = format!("new_topic_{test_id}");
-    queue.post_record(topic.clone(), Record::new(None, "test_msg".to_string(), None)).unwrap();
-    
+    queue
+        .post_record(
+            topic.clone(),
+            Record::new(None, "test_msg".to_string(), None),
+        )
+        .unwrap();
+
     let records = queue.poll_records(&topic, None).unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].record.value, "test_msg");

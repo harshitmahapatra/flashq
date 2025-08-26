@@ -57,7 +57,7 @@ async fn main() {
                 if let Ok(p) = arg.parse::<u16>() {
                     port = p;
                 } else {
-                    eprintln!("Error: Invalid argument '{}'", arg);
+                    eprintln!("Error: Invalid argument '{arg}'");
                     print_usage();
                     std::process::exit(1);
                 }

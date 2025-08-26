@@ -147,10 +147,10 @@ impl TestServer {
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer { 
-                        process, 
-                        port, 
-                        temp_dir: None, 
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir: None,
                         cleanup_on_drop: true,
                     });
                 }
@@ -187,7 +187,7 @@ impl TestServer {
                 .as_nanos();
             let test_id = format!("{}_{}", std::process::id(), timestamp);
             let temp_dir = std::env::temp_dir().join(format!("flashq_http_test_{test_id}"));
-            
+
             cmd.args(["--data-dir", temp_dir.to_str().unwrap()]);
             Some(temp_dir)
         } else {
@@ -195,10 +195,7 @@ impl TestServer {
             None
         };
 
-        let mut process = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let mut process = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
 
         // Wait for server to start and verify it's responding
         let client = reqwest::Client::builder()
@@ -223,10 +220,10 @@ impl TestServer {
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer { 
-                        process, 
-                        port, 
-                        temp_dir, 
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir,
                         cleanup_on_drop: true,
                     });
                 }
@@ -362,7 +359,7 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
-        
+
         // Clean up temporary directory only if cleanup is enabled
         if self.cleanup_on_drop {
             if let Some(temp_dir) = &self.temp_dir {
