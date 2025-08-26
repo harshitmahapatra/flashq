@@ -328,9 +328,15 @@ mod tests {
             Some(headers.clone()),
         );
 
-        assert_eq!(record.key.as_ref().unwrap(), "user123");
+        assert_eq!(
+            record.key.as_ref().expect("record should have key"),
+            "user123"
+        );
         assert_eq!(record.value, "test record");
-        assert_eq!(record.headers.as_ref().unwrap(), &headers);
+        assert_eq!(
+            record.headers.as_ref().expect("record should have headers"),
+            &headers
+        );
     }
 
     #[test]
@@ -361,7 +367,7 @@ mod tests {
         let result = queue.post_record("test_topic".to_string(), record);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0); // First record should have offset 0
+        assert_eq!(result.expect("posting record should succeed"), 0); // First record should have offset 0
     }
 
     #[test]
@@ -372,11 +378,15 @@ mod tests {
         let record2 = Record::new(None, "msg2".to_string(), None);
         let record3 = Record::new(None, "msg3".to_string(), None);
 
-        let offset1 = queue.post_record("topic".to_string(), record1).unwrap();
-        let offset2 = queue.post_record("topic".to_string(), record2).unwrap();
+        let offset1 = queue
+            .post_record("topic".to_string(), record1)
+            .expect("posting first record should succeed");
+        let offset2 = queue
+            .post_record("topic".to_string(), record2)
+            .expect("posting second record should succeed");
         let offset3 = queue
             .post_record("different_topic".to_string(), record3)
-            .unwrap();
+            .expect("posting record to different topic should succeed");
 
         assert_eq!(offset1, 0);
         assert_eq!(offset2, 1);
@@ -390,10 +400,16 @@ mod tests {
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
 
-        queue.post_record("news".to_string(), record1).unwrap();
-        queue.post_record("news".to_string(), record2).unwrap();
+        queue
+            .post_record("news".to_string(), record1)
+            .expect("posting first record should succeed");
+        queue
+            .post_record("news".to_string(), record2)
+            .expect("posting second record should succeed");
 
-        let records = queue.poll_records("news", None).unwrap();
+        let records = queue
+            .poll_records("news", None)
+            .expect("polling records from existing topic should succeed");
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "first news");
         assert_eq!(records[1].record.value, "second news");
@@ -491,14 +507,25 @@ mod tests {
 
         queue
             .post_record("metadata_topic".to_string(), record)
-            .unwrap();
-        let records = queue.poll_records("metadata_topic", None).unwrap();
+            .expect("posting record with metadata should succeed");
+        let records = queue
+            .poll_records("metadata_topic", None)
+            .expect("polling records should succeed");
 
         assert_eq!(records.len(), 1);
         let msg = &records[0];
-        assert_eq!(msg.record.key.as_ref().unwrap(), "user456");
+        assert_eq!(
+            msg.record.key.as_ref().expect("record should have key"),
+            "user456"
+        );
         assert_eq!(msg.record.value, "record with metadata");
-        assert_eq!(msg.record.headers.as_ref().unwrap(), &headers);
+        assert_eq!(
+            msg.record
+                .headers
+                .as_ref()
+                .expect("record should have headers"),
+            &headers
+        );
         assert_eq!(msg.offset, 0);
     }
 

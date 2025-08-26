@@ -13,6 +13,31 @@ pub enum StorageBackend {
 
 impl StorageBackend {
     /// Create a new storage backend instance
+    ///
+    /// Returns a boxed trait object implementing TopicLog, allowing different
+    /// storage implementations to be used interchangeably. The concrete type
+    /// is determined by the StorageBackend variant:
+    ///
+    /// - `Memory`: Creates an InMemoryTopicLog that stores records in a Vec
+    ///
+    /// # Returns
+    ///
+    /// A boxed TopicLog trait object ready for use. The returned instance
+    /// starts empty with offset 0 and can immediately accept record operations.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use flashq::storage::{StorageBackend, TopicLog};
+    /// use flashq::Record;
+    ///
+    /// let backend = StorageBackend::Memory;
+    /// let mut storage = backend.create();
+    ///
+    /// let record = Record::new(None, "test".to_string(), None);
+    /// let offset = storage.append(record);
+    /// assert_eq!(offset, 0);
+    /// ```
     pub fn create(&self) -> Box<dyn TopicLog> {
         match self {
             StorageBackend::Memory => Box::new(InMemoryTopicLog::new()),
@@ -80,8 +105,22 @@ mod tests {
 
         let records = storage.get_records_from_offset(0, None);
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].record.key.as_ref().unwrap(), "user123");
+        assert_eq!(
+            records[0]
+                .record
+                .key
+                .as_ref()
+                .expect("record should have key"),
+            "user123"
+        );
         assert_eq!(records[0].record.value, "record with headers");
-        assert_eq!(records[0].record.headers.as_ref().unwrap(), &headers);
+        assert_eq!(
+            records[0]
+                .record
+                .headers
+                .as_ref()
+                .expect("record should have headers"),
+            &headers
+        );
     }
 }
