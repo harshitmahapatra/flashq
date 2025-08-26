@@ -1,10 +1,7 @@
-use super::TopicLog;
+use super::{ConsumerGroup, TopicLog};
 use crate::{Record, RecordWithOffset};
+use std::collections::HashMap;
 
-/// In-memory implementation of TopicLog
-///
-/// This is the default storage backend that keeps all records in memory.
-/// Records are stored in a Vec and persist only for the lifetime of the process.
 #[derive(Debug, Clone)]
 pub struct InMemoryTopicLog {
     records: Vec<RecordWithOffset>,
@@ -18,7 +15,6 @@ impl Default for InMemoryTopicLog {
 }
 
 impl InMemoryTopicLog {
-    /// Create a new empty in-memory topic log
     pub fn new() -> Self {
         InMemoryTopicLog {
             records: Vec::new(),
@@ -181,5 +177,38 @@ mod tests {
         let records = log.get_records_from_offset(0, None);
         assert_eq!(records[0].offset, offset1);
         assert_eq!(records[1].offset, offset2);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InMemoryConsumerGroup {
+    group_id: String,
+    topic_offsets: HashMap<String, u64>,
+}
+
+impl InMemoryConsumerGroup {
+    pub fn new(group_id: String) -> Self {
+        InMemoryConsumerGroup {
+            group_id,
+            topic_offsets: HashMap::new(),
+        }
+    }
+}
+
+impl ConsumerGroup for InMemoryConsumerGroup {
+    fn get_offset(&self, topic: &str) -> u64 {
+        self.topic_offsets.get(topic).copied().unwrap_or(0)
+    }
+
+    fn set_offset(&mut self, topic: String, offset: u64) {
+        self.topic_offsets.insert(topic, offset);
+    }
+
+    fn group_id(&self) -> &str {
+        &self.group_id
+    }
+
+    fn get_all_offsets(&self) -> HashMap<String, u64> {
+        self.topic_offsets.clone()
     }
 }

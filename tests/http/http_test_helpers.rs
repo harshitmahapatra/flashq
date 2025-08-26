@@ -106,6 +106,8 @@ pub fn get_timeout_config() -> (u32, u64) {
 pub struct TestServer {
     process: Child,
     pub port: u16,
+    temp_dir: Option<std::path::PathBuf>,
+    cleanup_on_drop: bool,
 }
 
 impl TestServer {
@@ -145,7 +147,88 @@ impl TestServer {
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer { process, port });
+                    return Ok(TestServer { 
+                        process, 
+                        port, 
+                        temp_dir: None, 
+                        cleanup_on_drop: true,
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        eprintln!("Server failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Server failed to start within timeout".into())
+    }
+
+    pub async fn start_with_storage(storage: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let server_binary = ensure_server_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        eprintln!(
+            "Starting server on port {port} with {storage} storage using binary: {server_binary:?}"
+        );
+
+        let mut cmd = Command::new(&server_binary);
+        cmd.args([&port.to_string()]);
+
+        // For file storage, create a unique temporary directory for each test
+        let temp_dir = if storage == "file" {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let test_id = format!("{}_{}", std::process::id(), timestamp);
+            let temp_dir = std::env::temp_dir().join(format!("flashq_http_test_{test_id}"));
+            
+            cmd.args(["--data-dir", temp_dir.to_str().unwrap()]);
+            Some(temp_dir)
+        } else {
+            cmd.args(["--storage", storage]);
+            None
+        };
+
+        let mut process = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        // Wait for server to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                eprintln!("Server process exited with status: {exit_status}");
+                return Err("Server process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    eprintln!(
+                        "Server started successfully on port {} with {storage} storage after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestServer { 
+                        process, 
+                        port, 
+                        temp_dir, 
+                        cleanup_on_drop: true,
+                    });
                 }
                 Ok(false) => continue, // Retry
                 Err(e) => {
@@ -202,12 +285,92 @@ impl TestServer {
 
         Ok(false) // All retries failed
     }
+
+    /// Get the temporary data directory (for file storage tests)
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.temp_dir.as_deref()
+    }
+
+    /// Start server with a specific data directory (for persistence testing)
+    pub async fn start_with_data_dir<P: AsRef<std::path::Path>>(
+        data_dir: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let server_binary = ensure_server_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        let data_dir_path = data_dir.as_ref();
+        eprintln!(
+            "Starting server on port {port} with file storage using data dir: {data_dir_path:?}"
+        );
+
+        let mut process = Command::new(&server_binary)
+            .args([
+                &port.to_string(),
+                "--data-dir",
+                data_dir_path.to_str().unwrap(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        // Wait for server to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                eprintln!("Server process exited with status: {exit_status}");
+                return Err("Server process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    eprintln!(
+                        "Server started successfully on port {} with custom data dir after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir: Some(data_dir_path.to_path_buf()),
+                        cleanup_on_drop: false, // Don't cleanup - persistence tests need the data
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        eprintln!("Server failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Server failed to start within timeout".into())
+    }
 }
 
 impl Drop for TestServer {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
+        
+        // Clean up temporary directory only if cleanup is enabled
+        if self.cleanup_on_drop {
+            if let Some(temp_dir) = &self.temp_dir {
+                if temp_dir.exists() {
+                    let _ = std::fs::remove_dir_all(temp_dir);
+                }
+            }
+        }
     }
 }
 

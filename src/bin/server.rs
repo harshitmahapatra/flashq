@@ -10,21 +10,73 @@ use std::env;
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let port = if args.len() > 1 {
-        match args[1].parse::<u16>() {
-            Ok(p) => p,
-            Err(_) => {
-                eprintln!("Usage: server [port]");
-                eprintln!("Invalid port number: {}", args[1]);
-                std::process::exit(1);
+    let mut port = 8080;
+    let mut storage_backend = flashq::storage::StorageBackend::Memory;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--storage" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --storage requires a value (memory|file)");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                match args[i].as_str() {
+                    "memory" => storage_backend = flashq::storage::StorageBackend::Memory,
+                    "file" => {
+                        storage_backend = flashq::storage::StorageBackend::File(
+                            flashq::storage::file::SyncMode::Immediate,
+                        )
+                    }
+                    _ => {
+                        eprintln!(
+                            "Error: Invalid storage backend '{}'. Valid options: memory, file",
+                            args[i]
+                        );
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "--data-dir" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --data-dir requires a path");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                let data_dir = std::path::PathBuf::from(&args[i]);
+                storage_backend = flashq::storage::StorageBackend::FileWithPath {
+                    sync_mode: flashq::storage::file::SyncMode::Immediate,
+                    data_dir,
+                };
+            }
+            arg => {
+                if let Ok(p) = arg.parse::<u16>() {
+                    port = p;
+                } else {
+                    eprintln!("Error: Invalid argument '{}'", arg);
+                    print_usage();
+                    std::process::exit(1);
+                }
             }
         }
-    } else {
-        8080
-    };
+        i += 1;
+    }
 
-    if let Err(e) = start_server(port).await {
+    if let Err(e) = start_server(port, storage_backend).await {
         eprintln!("Server error: {e}");
         std::process::exit(1);
     }
+}
+
+fn print_usage() {
+    eprintln!("Usage: server [port] [--storage <backend>] [--data-dir <path>]");
+    eprintln!("  port: Port number to bind to (default: 8080)");
+    eprintln!("  --storage: Storage backend to use");
+    eprintln!("    memory: In-memory storage (default, data lost on restart)");
+    eprintln!("    file: File-based storage (data persisted to ./data directory)");
+    eprintln!("  --data-dir: Custom data directory for file storage (overrides --storage file)");
 }

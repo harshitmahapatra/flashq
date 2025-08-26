@@ -663,24 +663,30 @@ pub fn create_router(app_state: AppState) -> Router {
         .with_state(app_state)
 }
 
-/// Creates application state with configuration
-pub fn create_app_state(log_level: LogLevel) -> AppState {
+/// Creates application state with configuration and storage backend
+pub fn create_app_state(
+    log_level: LogLevel,
+    storage_backend: crate::storage::StorageBackend,
+) -> AppState {
     let config = AppConfig { log_level };
     Arc::new(AppStateInner {
-        queue: Arc::new(FlashQ::new()),
+        queue: Arc::new(FlashQ::with_storage_backend(storage_backend)),
         config,
     })
 }
 
-/// Starts the HTTP server on the specified port
-pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+/// Starts the HTTP server on the specified port with the given storage backend
+pub async fn start_server(
+    port: u16,
+    storage_backend: crate::storage::StorageBackend,
+) -> Result<(), Box<dyn std::error::Error>> {
     let log_level = if cfg!(debug_assertions) {
         LogLevel::Trace
     } else {
         LogLevel::Info
     };
 
-    let app_state = create_app_state(log_level);
+    let app_state = create_app_state(log_level, storage_backend);
     let app = create_router(app_state.clone());
 
     let bind_address = format!("127.0.0.1:{port}");

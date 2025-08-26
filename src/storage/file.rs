@@ -1,18 +1,12 @@
-use crate::storage::r#trait::TopicLog;
+use crate::storage::r#trait::{ConsumerGroup, TopicLog};
 use crate::{Record, RecordWithOffset};
+use serde::{Deserialize, Serialize};
 use serde_json;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-/// File-based topic log implementation
-///
-/// Stores records in append-only log files using a simple binary format:
-/// - Record length (4 bytes, little-endian u32)
-/// - Offset (8 bytes, little-endian u64)
-/// - JSON payload (variable length)
-///
-/// Files are stored in {data_dir}/{topic_name}.log
 pub struct FileTopicLog {
     file_path: PathBuf,
     file: File,
@@ -21,19 +15,14 @@ pub struct FileTopicLog {
     sync_mode: SyncMode,
 }
 
-/// Synchronization modes for writes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SyncMode {
-    /// No explicit sync (rely on OS)
     None,
-    /// Sync after every write
     Immediate,
-    /// Sync periodically (not implemented in MVP)
     Periodic,
 }
 
 impl FileTopicLog {
-    /// Create a new FileTopicLog for the given topic with configurable data directory
     pub fn new<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -69,12 +58,10 @@ impl FileTopicLog {
         Ok(log)
     }
 
-    /// Create a new FileTopicLog for the given topic using default data directory (./data)
     pub fn new_default(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
         Self::new(topic, sync_mode, "./data")
     }
 
-    /// Recover records from existing file and rebuild state
     fn recover_from_file(&mut self) -> Result<(), std::io::Error> {
         // Check if file exists - if not, start with empty state
         if !self.file_path.exists() {
@@ -150,7 +137,6 @@ impl FileTopicLog {
         Ok(())
     }
 
-    /// Truncate file at given position to handle partial writes
     fn truncate_at_position(&mut self, position: u64) -> Result<(), std::io::Error> {
         use std::fs::OpenOptions;
 
@@ -310,8 +296,126 @@ impl TopicLog for FileTopicLog {
 }
 
 impl FileTopicLog {
-    /// Manually sync the file to disk (for testing)
     pub fn sync(&mut self) -> Result<(), std::io::Error> {
         self.file.sync_all()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ConsumerGroupData {
+    group_id: String,
+    topic_offsets: HashMap<String, u64>,
+}
+
+pub struct FileConsumerGroup {
+    group_id: String,
+    topic_offsets: HashMap<String, u64>,
+    file_path: PathBuf,
+    sync_mode: SyncMode,
+}
+
+impl FileConsumerGroup {
+    pub fn new<P: AsRef<Path>>(
+        group_id: &str,
+        sync_mode: SyncMode,
+        data_dir: P,
+    ) -> Result<Self, std::io::Error> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let consumer_groups_dir = data_dir.join("consumer_groups");
+
+        // Create consumer_groups directory if it doesn't exist
+        if !consumer_groups_dir.exists() {
+            std::fs::create_dir_all(&consumer_groups_dir)?;
+        }
+
+        let file_path = consumer_groups_dir.join(format!("{group_id}.json"));
+        let mut topic_offsets = HashMap::new();
+
+        // Load existing state if file exists
+        if file_path.exists() {
+            let mut file = File::open(&file_path)?;
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)?;
+
+            if !contents.trim().is_empty() {
+                match serde_json::from_str::<ConsumerGroupData>(&contents) {
+                    Ok(data) => {
+                        topic_offsets = data.topic_offsets;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to parse consumer group file {}: {}",
+                            file_path.display(),
+                            e
+                        );
+                        // Continue with empty offsets rather than failing
+                    }
+                }
+            }
+        }
+
+        let consumer_group = FileConsumerGroup {
+            group_id: group_id.to_string(),
+            topic_offsets,
+            file_path,
+            sync_mode,
+        };
+
+        // Persist to disk immediately to ensure the consumer group file exists
+        consumer_group.persist_to_disk()?;
+
+        Ok(consumer_group)
+    }
+
+    pub fn new_default(group_id: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
+        Self::new(group_id, sync_mode, "./data")
+    }
+
+    fn persist_to_disk(&self) -> Result<(), std::io::Error> {
+        let data = ConsumerGroupData {
+            group_id: self.group_id.clone(),
+            topic_offsets: self.topic_offsets.clone(),
+        };
+
+        let json = serde_json::to_string_pretty(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&self.file_path)?;
+
+        file.write_all(json.as_bytes())?;
+
+        // Sync based on mode
+        if self.sync_mode == SyncMode::Immediate {
+            file.sync_all()?;
+        }
+
+        Ok(())
+    }
+}
+
+impl ConsumerGroup for FileConsumerGroup {
+    fn get_offset(&self, topic: &str) -> u64 {
+        self.topic_offsets.get(topic).copied().unwrap_or(0)
+    }
+
+    fn set_offset(&mut self, topic: String, offset: u64) {
+        self.topic_offsets.insert(topic, offset);
+
+        // Persist to disk immediately on every change
+        if let Err(e) = self.persist_to_disk() {
+            eprintln!("Warning: Failed to persist consumer group state: {}", e);
+        }
+    }
+
+    fn group_id(&self) -> &str {
+        &self.group_id
+    }
+
+    fn get_all_offsets(&self) -> HashMap<String, u64> {
+        self.topic_offsets.clone()
     }
 }
