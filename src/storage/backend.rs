@@ -3,12 +3,14 @@ use crate::storage::{InMemoryTopicLog, TopicLog};
 /// Storage backend configuration
 ///
 /// Specifies which storage implementation to use for topic logs.
-/// Currently only supports in-memory storage, with future extensibility
-/// for file-based and database storage backends.
+/// Currently supports in-memory storage and file-based storage with
+/// future extensibility for database storage backends.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageBackend {
     /// In-memory storage - records persist only during process lifetime
     Memory,
+    /// File-based storage with configurable sync mode - records persist to disk
+    File(crate::storage::file::SyncMode),
 }
 
 impl StorageBackend {
@@ -19,28 +21,38 @@ impl StorageBackend {
     /// is determined by the StorageBackend variant:
     ///
     /// - `Memory`: Creates an InMemoryTopicLog that stores records in a Vec
+    /// - `File(sync_mode)`: Creates a FileTopicLog with specified sync mode
+    ///
+    /// # Arguments
+    ///
+    /// * `topic` - The topic name for file-based storage (ignored for memory)
     ///
     /// # Returns
     ///
     /// A boxed TopicLog trait object ready for use. The returned instance
-    /// starts empty with offset 0 and can immediately accept record operations.
+    /// starts empty with offset 0 (or recovers existing records for file storage)
+    /// and can immediately accept record operations.
     ///
     /// # Example
     ///
     /// ```
-    /// use flashq::storage::{StorageBackend, TopicLog};
+    /// use flashq::storage::{StorageBackend, TopicLog, file::SyncMode};
     /// use flashq::Record;
     ///
     /// let backend = StorageBackend::Memory;
-    /// let mut storage = backend.create();
+    /// let mut storage = backend.create("test_topic").unwrap();
     ///
     /// let record = Record::new(None, "test".to_string(), None);
     /// let offset = storage.append(record);
     /// assert_eq!(offset, 0);
     /// ```
-    pub fn create(&self) -> Box<dyn TopicLog> {
+    pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog>, Box<dyn std::error::Error>> {
         match self {
-            StorageBackend::Memory => Box::new(InMemoryTopicLog::new()),
+            StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
+            StorageBackend::File(sync_mode) => {
+                let file_log = crate::storage::file::FileTopicLog::new(topic, *sync_mode)?;
+                Ok(Box::new(file_log))
+            }
         }
     }
 }
@@ -52,12 +64,48 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn test_storage_backend_memory_creation() {
+    fn test_storage_backend_memory() {
         let backend = StorageBackend::Memory;
-        let storage = backend.create();
+        let mut storage = backend.create("test_topic").unwrap();
+
         assert_eq!(storage.len(), 0);
         assert!(storage.is_empty());
         assert_eq!(storage.next_offset(), 0);
+
+        let record = Record::new(None, "test".to_string(), None);
+        let offset = storage.append(record);
+        assert_eq!(offset, 0);
+        assert_eq!(storage.len(), 1);
+        assert_eq!(storage.next_offset(), 1);
+    }
+
+    #[test]
+    fn test_storage_backend_file() {
+        use crate::storage::file::SyncMode;
+        use std::env;
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("flashq_backend_test_{}", std::process::id()));
+        let original_dir = env::current_dir().unwrap();
+
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        env::set_current_dir(&temp_dir).unwrap();
+
+        let backend = StorageBackend::File(SyncMode::Immediate);
+        let mut storage = backend.create("test_topic").unwrap();
+
+        assert_eq!(storage.len(), 0);
+        assert!(storage.is_empty());
+        assert_eq!(storage.next_offset(), 0);
+
+        let record = Record::new(None, "test".to_string(), None);
+        let offset = storage.append(record);
+        assert_eq!(offset, 0);
+        assert_eq!(storage.len(), 1);
+        assert_eq!(storage.next_offset(), 1);
+
+        env::set_current_dir(original_dir).unwrap();
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 
     #[test]
@@ -65,6 +113,13 @@ mod tests {
         let backend1 = StorageBackend::Memory;
         let backend2 = StorageBackend::Memory;
         assert_eq!(backend1, backend2);
+
+        use crate::storage::file::SyncMode;
+        let backend3 = StorageBackend::File(SyncMode::Immediate);
+        let backend4 = StorageBackend::File(SyncMode::Immediate);
+        assert_eq!(backend3, backend4);
+
+        assert_ne!(backend1, backend3);
     }
 
     #[test]
