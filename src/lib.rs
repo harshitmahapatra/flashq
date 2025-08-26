@@ -193,11 +193,7 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
-            Some(topic_log) => Ok(topic_log
-                .get_records_from_offset(offset, count)
-                .into_iter()
-                .cloned()
-                .collect()),
+            Some(topic_log) => Ok(topic_log.get_records_from_offset(offset, count)),
             None => Err(FlashQError::TopicNotFound {
                 topic: topic.to_string(),
             }),

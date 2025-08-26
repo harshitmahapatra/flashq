@@ -10,7 +10,7 @@ pub trait TopicLog: Send + Sync {
     fn append(&mut self, record: Record) -> u64;
 
     /// Get records starting from the given offset, optionally limited by count
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<&RecordWithOffset>;
+    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset>;
 
     /// Get the total number of records in the log
     fn len(&self) -> usize;
