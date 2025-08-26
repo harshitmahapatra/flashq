@@ -59,8 +59,12 @@ impl StorageBackend {
                 let file_log = crate::storage::file::FileTopicLog::new_default(topic, *sync_mode)?;
                 Ok(Box::new(file_log))
             }
-            StorageBackend::FileWithPath { sync_mode, data_dir } => {
-                let file_log = crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
+            StorageBackend::FileWithPath {
+                sync_mode,
+                data_dir,
+            } => {
+                let file_log =
+                    crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
                 Ok(Box::new(file_log))
             }
         }

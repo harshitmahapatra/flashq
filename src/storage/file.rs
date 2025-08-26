@@ -35,15 +35,19 @@ pub enum SyncMode {
 
 impl FileTopicLog {
     /// Create a new FileTopicLog for the given topic with configurable data directory
-    pub fn new<P: AsRef<Path>>(topic: &str, sync_mode: SyncMode, data_dir: P) -> Result<Self, std::io::Error> {
+    pub fn new<P: AsRef<Path>>(
+        topic: &str,
+        sync_mode: SyncMode,
+        data_dir: P,
+    ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
-        
+
         // Create data directory if it doesn't exist
         if !data_dir.exists() {
             std::fs::create_dir_all(&data_dir)?;
         }
 
-        let file_path = data_dir.join(format!("{}.log", topic));
+        let file_path = data_dir.join(format!("{topic}.log"));
 
         // Open file in append mode, create if it doesn't exist
         let file = OpenOptions::new()
@@ -175,7 +179,7 @@ impl TopicLog for FileTopicLog {
         let json_payload = match serde_json::to_vec(&record) {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("Failed to serialize record: {}", e);
+                eprintln!("Failed to serialize record: {e}");
                 return offset; // Return current offset without incrementing on error
             }
         };
@@ -195,14 +199,14 @@ impl TopicLog for FileTopicLog {
 
         // Write to file
         if let Err(e) = self.file.write_all(&write_buffer) {
-            eprintln!("Failed to write record to file: {}", e);
+            eprintln!("Failed to write record to file: {e}");
             return offset; // Return current offset without incrementing on error
         }
 
         // Sync based on configuration
         if matches!(self.sync_mode, SyncMode::Immediate) {
             if let Err(e) = self.file.sync_all() {
-                eprintln!("Failed to sync file: {}", e);
+                eprintln!("Failed to sync file: {e}");
                 // Continue anyway - data is written, just not synced
             }
         }
@@ -224,7 +228,7 @@ impl TopicLog for FileTopicLog {
         let read_file = match File::open(&self.file_path) {
             Ok(file) => file,
             Err(e) => {
-                eprintln!("Failed to open file for reading: {}", e);
+                eprintln!("Failed to open file for reading: {e}");
                 return records;
             }
         };
@@ -232,7 +236,7 @@ impl TopicLog for FileTopicLog {
         let mut buffer = Vec::new();
         let mut read_file = read_file;
         if let Err(e) = read_file.read_to_end(&mut buffer) {
-            eprintln!("Failed to read file: {}", e);
+            eprintln!("Failed to read file: {e}");
             return records;
         }
 
@@ -282,7 +286,7 @@ impl TopicLog for FileTopicLog {
                         found_count += 1;
                     }
                     Err(e) => {
-                        eprintln!("Failed to parse record at offset {}: {}", record_offset, e);
+                        eprintln!("Failed to parse record at offset {record_offset}: {e}");
                         break; // Stop on corruption
                     }
                 }

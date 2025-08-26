@@ -32,9 +32,9 @@
 //! ```
 
 pub mod backend;
+pub mod file;
 pub mod memory;
 pub mod r#trait;
-pub mod file;
 
 pub use backend::StorageBackend;
 pub use memory::InMemoryTopicLog;

@@ -164,25 +164,21 @@ impl FlashQ {
 
     pub fn post_record(&self, topic: String, record: Record) -> Result<u64, String> {
         let mut topic_log_map = self.topics.lock().unwrap();
-        let topic_log = topic_log_map
-            .entry(topic.clone())
-            .or_insert_with(|| {
-                self.storage_backend
-                    .create(&topic)
-                    .expect("Failed to create storage backend")
-            });
+        let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
+            self.storage_backend
+                .create(&topic)
+                .expect("Failed to create storage backend")
+        });
         Ok(topic_log.append(record))
     }
 
     pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, String> {
         let mut topic_log_map = self.topics.lock().unwrap();
-        let topic_log = topic_log_map
-            .entry(topic.clone())
-            .or_insert_with(|| {
-                self.storage_backend
-                    .create(&topic)
-                    .expect("Failed to create storage backend")
-            });
+        let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
+            self.storage_backend
+                .create(&topic)
+                .expect("Failed to create storage backend")
+        });
 
         let mut offsets = Vec::new();
         for record in records {
