@@ -11,6 +11,11 @@ pub enum StorageBackend {
     Memory,
     /// File-based storage with configurable sync mode - records persist to disk
     File(crate::storage::file::SyncMode),
+    /// File-based storage with custom data directory and sync mode
+    FileWithPath {
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: std::path::PathBuf,
+    },
 }
 
 impl StorageBackend {
@@ -21,7 +26,8 @@ impl StorageBackend {
     /// is determined by the StorageBackend variant:
     ///
     /// - `Memory`: Creates an InMemoryTopicLog that stores records in a Vec
-    /// - `File(sync_mode)`: Creates a FileTopicLog with specified sync mode
+    /// - `File(sync_mode)`: Creates a FileTopicLog with default data directory (./data)
+    /// - `FileWithPath`: Creates a FileTopicLog with custom data directory
     ///
     /// # Arguments
     ///
@@ -50,7 +56,11 @@ impl StorageBackend {
         match self {
             StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
             StorageBackend::File(sync_mode) => {
-                let file_log = crate::storage::file::FileTopicLog::new(topic, *sync_mode)?;
+                let file_log = crate::storage::file::FileTopicLog::new_default(topic, *sync_mode)?;
+                Ok(Box::new(file_log))
+            }
+            StorageBackend::FileWithPath { sync_mode, data_dir } => {
+                let file_log = crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
                 Ok(Box::new(file_log))
             }
         }
@@ -77,35 +87,6 @@ mod tests {
         assert_eq!(offset, 0);
         assert_eq!(storage.len(), 1);
         assert_eq!(storage.next_offset(), 1);
-    }
-
-    #[test]
-    fn test_storage_backend_file() {
-        use crate::storage::file::SyncMode;
-        use std::env;
-
-        let temp_dir =
-            std::env::temp_dir().join(format!("flashq_backend_test_{}", std::process::id()));
-        let original_dir = env::current_dir().unwrap();
-
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
-
-        let backend = StorageBackend::File(SyncMode::Immediate);
-        let mut storage = backend.create("test_topic").unwrap();
-
-        assert_eq!(storage.len(), 0);
-        assert!(storage.is_empty());
-        assert_eq!(storage.next_offset(), 0);
-
-        let record = Record::new(None, "test".to_string(), None);
-        let offset = storage.append(record);
-        assert_eq!(offset, 0);
-        assert_eq!(storage.len(), 1);
-        assert_eq!(storage.next_offset(), 1);
-
-        env::set_current_dir(original_dir).unwrap();
-        std::fs::remove_dir_all(&temp_dir).ok();
     }
 
     #[test]

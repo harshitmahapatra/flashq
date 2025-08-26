@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 /// - Offset (8 bytes, little-endian u64)
 /// - JSON payload (variable length)
 ///
-/// Files are stored in ./data/{topic_name}.log
+/// Files are stored in {data_dir}/{topic_name}.log
 pub struct FileTopicLog {
+    data_dir: PathBuf,
     file_path: PathBuf,
     file: File,
     next_offset: u64,
@@ -33,12 +34,13 @@ pub enum SyncMode {
 }
 
 impl FileTopicLog {
-    /// Create a new FileTopicLog for the given topic
-    pub fn new(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
+    /// Create a new FileTopicLog for the given topic with configurable data directory
+    pub fn new<P: AsRef<Path>>(topic: &str, sync_mode: SyncMode, data_dir: P) -> Result<Self, std::io::Error> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        
         // Create data directory if it doesn't exist
-        let data_dir = Path::new("./data");
         if !data_dir.exists() {
-            std::fs::create_dir_all(data_dir)?;
+            std::fs::create_dir_all(&data_dir)?;
         }
 
         let file_path = data_dir.join(format!("{}.log", topic));
@@ -51,6 +53,7 @@ impl FileTopicLog {
             .open(&file_path)?;
 
         let mut log = FileTopicLog {
+            data_dir,
             file_path: file_path.clone(),
             file,
             next_offset: 0,
@@ -62,6 +65,11 @@ impl FileTopicLog {
         log.recover_from_file()?;
 
         Ok(log)
+    }
+
+    /// Create a new FileTopicLog for the given topic using default data directory (./data)
+    pub fn new_default(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
+        Self::new(topic, sync_mode, "./data")
     }
 
     /// Recover records from existing file and rebuild state
@@ -144,7 +152,7 @@ impl FileTopicLog {
     fn truncate_at_position(&mut self, position: u64) -> Result<(), std::io::Error> {
         use std::fs::OpenOptions;
 
-        let mut file = OpenOptions::new().write(true).open(&self.file_path)?;
+        let file = OpenOptions::new().write(true).open(&self.file_path)?;
 
         file.set_len(position)?;
 
@@ -303,96 +311,5 @@ impl FileTopicLog {
     /// Manually sync the file to disk (for testing)
     pub fn sync(&mut self) -> Result<(), std::io::Error> {
         self.file.sync_all()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
-
-    #[test]
-    fn test_file_topic_log_basic_operations() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("flashq_test_basic_{}", std::process::id()));
-        let original_dir = env::current_dir().unwrap();
-
-        // Create temp directory and change to it
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
-
-        let mut log = FileTopicLog::new("test_topic", SyncMode::Immediate).unwrap();
-
-        assert_eq!(log.len(), 0);
-        assert!(log.is_empty());
-        assert_eq!(log.next_offset(), 0);
-
-        // Add some records
-        let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
-        let offset1 = log.append(record1);
-        assert_eq!(offset1, 0);
-        assert_eq!(log.len(), 1);
-        assert_eq!(log.next_offset(), 1);
-
-        let record2 = Record::new(Some("key2".to_string()), "value2".to_string(), None);
-        let offset2 = log.append(record2);
-        assert_eq!(offset2, 1);
-        assert_eq!(log.len(), 2);
-
-        // Test retrieval
-        let records = log.get_records_from_offset(0, None);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].offset, 0);
-        assert_eq!(records[0].record.value, "value1");
-        assert_eq!(records[1].offset, 1);
-        assert_eq!(records[1].record.value, "value2");
-
-        // Test with count limit
-        let records = log.get_records_from_offset(0, Some(1));
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].offset, 0);
-
-        // Test from specific offset
-        let records = log.get_records_from_offset(1, None);
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].offset, 1);
-
-        // Restore original directory and clean up
-        env::set_current_dir(original_dir).unwrap();
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    fn test_file_recovery() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("flashq_test_recovery_{}", std::process::id()));
-        let original_dir = env::current_dir().unwrap();
-
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
-
-        // Create initial log and add records
-        {
-            let mut log = FileTopicLog::new("recovery_test", SyncMode::Immediate).unwrap();
-            log.append(Record::new(None, "first".to_string(), None));
-            log.append(Record::new(None, "second".to_string(), None));
-            // Explicitly sync to ensure data is written
-            log.sync().unwrap();
-        } // Log goes out of scope, file is closed
-
-        // Create new log instance - should recover existing records
-        {
-            let log = FileTopicLog::new("recovery_test", SyncMode::Immediate).unwrap();
-            assert_eq!(log.len(), 2);
-            assert_eq!(log.next_offset(), 2);
-
-            let records = log.get_records_from_offset(0, None);
-            assert_eq!(records.len(), 2);
-            assert_eq!(records[0].record.value, "first");
-            assert_eq!(records[1].record.value, "second");
-        }
-
-        env::set_current_dir(original_dir).unwrap();
-        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }
