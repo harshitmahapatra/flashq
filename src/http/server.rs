@@ -725,12 +725,33 @@ mod tests {
 
     #[test]
     fn test_error_to_status_code() {
-        assert_eq!(error_to_status_code("invalid_parameter"), StatusCode::BAD_REQUEST);
-        assert_eq!(error_to_status_code("validation_error"), StatusCode::BAD_REQUEST);
-        assert_eq!(error_to_status_code("topic_not_found"), StatusCode::NOT_FOUND);
-        assert_eq!(error_to_status_code("group_not_found"), StatusCode::NOT_FOUND);
-        assert_eq!(error_to_status_code("record_validation_error"), StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(error_to_status_code("internal_error"), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(error_to_status_code("unknown_error"), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            error_to_status_code("invalid_parameter"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            error_to_status_code("validation_error"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            error_to_status_code("topic_not_found"),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            error_to_status_code("group_not_found"),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            error_to_status_code("record_validation_error"),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            error_to_status_code("internal_error"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            error_to_status_code("unknown_error"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

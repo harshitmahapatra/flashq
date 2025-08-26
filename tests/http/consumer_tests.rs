@@ -1,5 +1,5 @@
-use flashq::http::*;
 use super::http_test_helpers::{TestClient, TestServer};
+use flashq::http::*;
 
 #[tokio::test]
 async fn test_consumer_group_operations() {

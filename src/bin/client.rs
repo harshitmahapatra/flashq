@@ -1,5 +1,5 @@
 //! FlashQ HTTP Client Binary
-//! 
+//!
 //! Lightweight binary that provides CLI interface to the FlashQ HTTP server.
 //! All core client and CLI logic is implemented in src/http/ modules.
 

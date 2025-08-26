@@ -1,8 +1,8 @@
 // Tests for expanded client functionality
 // These tests verify that the client binary supports all operations needed by integration tests
 
-use std::process::Command;
 use super::http_test_helpers::{TestServer, ensure_client_binary};
+use std::process::Command;
 
 #[tokio::test]
 async fn test_client_consumer_group_operations() {

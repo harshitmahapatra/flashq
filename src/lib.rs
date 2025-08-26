@@ -358,8 +358,6 @@ impl FlashQ {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

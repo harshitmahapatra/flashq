@@ -1,5 +1,5 @@
-use serde_json::Value;
 use super::http_test_helpers::{TestClient, TestServer};
+use serde_json::Value;
 
 fn load_openapi_spec() -> Value {
     let content = std::fs::read_to_string("docs/openapi.yaml").unwrap();
@@ -26,8 +26,8 @@ fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), Str
     if let Some(required) = resolved_schema.get("required").and_then(|v| v.as_array()) {
         for field in required {
             let field_name = field.as_str().unwrap();
-            if !data.get(field_name).is_some() {
-                return Err(format!("Missing required field: {}", field_name));
+            if data.get(field_name).is_none() {
+                return Err(format!("Missing required field: {field_name}"));
             }
         }
     }
@@ -42,17 +42,17 @@ fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), Str
                     match field_type {
                         "string" => {
                             if !field_value.is_string() {
-                                return Err(format!("Field {} should be string", field_name));
+                                return Err(format!("Field {field_name} should be string"));
                             }
                         }
                         "integer" => {
                             if !field_value.is_number() {
-                                return Err(format!("Field {} should be number", field_name));
+                                return Err(format!("Field {field_name} should be number"));
                             }
                         }
                         "array" => {
                             if !field_value.is_array() {
-                                return Err(format!("Field {} should be array", field_name));
+                                return Err(format!("Field {field_name} should be array"));
                             }
                         }
                         _ => {}
@@ -73,7 +73,7 @@ async fn test_health_endpoint_compliance() {
 
     let response = helper
         .client
-        .get(&format!("{}/health", helper.base_url))
+        .get(format!("{}/health", helper.base_url))
         .send()
         .await
         .unwrap();
