@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use flashq::api::*;
+use flashq::http::*;
 use test_helpers::{TestClient, TestServer};
 
 #[tokio::test]

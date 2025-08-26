@@ -1,3 +1,5 @@
+//! HTTP API request and response types
+
 use crate::{Record, RecordWithOffset};
 use serde::{Deserialize, Serialize};
 

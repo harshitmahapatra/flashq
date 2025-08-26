@@ -4,6 +4,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 pub mod demo;
+#[cfg(feature = "http")]
+pub mod http;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FlashQError {
@@ -356,7 +358,7 @@ impl FlashQ {
     }
 }
 
-pub mod api;
+
 
 #[cfg(test)]
 mod tests {
