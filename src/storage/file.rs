@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 ///
 /// Files are stored in {data_dir}/{topic_name}.log
 pub struct FileTopicLog {
-    data_dir: PathBuf,
     file_path: PathBuf,
     file: File,
     next_offset: u64,
@@ -57,7 +56,6 @@ impl FileTopicLog {
             .open(&file_path)?;
 
         let mut log = FileTopicLog {
-            data_dir,
             file_path: file_path.clone(),
             file,
             next_offset: 0,
