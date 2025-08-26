@@ -10,11 +10,11 @@
 //! use flashq::Record;
 //!
 //! let mut log = InMemoryTopicLog::new();
-//! 
+//!
 //! // Append records and get their offsets
 //! let record1 = Record::new(None, "first message".to_string(), None);
 //! let record2 = Record::new(Some("key123".to_string()), "second message".to_string(), None);
-//! 
+//!
 //! let offset1 = log.append(record1);
 //! let offset2 = log.append(record2);
 //! assert_eq!(offset1, 0);

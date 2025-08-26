@@ -37,7 +37,8 @@ impl TopicLog for InMemoryTopicLog {
     }
 
     fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
-        let start_index = offset.try_into()
+        let start_index = offset
+            .try_into()
             .expect("offset value too large to convert to array index");
         if start_index >= self.records.len() {
             return Vec::new();
