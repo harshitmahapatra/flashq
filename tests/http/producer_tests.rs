@@ -1,8 +1,6 @@
-mod test_helpers;
-
 use flashq::Record;
 use flashq::http::*;
-use test_helpers::{TestClient, TestServer};
+use super::http_test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_post_record_integration() {

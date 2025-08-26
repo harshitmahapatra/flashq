@@ -2,6 +2,7 @@
 
 use crate::{Record, RecordWithOffset};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // =============================================================================
 // PRODUCER API TYPES
@@ -130,9 +131,7 @@ pub struct ErrorResponse {
 
 // =============================================================================
 // VALIDATION UTILITIES
-// =============================================================================
-
-use std::collections::HashMap;
+// ============================================================================="
 
 /// Utility function to parse header strings into HashMap
 pub fn parse_headers(header_strings: Option<Vec<String>>) -> Option<HashMap<String, String>> {
@@ -351,6 +350,10 @@ pub struct HealthCheckResponse {
     pub timestamp: u64,
 }
 
+// =============================================================================
+// ERROR RESPONSE IMPLEMENTATION
+// =============================================================================
+
 impl ErrorResponse {
     pub fn new(error: &str, message: &str) -> Self {
         Self {
@@ -427,5 +430,151 @@ impl ErrorResponse {
             "Consumer group ID must contain only alphanumeric characters, dots, underscores, and hyphens",
             serde_json::json!({ "parameter": "group_id", "value": group_id }),
         )
+    }
+}
+
+// =============================================================================
+// UNIT TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_parse_headers_valid() {
+        let header_strings = Some(vec![
+            "Content-Type=application/json".to_string(),
+            "Authorization=Bearer token123".to_string(),
+        ]);
+
+        let result = parse_headers(header_strings);
+        assert!(result.is_some());
+
+        let headers = result.unwrap();
+        assert_eq!(
+            headers.get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer token123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_headers_invalid_format() {
+        let header_strings = Some(vec![
+            "Content-Type=application/json".to_string(),
+            "InvalidHeader".to_string(),
+        ]);
+
+        let result = parse_headers(header_strings);
+        assert!(result.is_some());
+
+        let headers = result.unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers.get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_headers_none() {
+        let result = parse_headers(None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_topic_name_valid() {
+        assert!(validate_topic_name("valid_topic").is_ok());
+        assert!(validate_topic_name("topic.with.dots").is_ok());
+        assert!(validate_topic_name("topic-with-dashes").is_ok());
+        assert!(validate_topic_name("_underscore_start").is_ok());
+        assert!(validate_topic_name(".dot_start").is_ok());
+        assert!(validate_topic_name("topic123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_topic_name_invalid() {
+        assert!(validate_topic_name("").is_err());
+        assert!(validate_topic_name("-invalid_start").is_err());
+        assert!(validate_topic_name("topic with spaces").is_err());
+        assert!(validate_topic_name("topic@invalid").is_err());
+        assert!(validate_topic_name(&"a".repeat(256)).is_err());
+    }
+
+    #[test]
+    fn test_validate_consumer_group_id_valid() {
+        assert!(validate_consumer_group_id("valid_group").is_ok());
+        assert!(validate_consumer_group_id("group.with.dots").is_ok());
+        assert!(validate_consumer_group_id("group-with-dashes").is_ok());
+    }
+
+    #[test]
+    fn test_validate_consumer_group_id_invalid() {
+        assert!(validate_consumer_group_id("").is_err());
+        assert!(validate_consumer_group_id("-invalid_start").is_err());
+        assert!(validate_consumer_group_id("group with spaces").is_err());
+    }
+
+    #[test]
+    fn test_validate_record_valid() {
+        let record = Record::new(
+            Some("key".to_string()),
+            "value".to_string(),
+            Some(HashMap::from([("header".to_string(), "value".to_string())])),
+        );
+        assert!(validate_record(&record, 0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_record_key_too_long() {
+        let long_key = "a".repeat(limits::MAX_KEY_SIZE + 1);
+        let record = Record::new(Some(long_key), "value".to_string(), None);
+        assert!(validate_record(&record, 0).is_err());
+    }
+
+    #[test]
+    fn test_validate_record_value_too_long() {
+        let long_value = "a".repeat(limits::MAX_VALUE_SIZE + 1);
+        let record = Record::new(None, long_value, None);
+        assert!(validate_record(&record, 0).is_err());
+    }
+
+    #[test]
+    fn test_validate_produce_request_valid() {
+        let request = ProduceRequest {
+            records: vec![Record::new(None, "test".to_string(), None)],
+        };
+        assert!(validate_produce_request(&request).is_ok());
+    }
+
+    #[test]
+    fn test_validate_produce_request_empty() {
+        let request = ProduceRequest { records: vec![] };
+        assert!(validate_produce_request(&request).is_err());
+    }
+
+    #[test]
+    fn test_validate_poll_query_valid() {
+        let query = PollQuery {
+            max_records: Some(100),
+            from_offset: None,
+            include_headers: None,
+        };
+        assert!(validate_poll_query(&query).is_ok());
+    }
+
+    #[test]
+    fn test_validate_poll_query_invalid_max_records() {
+        let query = PollQuery {
+            max_records: Some(limits::MAX_POLL_RECORDS + 1),
+            from_offset: None,
+            include_headers: None,
+        };
+        assert!(validate_poll_query(&query).is_err());
     }
 }

@@ -1,7 +1,7 @@
 //! CLI interface implementation for FlashQ HTTP client
 
+use super::{client::*, common::parse_headers};
 use clap::{Parser, Subcommand};
-use super::{client::*, types::parse_headers};
 
 // =============================================================================
 // CLI CONFIGURATION STRUCTS
@@ -86,11 +86,7 @@ pub enum OffsetCommands {
 // COMMAND DISPATCHERS
 // =============================================================================
 
-pub async fn handle_cli_command(
-    client: &reqwest::Client,
-    server_url: &str,
-    command: Commands,
-) {
+pub async fn handle_cli_command(client: &reqwest::Client, server_url: &str, command: Commands) {
     match command {
         Commands::Health => {
             handle_health_command(client, server_url).await;
@@ -183,5 +179,38 @@ pub async fn handle_offset_command(
         OffsetCommands::Get { group_id, topic } => {
             get_offset_command(client, server_url, &group_id, &topic).await;
         }
+    }
+}
+
+// =============================================================================
+// UNIT TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_struct_creation() {
+        let cli = Cli {
+            port: 9090,
+            command: Commands::Health,
+        };
+        assert_eq!(cli.port, 9090);
+    }
+
+    #[test]
+    fn test_commands_enum_variants() {
+        let _health = Commands::Health;
+        let _producer = Commands::Producer(ProducerCommands::Records {
+            topic: "test".to_string(),
+            message: Some("value".to_string()),
+            key: None,
+            header: None,
+            batch: None,
+        });
+        let _consumer = Commands::Consumer(ConsumerCommands::Create {
+            group_id: "group".to_string(),
+        });
     }
 }

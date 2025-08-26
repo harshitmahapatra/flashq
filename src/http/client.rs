@@ -1,11 +1,11 @@
 //! HTTP client implementation and CLI command handlers for FlashQ
 
+use super::common::*;
 use crate::{Record, RecordWithOffset};
-use super::types::*;
 use std::collections::HashMap;
 
 // =============================================================================
-// CLI COMMAND HANDLERS
+// HEALTH CHECK COMMANDS
 // =============================================================================
 
 pub async fn handle_health_command(client: &reqwest::Client, server_url: &str) {
@@ -28,6 +28,10 @@ pub async fn handle_health_command(client: &reqwest::Client, server_url: &str) {
         Err(e) => println!("Failed to connect to server: {e}"),
     }
 }
+
+// =============================================================================
+// PRODUCER COMMANDS
+// =============================================================================
 
 pub async fn handle_batch_post(
     client: &reqwest::Client,
@@ -126,7 +130,15 @@ pub async fn post_records(
     }
 }
 
-pub async fn create_consumer_group_command(client: &reqwest::Client, server_url: &str, group_id: &str) {
+// =============================================================================
+// CONSUMER GROUP COMMANDS
+// =============================================================================
+
+pub async fn create_consumer_group_command(
+    client: &reqwest::Client,
+    server_url: &str,
+    group_id: &str,
+) {
     let url = format!("{server_url}/consumer/{group_id}");
     match client.post(&url).send().await {
         Ok(response) => {
@@ -141,7 +153,11 @@ pub async fn create_consumer_group_command(client: &reqwest::Client, server_url:
     }
 }
 
-pub async fn leave_consumer_group_command(client: &reqwest::Client, server_url: &str, group_id: &str) {
+pub async fn leave_consumer_group_command(
+    client: &reqwest::Client,
+    server_url: &str,
+    group_id: &str,
+) {
     let url = format!("{server_url}/consumer/{group_id}");
     match client.delete(&url).send().await {
         Ok(response) => {
@@ -315,4 +331,47 @@ pub fn print_record(record: &RecordWithOffset) {
     }
 
     println!();
+}
+
+// =============================================================================
+// UNIT TESTS
+// =============================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Record;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_print_record_basic() {
+        let record = RecordWithOffset {
+            record: Record::new(None, "test message".to_string(), None),
+            offset: 42,
+            timestamp: "2023-01-01T00:00:00Z".to_string(),
+        };
+
+        // This test just ensures the function doesn't panic
+        print_record(&record);
+    }
+
+    #[test]
+    fn test_print_record_with_key_and_headers() {
+        let headers = HashMap::from([
+            ("user".to_string(), "alice".to_string()),
+            ("type".to_string(), "notification".to_string()),
+        ]);
+
+        let record = RecordWithOffset {
+            record: Record::new(
+                Some("user123".to_string()),
+                "Hello world".to_string(),
+                Some(headers),
+            ),
+            offset: 0,
+            timestamp: "2023-01-01T12:00:00Z".to_string(),
+        };
+
+        // This test just ensures the function doesn't panic with all fields present
+        print_record(&record);
+    }
 }

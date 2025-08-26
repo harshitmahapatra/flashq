@@ -1,7 +1,5 @@
-mod test_helpers;
-
 use serde_json::Value;
-use test_helpers::{TestClient, TestServer};
+use super::http_test_helpers::{TestClient, TestServer};
 
 fn load_openapi_spec() -> Value {
     let content = std::fs::read_to_string("docs/openapi.yaml").unwrap();

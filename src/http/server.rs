@@ -1,5 +1,7 @@
 //! HTTP server implementation for FlashQ
 
+use super::common::*;
+use crate::{FlashQ, FlashQError, Record};
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -8,8 +10,6 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::Utc;
-use crate::{FlashQ, FlashQError, Record};
-use super::types::*;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -699,4 +699,38 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Server failed to start: {e}"))?;
 
     Ok(())
+}
+
+// =============================================================================
+// UNIT TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_level_as_str() {
+        assert_eq!(LogLevel::Error.as_str(), "ERROR");
+        assert_eq!(LogLevel::Info.as_str(), "INFO");
+        assert_eq!(LogLevel::Trace.as_str(), "TRACE");
+    }
+
+    #[test]
+    fn test_log_level_ordering() {
+        assert!(LogLevel::Error < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Trace);
+        assert!(LogLevel::Error < LogLevel::Trace);
+    }
+
+    #[test]
+    fn test_error_to_status_code() {
+        assert_eq!(error_to_status_code("invalid_parameter"), StatusCode::BAD_REQUEST);
+        assert_eq!(error_to_status_code("validation_error"), StatusCode::BAD_REQUEST);
+        assert_eq!(error_to_status_code("topic_not_found"), StatusCode::NOT_FOUND);
+        assert_eq!(error_to_status_code("group_not_found"), StatusCode::NOT_FOUND);
+        assert_eq!(error_to_status_code("record_validation_error"), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error_to_status_code("internal_error"), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error_to_status_code("unknown_error"), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
