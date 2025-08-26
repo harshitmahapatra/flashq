@@ -1,7 +1,5 @@
-mod test_helpers;
-
-use flashq::api::*;
-use test_helpers::{TestClient, TestServer};
+use super::http_test_helpers::{TestClient, TestServer};
+use flashq::http::*;
 
 #[tokio::test]
 async fn test_consumer_group_operations() {

@@ -62,13 +62,23 @@ cargo run --bin client -- health # CLI client
 ## Project Structure
 
 ```
-src/lib.rs          # Core FlashQ + Record types
-src/main.rs         # Entry point 
-src/demo.rs         # Interactive demo
-src/api.rs          # HTTP API structures
-src/bin/server.rs   # HTTP server + validation constants
-src/bin/client.rs   # CLI client
-tests/*.rs          # Integration tests
+src/lib.rs              # Core FlashQ + Record types
+src/main.rs             # Entry point 
+src/demo.rs             # Interactive demo
+src/storage/            # Storage abstraction layer
+├── mod.rs              # Public exports and documentation
+├── trait.rs            # TopicLog trait definition
+├── backend.rs          # StorageBackend factory
+└── memory.rs           # InMemoryTopicLog implementation
+src/http/               # HTTP components
+├── mod.rs              # HTTP types and validation
+├── server.rs           # HTTP server implementation
+├── client.rs           # HTTP client utilities
+├── cli.rs              # CLI command structures
+└── common.rs           # Shared validation logic
+src/bin/server.rs       # HTTP server binary
+src/bin/client.rs       # CLI client binary
+tests/http/             # HTTP integration tests
 ```
 
 ## Contribution Guidelines

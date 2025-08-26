@@ -1,5 +1,5 @@
 use flashq::Record;
-use flashq::api::*;
+use flashq::http::*;
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;

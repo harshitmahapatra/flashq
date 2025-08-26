@@ -1,6 +1,4 @@
-mod test_helpers;
-
-use test_helpers::{TestClient, TestServer};
+use super::http_test_helpers::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_health_check() {

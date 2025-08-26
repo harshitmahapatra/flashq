@@ -7,18 +7,18 @@ Internal architecture and design overview of FlashQ.
 ```mermaid
 graph TD
     A[CLI Client] -->|HTTP| B[HTTP Server]
-    C[Interactive Demo] --> D[FlashQ]
+    C[Interactive Demo] --> D[FlashQ Core]
     B --> D
-    D --> E[TopicLog 1]
-    D --> F[TopicLog 2]
-    D --> G[TopicLog N]
-    B --> H[Consumer Groups]
-    H --> I[Group Offsets]
     
-    subgraph "Storage Layer"
-        E --> J[Records 0,1,2...]
-        F --> K[Records 0,1,2...]
-        G --> L[Records 0,1,2...]
+    D --> E[Topics Map]
+    D --> F[Consumer Groups]
+    
+    E --> G[TopicLog]
+    G --> H[Records]
+    
+    subgraph "Storage Backends"
+        I[Memory]
+        J[Future: File/DB]
     end
 ```
 
@@ -26,13 +26,18 @@ graph TD
 
 **Core Components:**
 - `FlashQ`: Topic-based record storage with offset tracking
-- `Record/RecordWithOffset`: Record structures for requests/responses  
+- `Record/RecordWithOffset`: Record structures for requests/responses
+- `TopicLog` trait: Storage abstraction for different backend implementations
+- `StorageBackend`: Factory for creating storage instances 
+- `InMemoryTopicLog`: Default in-memory storage implementation
 - HTTP server: REST API with validation and consumer groups
 - CLI client: Structured command interface
 - Interactive demo: Educational exploration tool
 
 **Key Features:**
 - Thread-safe concurrent access (`Arc<Mutex<>>`)
+- Trait-based storage abstraction for pluggable backends
+- Owned data returns for improved performance and safety
 - OpenAPI-compliant validation and error handling
 - Comprehensive integration test coverage
 
@@ -46,16 +51,16 @@ sequenceDiagram
     participant T as TopicLog
     
     C->>S: POST /topics/news/records
-    S->>Q: append_records()
-    Q->>T: add records with offsets
-    T-->>Q: [offset_0, offset_1]
+    S->>Q: post_record()
+    Q->>T: append(record)
+    T-->>Q: offset
     Q-->>S: success response
-    S-->>C: {"offsets": [...]}
+    S-->>C: {"offset": N}
     
     C->>S: GET /topics/news/records
     S->>Q: poll_records()  
-    Q->>T: get records from offset
-    T-->>Q: [RecordWithOffset...]
+    Q->>T: get_records_from_offset()
+    T-->>Q: Vec<RecordWithOffset>
     Q-->>S: records array
     S-->>C: {"records": [...]}
 ```
@@ -68,32 +73,12 @@ sequenceDiagram
 
 ## Design Decisions
 
-```mermaid
-graph LR
-    A[Record] -->|append| B[TopicLog]
-    B --> C[Vec RecordWithOffset]
-    B --> D[next_offset]
-    
-    E[Consumer Group] --> F[HashMap topic→offset]
-    
-    subgraph "Thread Safety"
-        G[Arc Mutex FlashQ] 
-        H[Arc Mutex ConsumerGroups]
-    end
-    
-    subgraph "Storage"
-        B
-        I[Topic 1]
-        J[Topic 2]
-        K[Topic N]
-    end
-```
-
 **Architecture Choices:**
+- **Storage abstraction**: Trait-based pluggable backends 
+- **Owned data**: Returns `Vec<RecordWithOffset>` vs references
+- **Safe casting**: `try_into()` with bounds checking
 - **Append-only logs**: Immutable history, FIFO ordering
-- **Coarse-grained locking**: Single mutex for simplicity vs performance
 - **In-memory storage**: Fast access, no persistence
-- **OpenAPI validation**: Structured errors with semantic codes
 
 ## Performance Characteristics
 
