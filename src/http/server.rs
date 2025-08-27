@@ -1,7 +1,7 @@
 //! HTTP server implementation for FlashQ
 
 use super::common::*;
-use crate::{FlashQ, FlashQError, Record};
+use crate::{FlashQ, Record};
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -77,6 +77,8 @@ pub fn error_to_status_code(error_code: &str) -> StatusCode {
     match error_code {
         "invalid_parameter" | "validation_error" => StatusCode::BAD_REQUEST,
         "topic_not_found" | "group_not_found" => StatusCode::NOT_FOUND,
+        "conflict" => StatusCode::CONFLICT,
+        "invalid_offset" => StatusCode::BAD_REQUEST,
         "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
         "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -180,7 +182,7 @@ pub async fn produce_records(
                 LogLevel::Error,
                 &format!("POST /topics/{topic}/records failed: {error}"),
             );
-            let error_response = ErrorResponse::internal_error(&error.to_string());
+            let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -233,7 +235,7 @@ pub async fn create_consumer_group(
                 &format!("POST /consumer/{} failed: {}", params.group_id, error),
             );
 
-            let error_response = ErrorResponse::internal_error(&error.to_string());
+            let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -278,11 +280,7 @@ pub async fn leave_consumer_group(
                 &format!("DELETE /consumer/{} failed: {}", params.group_id, error),
             );
 
-            let error_response = if error.is_not_found() {
-                ErrorResponse::group_not_found(&params.group_id)
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -365,13 +363,7 @@ pub async fn get_consumer_group_offset(
                 ),
             );
 
-            let error_response = match &error {
-                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                FlashQError::ConsumerGroupNotFound { group_id } => {
-                    ErrorResponse::group_not_found(group_id)
-                }
-                _ => ErrorResponse::internal_error(&error.to_string()),
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -448,13 +440,7 @@ pub async fn commit_consumer_group_offset(
                 ),
             );
 
-            let error_response = match &error {
-                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                FlashQError::ConsumerGroupNotFound { group_id } => {
-                    ErrorResponse::group_not_found(group_id)
-                }
-                _ => ErrorResponse::internal_error(&error.to_string()),
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -543,13 +529,7 @@ pub async fn fetch_records_for_consumer_group(
                 params.group_id, params.topic, error
             ),
         );
-        match &error {
-            FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-            FlashQError::ConsumerGroupNotFound { group_id } => {
-                ErrorResponse::group_not_found(group_id)
-            }
-            _ => ErrorResponse::internal_error(&error.to_string()),
-        }
+        ErrorResponse::from(error)
     };
 
     match records_result {

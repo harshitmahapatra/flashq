@@ -1,6 +1,6 @@
 //! HTTP API request and response types
 
-use crate::{Record, RecordWithOffset};
+use crate::{Record, RecordWithOffset, FlashQError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -430,6 +430,30 @@ impl ErrorResponse {
             "Consumer group ID must contain only alphanumeric characters, dots, underscores, and hyphens",
             serde_json::json!({ "parameter": "group_id", "value": group_id }),
         )
+    }
+}
+
+impl From<FlashQError> for ErrorResponse {
+    fn from(err: FlashQError) -> Self {
+        match err {
+            FlashQError::TopicNotFound { topic } => Self::topic_not_found(&topic),
+            FlashQError::ConsumerGroupNotFound { group_id } => Self::group_not_found(&group_id),
+            FlashQError::ConsumerGroupAlreadyExists { group_id } => Self::with_details(
+                "conflict",
+                &format!("Consumer group '{}' already exists", group_id),
+                serde_json::json!({ "group_id": group_id }),
+            ),
+            FlashQError::InvalidOffset { offset, topic, max_offset } => Self::with_details(
+                "invalid_offset",
+                &format!("Invalid offset {} for topic '{}', max offset is {}", offset, topic, max_offset),
+                serde_json::json!({
+                    "offset": offset,
+                    "topic": topic,
+                    "max_offset": max_offset
+                }),
+            ),
+            FlashQError::Storage(storage_err) => Self::internal_error(&format!("Storage error: {}", storage_err)),
+        }
     }
 }
 

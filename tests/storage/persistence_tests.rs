@@ -25,7 +25,7 @@ fn test_file_topic_log_recovery() {
     assert_eq!(recovered_log.len(), 2);
     assert_eq!(recovered_log.next_offset(), 2);
 
-    let records = recovered_log.get_records_from_offset(0, None);
+    let records = recovered_log.get_records_from_offset(0, None).unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].record.value, "first");
     assert_eq!(records[1].record.value, "second");

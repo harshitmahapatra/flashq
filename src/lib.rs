@@ -1,125 +1,15 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::fmt;
 use std::sync::{Arc, Mutex};
 use storage::{ConsumerGroup, TopicLog};
 
 pub mod demo;
+pub mod error;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod storage;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum FlashQError {
-    TopicNotFound {
-        topic: String,
-    },
-    ConsumerGroupNotFound {
-        group_id: String,
-    },
-    ConsumerGroupAlreadyExists {
-        group_id: String,
-    },
-    InvalidOffset {
-        offset: u64,
-        topic: String,
-        max_offset: u64,
-    },
-    StorageError {
-        message: String,
-    },
-    SerializationError {
-        message: String,
-    },
-    IoError {
-        message: String,
-    },
-    DiskFull {
-        message: String,
-    },
-    PermissionDenied {
-        message: String,
-    },
-}
-
-impl fmt::Display for FlashQError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FlashQError::TopicNotFound { topic } => write!(f, "Topic {topic} does not exist"),
-            FlashQError::ConsumerGroupNotFound { group_id } => {
-                write!(f, "Consumer group {group_id} does not exist")
-            }
-            FlashQError::ConsumerGroupAlreadyExists { group_id } => {
-                write!(f, "Consumer group {group_id} already exists")
-            }
-            FlashQError::InvalidOffset {
-                offset,
-                topic,
-                max_offset,
-            } => write!(
-                f,
-                "Invalid offset {offset} for topic {topic} with max offset {max_offset}"
-            ),
-            FlashQError::StorageError { message } => write!(f, "Storage error: {message}"),
-            FlashQError::SerializationError { message } => write!(f, "Serialization error: {message}"),
-            FlashQError::IoError { message } => write!(f, "IO error: {message}"),
-            FlashQError::DiskFull { message } => write!(f, "Disk full: {message}"),
-            FlashQError::PermissionDenied { message } => write!(f, "Permission denied: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for FlashQError {}
-
-impl FlashQError {
-    pub fn is_not_found(&self) -> bool {
-        matches!(
-            self,
-            FlashQError::TopicNotFound { .. }
-                | FlashQError::ConsumerGroupNotFound { .. }
-                | FlashQError::InvalidOffset { .. }
-        )
-    }
-
-    pub fn is_client_error(&self) -> bool {
-        matches!(
-            self,
-            FlashQError::TopicNotFound { .. }
-                | FlashQError::ConsumerGroupNotFound { .. }
-                | FlashQError::ConsumerGroupAlreadyExists { .. }
-                | FlashQError::InvalidOffset { .. }
-        )
-    }
-
-    /// Convert an IO error to the appropriate FlashQError variant
-    pub fn from_io_error(e: std::io::Error, context: &str) -> Self {
-        match e.kind() {
-            std::io::ErrorKind::PermissionDenied => FlashQError::PermissionDenied {
-                message: format!("{context}: {e}"),
-            },
-            std::io::ErrorKind::OutOfMemory => FlashQError::DiskFull {
-                message: format!("{context}: Out of memory - {e}"),
-            },
-            // On Unix systems, ENOSPC (No space left on device) maps to Other
-            // We need to check the raw OS error or error message
-            std::io::ErrorKind::Other => {
-                let error_msg = e.to_string().to_lowercase();
-                if error_msg.contains("no space left") || error_msg.contains("disk full") {
-                    FlashQError::DiskFull {
-                        message: format!("{context}: {e}"),
-                    }
-                } else {
-                    FlashQError::IoError {
-                        message: format!("{context}: {e}"),
-                    }
-                }
-            },
-            _ => FlashQError::IoError {
-                message: format!("{context}: {e}"),
-            },
-        }
-    }
-}
+pub use error::FlashQError;
 
 // =============================================================================
 // CORE DATA STRUCTURES
@@ -214,7 +104,7 @@ impl FlashQ {
                 .create(&topic)
                 .expect("Failed to create storage backend")
         });
-        topic_log.append(record)
+        topic_log.append(record).map_err(FlashQError::from)
     }
 
     pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, FlashQError> {
@@ -227,7 +117,7 @@ impl FlashQ {
 
         let mut offsets = Vec::new();
         for record in records {
-            offsets.push(topic_log.append(record)?);
+            offsets.push(topic_log.append(record).map_err(FlashQError::from)?);
         }
         Ok(offsets)
     }
@@ -248,7 +138,7 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
-            Some(topic_log) => Ok(topic_log.get_records_from_offset(offset, count)),
+            Some(topic_log) => topic_log.get_records_from_offset(offset, count).map_err(FlashQError::from),
             None => Err(FlashQError::TopicNotFound {
                 topic: topic.to_string(),
             }),
@@ -1003,14 +893,14 @@ mod tests {
         let topic_error = FlashQError::TopicNotFound {
             topic: "missing".to_string(),
         };
-        assert_eq!(topic_error.to_string(), "Topic missing does not exist");
+        assert_eq!(topic_error.to_string(), "Topic 'missing' not found");
 
         let group_error = FlashQError::ConsumerGroupNotFound {
             group_id: "missing-group".to_string(),
         };
         assert_eq!(
             group_error.to_string(),
-            "Consumer group missing-group does not exist"
+            "Consumer group 'missing-group' not found"
         );
 
         let exists_error = FlashQError::ConsumerGroupAlreadyExists {
@@ -1018,7 +908,7 @@ mod tests {
         };
         assert_eq!(
             exists_error.to_string(),
-            "Consumer group existing-group already exists"
+            "Consumer group 'existing-group' already exists"
         );
 
         let offset_error = FlashQError::InvalidOffset {
@@ -1028,7 +918,7 @@ mod tests {
         };
         assert_eq!(
             offset_error.to_string(),
-            "Invalid offset 10 for topic test with max offset 5"
+            "Invalid offset 10 for topic 'test', max offset is 5"
         );
     }
 

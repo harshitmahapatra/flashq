@@ -1,5 +1,6 @@
 use super::{ConsumerGroup, TopicLog};
-use crate::{FlashQError, Record, RecordWithOffset};
+use crate::{Record, RecordWithOffset};
+use crate::error::StorageError;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ impl InMemoryTopicLog {
 }
 
 impl TopicLog for InMemoryTopicLog {
-    fn append(&mut self, record: Record) -> Result<u64, FlashQError> {
+    fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let current_offset = self.next_offset;
         let record_with_offset = RecordWithOffset::from_record(record, current_offset);
         self.records.push(record_with_offset);
@@ -32,19 +33,24 @@ impl TopicLog for InMemoryTopicLog {
         Ok(current_offset)
     }
 
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
+    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Result<Vec<RecordWithOffset>, StorageError> {
         let start_index = offset
             .try_into()
-            .expect("offset value too large to convert to array index");
+            .map_err(|_| StorageError::DataCorruption { 
+                context: "memory storage".to_string(),
+                details: format!("offset {} too large to convert to array index", offset)
+            })?;
+        
         if start_index >= self.records.len() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
+        
         let slice = &self.records[start_index..];
         let limited_slice = match count {
             Some(limit) => &slice[..limit.min(slice.len())],
             None => slice,
         };
-        limited_slice.to_vec()
+        Ok(limited_slice.to_vec())
     }
 
     fn len(&self) -> usize {
@@ -114,7 +120,7 @@ mod tests {
         log.append(record2).unwrap();
         log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(0, None);
+        let records = log.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].record.value, "first");
         assert_eq!(records[1].record.value, "second");
@@ -132,7 +138,7 @@ mod tests {
         log.append(record2).unwrap();
         log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(1, None);
+        let records = log.get_records_from_offset(1, None).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "second");
         assert_eq!(records[1].record.value, "third");
@@ -149,7 +155,7 @@ mod tests {
         log.append(record2).unwrap();
         log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(0, Some(2));
+        let records = log.get_records_from_offset(0, Some(2)).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "first");
         assert_eq!(records[1].record.value, "second");
@@ -161,7 +167,7 @@ mod tests {
         let record = Record::new(None, "only record".to_string(), None);
         log.append(record).unwrap();
 
-        let records = log.get_records_from_offset(5, None);
+        let records = log.get_records_from_offset(5, None).unwrap();
         assert_eq!(records.len(), 0);
     }
 
@@ -174,7 +180,7 @@ mod tests {
         let offset1 = log.append(record1).unwrap();
         let offset2 = log.append(record2).unwrap();
 
-        let records = log.get_records_from_offset(0, None);
+        let records = log.get_records_from_offset(0, None).unwrap();
         assert_eq!(records[0].offset, offset1);
         assert_eq!(records[1].offset, offset2);
     }

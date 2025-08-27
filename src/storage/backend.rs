@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(offset2, 1);
         assert_eq!(storage.len(), 2);
 
-        let records = storage.get_records_from_offset(0, None);
+        let records = storage.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "value1");
         assert_eq!(records[1].record.value, "value2");
@@ -126,7 +126,7 @@ mod tests {
         let offset = storage.append(record).unwrap();
         assert_eq!(offset, 0);
 
-        let records = storage.get_records_from_offset(0, None);
+        let records = storage.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(
             records[0]

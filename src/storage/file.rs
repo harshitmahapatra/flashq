@@ -1,5 +1,6 @@
 use crate::storage::r#trait::{ConsumerGroup, TopicLog};
-use crate::{FlashQError, Record, RecordWithOffset};
+use crate::{Record, RecordWithOffset};
+use crate::error::StorageError;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -156,14 +157,12 @@ impl FileTopicLog {
 }
 
 impl TopicLog for FileTopicLog {
-    fn append(&mut self, record: Record) -> Result<u64, FlashQError> {
+    fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let offset = self.next_offset;
 
         // Serialize record to JSON
         let json_payload = serde_json::to_vec(&record)
-            .map_err(|e| FlashQError::SerializationError {
-                message: format!("Failed to serialize record: {e}"),
-            })?;
+            .map_err(|e| StorageError::from_serialization_error(e, "record serialization"))?;
 
         // Write binary format: length(4) + offset(8) + json_payload
         let length = json_payload.len() as u32;
@@ -180,12 +179,12 @@ impl TopicLog for FileTopicLog {
 
         // Write to file with enhanced error handling
         self.file.write_all(&write_buffer)
-            .map_err(|e| FlashQError::from_io_error(e, "Failed to write record to file"))?;
+            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to file"))?;
 
         // Sync based on configuration with enhanced error handling
         if matches!(self.sync_mode, SyncMode::Immediate) {
             self.file.sync_all()
-                .map_err(|e| FlashQError::from_io_error(e, "Failed to sync file"))?;
+                .map_err(|e| StorageError::from_io_error(e, "Failed to sync file"))?;
         }
 
         self.next_offset += 1;
@@ -193,29 +192,22 @@ impl TopicLog for FileTopicLog {
         Ok(offset)
     }
 
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
+    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Result<Vec<RecordWithOffset>, StorageError> {
         let mut records = Vec::new();
 
         // Check if file exists - if not, return empty records
         if !self.file_path.exists() {
-            return records;
+            return Ok(records);
         }
 
         // Open a new file handle for reading to avoid interfering with writes
-        let read_file = match File::open(&self.file_path) {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Failed to open file for reading: {e}");
-                return records;
-            }
-        };
+        let read_file = File::open(&self.file_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open file for reading"))?;
 
         let mut buffer = Vec::new();
         let mut read_file = read_file;
-        if let Err(e) = read_file.read_to_end(&mut buffer) {
-            eprintln!("Failed to read file: {e}");
-            return records;
-        }
+        read_file.read_to_end(&mut buffer)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to read file"))?;
 
         let mut cursor = 0;
         let target_count = count.unwrap_or(usize::MAX);
@@ -248,7 +240,10 @@ impl TopicLog for FileTopicLog {
 
             // Check bounds
             if cursor + length > buffer.len() {
-                break; // Partial record
+                return Err(StorageError::DataCorruption {
+                    context: "file read".to_string(),
+                    details: format!("Partial record detected at cursor {}", cursor),
+                });
             }
 
             // If this record's offset is >= the requested offset, include it
@@ -263,8 +258,7 @@ impl TopicLog for FileTopicLog {
                         found_count += 1;
                     }
                     Err(e) => {
-                        eprintln!("Failed to parse record at offset {record_offset}: {e}");
-                        break; // Stop on corruption
+                        return Err(StorageError::from_serialization_error(e, &format!("record parsing at offset {}", record_offset)));
                     }
                 }
             }
@@ -272,7 +266,7 @@ impl TopicLog for FileTopicLog {
             cursor += length;
         }
 
-        records
+        Ok(records)
     }
 
     fn len(&self) -> usize {
@@ -289,9 +283,9 @@ impl TopicLog for FileTopicLog {
 }
 
 impl FileTopicLog {
-    pub fn sync(&mut self) -> Result<(), FlashQError> {
+    pub fn sync(&mut self) -> Result<(), StorageError> {
         self.file.sync_all()
-            .map_err(|e| FlashQError::from_io_error(e, "Failed to sync topic log file"))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync topic log file"))
     }
 }
 

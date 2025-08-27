@@ -60,13 +60,13 @@ fn test_record_retrieval_from_offset() {
     )).unwrap();
 
     // Action & Expectation: Get all records from start
-    let all_records = log.get_records_from_offset(0, None);
+    let all_records = log.get_records_from_offset(0, None).unwrap();
     assert_eq!(all_records.len(), 3);
     assert_eq!(all_records[0].record.value, "value1");
     assert_eq!(all_records[2].record.value, "value3");
 
     // Action & Expectation: Get records from specific offset
-    let partial_records = log.get_records_from_offset(1, None);
+    let partial_records = log.get_records_from_offset(1, None).unwrap();
     assert_eq!(partial_records.len(), 2);
     assert_eq!(partial_records[0].record.value, "value2");
 }
@@ -83,7 +83,7 @@ fn test_record_retrieval_with_count_limit() {
     log.append(Record::new(None, "value3".to_string(), None)).unwrap();
 
     // Action & Expectation: Get limited number of records
-    let limited_records = log.get_records_from_offset(0, Some(2));
+    let limited_records = log.get_records_from_offset(0, Some(2)).unwrap();
     assert_eq!(limited_records.len(), 2);
     assert_eq!(limited_records[0].record.value, "value1");
     assert_eq!(limited_records[1].record.value, "value2");
@@ -106,7 +106,7 @@ fn test_offset_consistency() {
     }
 
     // Final expectation
-    let records = log.get_records_from_offset(0, None);
+    let records = log.get_records_from_offset(0, None).unwrap();
     for (i, record) in records.iter().enumerate() {
         assert_eq!(record.offset, i as u64);
     }
