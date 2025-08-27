@@ -46,6 +46,7 @@ pub enum StorageError {
         context: String,
         pid: Option<u32>,
     },
+    LockAcquisitionFailed,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,6 +114,9 @@ impl fmt::Display for StorageError {
                 Some(pid) => write!(f, "Directory locked in {context} (PID: {pid})"),
                 None => write!(f, "Directory locked in {context}"),
             },
+            StorageError::LockAcquisitionFailed => {
+                write!(f, "Failed to acquire exclusive lock on file")
+            }
         }
     }
 }

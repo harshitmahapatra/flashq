@@ -60,9 +60,7 @@ async fn main() {
                 ) {
                     Ok(backend) => backend,
                     Err(e) => {
-                        eprintln!(
-                            "Error: Failed to initialize file storage with custom path: {e}"
-                        );
+                        eprintln!("Error: Failed to initialize file storage with custom path: {e}");
                         std::process::exit(1);
                     }
                 };

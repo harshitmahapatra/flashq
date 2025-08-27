@@ -271,8 +271,7 @@ impl FlashQ {
 
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File { .. } => std::path::PathBuf::from("./data"),
-            storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
+            storage::StorageBackend::File { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };
 
@@ -311,8 +310,7 @@ impl FlashQ {
 
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File { .. } => std::path::PathBuf::from("./data"),
-            storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
+            storage::StorageBackend::File { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };
 

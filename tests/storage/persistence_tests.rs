@@ -5,12 +5,10 @@ use flashq::{FlashQ, Record};
 
 #[test]
 fn test_file_topic_log_recovery() {
-    // Setup
     let config = TestConfig::new("log_recovery");
     let topic_name = config.topic_name.clone();
     let temp_dir = config.temp_dir.clone();
 
-    // Action: Create log, add records, and drop it
     {
         let mut log = FileTopicLog::new(&topic_name, config.sync_mode, &temp_dir).unwrap();
         log.append(Record::new(None, "first".to_string(), None))
@@ -18,12 +16,10 @@ fn test_file_topic_log_recovery() {
         log.append(Record::new(None, "second".to_string(), None))
             .unwrap();
         log.sync().unwrap();
-    } // Log goes out of scope
+    }
 
-    // Action: Create new log instance
     let recovered_log = FileTopicLog::new(&topic_name, config.sync_mode, &temp_dir).unwrap();
 
-    // Expectation: Should recover existing records
     assert_eq!(recovered_log.len(), 2);
     assert_eq!(recovered_log.next_offset(), 2);
 
@@ -40,7 +36,6 @@ fn test_flashq_persistence_across_instances() {
     let topic_name = config.topic_name.clone();
     let temp_dir = config.temp_dir.clone();
 
-    // Action: Create FlashQ, add records, and drop it
     {
         let queue = FlashQ::with_storage_backend(
             StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
@@ -58,14 +53,11 @@ fn test_flashq_persistence_across_instances() {
                 Record::new(None, "persistent2".to_string(), None),
             )
             .unwrap();
-    } // Queue goes out of scope
-
-    // Action: Create new FlashQ instance
+    }
     let new_queue = FlashQ::with_storage_backend(
         StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
 
-    // Expectation: Should recover existing records
     let records = new_queue.poll_records(&topic_name, None).unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].record.value, "persistent1");
@@ -81,7 +73,6 @@ fn test_offset_continuation_after_recovery() {
     let topic_name = config.topic_name.clone();
     let temp_dir = config.temp_dir.clone();
 
-    // Action: Create queue, add records, drop it
     {
         let queue = FlashQ::with_storage_backend(
             StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
@@ -94,7 +85,6 @@ fn test_offset_continuation_after_recovery() {
             .unwrap();
     }
 
-    // Action: Create new instance and add more records
     let new_queue = FlashQ::with_storage_backend(
         StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
@@ -106,7 +96,6 @@ fn test_offset_continuation_after_recovery() {
         )
         .unwrap();
 
-    // Expectation: Offset should continue from where it left off
     assert_eq!(new_offset, 1);
 
     let all_records = new_queue.poll_records(&topic_name, None).unwrap();
@@ -120,16 +109,13 @@ fn test_empty_data_directory_recovery() {
     // Setup
     let config = TestConfig::new("empty_recovery");
 
-    // Action: Create FlashQ with empty data directory
     let queue = FlashQ::with_storage_backend(
         StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
     );
 
-    // Expectation: Should handle empty directory gracefully - polling non-existent topic should return error
     let poll_result = queue.poll_records(&config.topic_name, None);
-    assert!(poll_result.is_err()); // Topic doesn't exist yet
+    assert!(poll_result.is_err());
 
-    // Should be able to add new records
     let offset = queue
         .post_record(
             config.topic_name.clone(),
