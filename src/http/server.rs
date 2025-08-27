@@ -1,7 +1,7 @@
 //! HTTP server implementation for FlashQ
 
 use super::common::*;
-use crate::{error, info, trace, FlashQ, Record};
+use crate::{FlashQ, Record, error, info, trace};
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -117,8 +117,7 @@ pub async fn produce_records(
     match app_state.queue.post_records(topic.clone(), records) {
         Ok(offsets) => {
             trace!(
-                "POST /topics/{}/records - Posted {} records, offsets: {:?}",
-                topic, record_count, offsets
+                "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
             );
 
             let timestamp = chrono::Utc::now().to_rfc3339();
@@ -135,7 +134,7 @@ pub async fn produce_records(
             }))
         }
         Err(error) => {
-            error!("POST /topics/{}/records failed: {}", topic, error);
+            error!("POST /topics/{topic}/records failed: {error}");
             let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
@@ -533,7 +532,7 @@ pub async fn start_server(
         .await
         .map_err(|e| format!("Failed to bind to address {bind_address}: {e}"))?;
 
-    info!("FlashQ Server starting on http://{}", bind_address);
+    info!("FlashQ Server starting on http://{bind_address}");
 
     axum::serve(listener, app)
         .await

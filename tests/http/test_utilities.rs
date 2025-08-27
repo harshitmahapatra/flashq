@@ -1,5 +1,5 @@
-use flashq::{Record, debug, error, info};
 use flashq::http::*;
+use flashq::{Record, debug, error, info};
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -291,9 +291,7 @@ impl TestServer {
         let (max_attempts, sleep_ms) = get_timeout_config();
 
         let data_dir_path = data_dir.as_ref();
-        info!(
-            "Starting server on port {port} with file storage using data dir: {data_dir_path:?}"
-        );
+        info!("Starting server on port {port} with file storage using data dir: {data_dir_path:?}");
 
         let mut process = Command::new(&server_binary)
             .args([
