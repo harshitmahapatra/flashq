@@ -11,6 +11,9 @@ pub mod storage;
 
 pub use error::FlashQError;
 
+// Re-export logging macros for consistent usage across the crate
+pub use log::{debug, error, info, trace, warn};
+
 // =============================================================================
 // CORE DATA STRUCTURES
 // =============================================================================
@@ -85,13 +88,13 @@ impl FlashQ {
 
         // For file backends, recover existing topics and consumer groups from disk
         queue.recover_existing_topics().unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to recover existing topics: {e}");
+            warn!("Failed to recover existing topics: {e}");
         });
 
         queue
             .recover_existing_consumer_groups()
             .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to recover existing consumer groups: {e}");
+                warn!("Failed to recover existing consumer groups: {e}");
             });
 
         queue

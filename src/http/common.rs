@@ -1,6 +1,6 @@
 //! HTTP API request and response types
 
-use crate::{FlashQError, Record, RecordWithOffset};
+use crate::{FlashQError, Record, RecordWithOffset, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -143,7 +143,7 @@ pub fn parse_headers(header_strings: Option<Vec<String>>) -> Option<HashMap<Stri
                 match (split.next(), split.next()) {
                     (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
                     _ => {
-                        eprintln!("Warning: Invalid header format '{h}', expected KEY=VALUE");
+                        warn!("Invalid header format '{h}', expected KEY=VALUE");
                         None
                     }
                 }

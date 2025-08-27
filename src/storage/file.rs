@@ -1,6 +1,6 @@
 use crate::error::StorageError;
 use crate::storage::r#trait::{ConsumerGroup, TopicLog};
-use crate::{Record, RecordWithOffset};
+use crate::{Record, RecordWithOffset, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -532,8 +532,8 @@ impl FileConsumerGroup {
         match serde_json::from_str::<ConsumerGroupData>(&contents) {
             Ok(data) => Ok(data.topic_offsets),
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to parse consumer group file {}: {}",
+                warn!(
+                    "Failed to parse consumer group file {}: {}",
                     file_path.display(),
                     e
                 );
@@ -577,7 +577,7 @@ impl ConsumerGroup for FileConsumerGroup {
         self.topic_offsets.insert(topic, offset);
 
         if let Err(e) = self.persist_to_disk() {
-            eprintln!("Warning: Failed to persist consumer group state: {e}");
+            warn!("Failed to persist consumer group state: {e}");
         }
     }
 

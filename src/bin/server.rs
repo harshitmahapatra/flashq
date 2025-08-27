@@ -8,6 +8,8 @@ use std::env;
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+    
     let args: Vec<String> = env::args().collect();
 
     let mut port = 8080;
@@ -19,7 +21,7 @@ async fn main() {
             "--storage" => {
                 i += 1;
                 if i >= args.len() {
-                    eprintln!("Error: --storage requires a value (memory|file)");
+                    log::error!("--storage requires a value (memory|file)");
                     print_usage();
                     std::process::exit(1);
                 }
@@ -31,14 +33,14 @@ async fn main() {
                         ) {
                             Ok(backend) => backend,
                             Err(e) => {
-                                eprintln!("Error: Failed to initialize file storage: {e}");
+                                log::error!("Failed to initialize file storage: {e}");
                                 std::process::exit(1);
                             }
                         }
                     }
                     _ => {
-                        eprintln!(
-                            "Error: Invalid storage backend '{}'. Valid options: memory, file",
+                        log::error!(
+                            "Invalid storage backend '{}'. Valid options: memory, file",
                             args[i]
                         );
                         print_usage();
@@ -49,7 +51,7 @@ async fn main() {
             "--data-dir" => {
                 i += 1;
                 if i >= args.len() {
-                    eprintln!("Error: --data-dir requires a path");
+                    log::error!("--data-dir requires a path");
                     print_usage();
                     std::process::exit(1);
                 }
@@ -60,7 +62,7 @@ async fn main() {
                 ) {
                     Ok(backend) => backend,
                     Err(e) => {
-                        eprintln!("Error: Failed to initialize file storage with custom path: {e}");
+                        log::error!("Failed to initialize file storage with custom path: {e}");
                         std::process::exit(1);
                     }
                 };
@@ -69,7 +71,7 @@ async fn main() {
                 if let Ok(p) = arg.parse::<u16>() {
                     port = p;
                 } else {
-                    eprintln!("Error: Invalid argument '{arg}'");
+                    log::error!("Invalid argument '{arg}'");
                     print_usage();
                     std::process::exit(1);
                 }
@@ -79,16 +81,16 @@ async fn main() {
     }
 
     if let Err(e) = start_server(port, storage_backend).await {
-        eprintln!("Server error: {e}");
+        log::error!("Server error: {e}");
         std::process::exit(1);
     }
 }
 
 fn print_usage() {
-    eprintln!("Usage: server [port] [--storage <backend>] [--data-dir <path>]");
-    eprintln!("  port: Port number to bind to (default: 8080)");
-    eprintln!("  --storage: Storage backend to use");
-    eprintln!("    memory: In-memory storage (default, data lost on restart)");
-    eprintln!("    file: File-based storage (data persisted to ./data directory)");
-    eprintln!("  --data-dir: Custom data directory for file storage (overrides --storage file)");
+    log::info!("Usage: server [port] [--storage <backend>] [--data-dir <path>]");
+    log::info!("  port: Port number to bind to (default: 8080)");
+    log::info!("  --storage: Storage backend to use");
+    log::info!("    memory: In-memory storage (default, data lost on restart)");
+    log::info!("    file: File-based storage (data persisted to ./data directory)");
+    log::info!("  --data-dir: Custom data directory for file storage (overrides --storage file)");
 }

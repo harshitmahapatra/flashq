@@ -1,4 +1,4 @@
-use flashq::Record;
+use flashq::{Record, debug, error, info};
 use flashq::http::*;
 use std::env;
 use std::net::TcpListener;
@@ -31,7 +31,7 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 
 pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     SERVER_INIT.call_once(|| {
-        eprintln!("Building server binary for integration tests...");
+        info!("Building server binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "server"])
             .output()
@@ -46,7 +46,7 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
         let binary_path = PathBuf::from("target/debug/server");
         *SERVER_BINARY_PATH.lock().unwrap() = Some(binary_path);
-        eprintln!("Server binary built successfully");
+        info!("Server binary built successfully");
     });
 
     let binary_path = SERVER_BINARY_PATH
@@ -61,7 +61,7 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     CLIENT_INIT.call_once(|| {
-        eprintln!("Building client binary for integration tests...");
+        info!("Building client binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "client"])
             .output()
@@ -76,7 +76,7 @@ pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
         let binary_path = PathBuf::from("target/debug/client");
         *CLIENT_BINARY_PATH.lock().unwrap() = Some(binary_path);
-        eprintln!("Client binary built successfully");
+        info!("Client binary built successfully");
     });
 
     let binary_path = CLIENT_BINARY_PATH
@@ -92,7 +92,7 @@ pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 pub fn get_timeout_config() -> (u32, u64) {
     // Returns (max_attempts, sleep_ms)
     if env::var("CI").is_ok() {
-        eprintln!("Running in CI environment - using extended timeouts");
+        info!("Running in CI environment - using extended timeouts");
         (60, 500) // 30 seconds total in CI
     } else {
         (30, 500) // 15 seconds locally
@@ -115,7 +115,7 @@ impl TestServer {
         let server_binary = ensure_server_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
-        eprintln!("Starting server on port {port} using binary: {server_binary:?}");
+        info!("Starting server on port {port} using binary: {server_binary:?}");
 
         let mut process = Command::new(&server_binary)
             .args([&port.to_string()])
@@ -134,14 +134,14 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                eprintln!("Server process exited with status: {exit_status}");
+                error!("Server process exited with status: {exit_status}");
                 return Err("Server process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
-                    eprintln!(
+                    info!(
                         "Server started successfully on port {} after {} attempts",
                         port,
                         attempt + 1
@@ -154,13 +154,13 @@ impl TestServer {
                 }
                 Ok(false) => continue, // Retry
                 Err(e) => {
-                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
                     continue;
                 }
             }
         }
 
-        eprintln!("Server failed to start within {max_attempts} attempts");
+        error!("Server failed to start within {max_attempts} attempts");
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
     }
@@ -170,7 +170,7 @@ impl TestServer {
         let server_binary = ensure_server_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
-        eprintln!(
+        info!(
             "Starting server on port {port} with {storage} storage using binary: {server_binary:?}"
         );
 
@@ -203,14 +203,14 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                eprintln!("Server process exited with status: {exit_status}");
+                error!("Server process exited with status: {exit_status}");
                 return Err("Server process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
-                    eprintln!(
+                    info!(
                         "Server started successfully on port {} with {storage} storage after {} attempts",
                         port,
                         attempt + 1
@@ -223,13 +223,13 @@ impl TestServer {
                 }
                 Ok(false) => continue, // Retry
                 Err(e) => {
-                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
                     continue;
                 }
             }
         }
 
-        eprintln!("Server failed to start within {max_attempts} attempts");
+        error!("Server failed to start within {max_attempts} attempts");
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
     }
@@ -251,7 +251,7 @@ impl TestServer {
                     if response.status().is_success() {
                         return Ok(true);
                     } else {
-                        eprintln!(
+                        debug!(
                             "Health check attempt {}.{}: HTTP {}",
                             attempt,
                             retry + 1,
@@ -260,7 +260,7 @@ impl TestServer {
                     }
                 }
                 Err(e) if retry < 2 => {
-                    eprintln!(
+                    debug!(
                         "Health check attempt {}.{} failed, retrying: {}",
                         attempt,
                         retry + 1,
@@ -291,7 +291,7 @@ impl TestServer {
         let (max_attempts, sleep_ms) = get_timeout_config();
 
         let data_dir_path = data_dir.as_ref();
-        eprintln!(
+        info!(
             "Starting server on port {port} with file storage using data dir: {data_dir_path:?}"
         );
 
@@ -316,14 +316,14 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                eprintln!("Server process exited with status: {exit_status}");
+                error!("Server process exited with status: {exit_status}");
                 return Err("Server process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
-                    eprintln!(
+                    info!(
                         "Server started successfully on port {} with custom data dir after {} attempts",
                         port,
                         attempt + 1
@@ -336,13 +336,13 @@ impl TestServer {
                 }
                 Ok(false) => continue, // Retry
                 Err(e) => {
-                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
                     continue;
                 }
             }
         }
 
-        eprintln!("Server failed to start within {max_attempts} attempts");
+        error!("Server failed to start within {max_attempts} attempts");
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
     }

@@ -1,5 +1,6 @@
 use crate::error::StorageError;
 use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
+use crate::warn;
 use fs4::fs_std::FileExt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -22,7 +23,7 @@ impl Drop for StorageBackend {
             let lock_path = data_dir.join(".flashq.lock");
             if lock_path.exists() {
                 if let Err(e) = std::fs::remove_file(&lock_path) {
-                    eprintln!("Warning: Failed to remove lock file {lock_path:?}: {e}");
+                    warn!("Failed to remove lock file {lock_path:?}: {e}");
                 }
             }
         }
