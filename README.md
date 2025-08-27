@@ -11,7 +11,10 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 - Batch operations (up to 1000 records)
 - HTTP REST API with JSON
 - Thread-safe concurrent access
-- Pluggable storage backends
+- File storage backend with directory locking and crash recovery
+- Write-ahead logging with configurable commit thresholds
+- Error handling with structured logging
+- Pluggable storage backends (in-memory and file-based)
 
 ## Quick Start
 
@@ -26,8 +29,13 @@ cargo run --bin flashq
 
 **Start server:**
 ```bash
+# In-memory storage (default)
 cargo run --bin server           # Debug mode (port 8080)
 cargo run --bin server 9090      # Custom port
+
+# File storage backend
+cargo run --bin server -- --storage=file --data-dir=./data
+cargo run --bin server 9090 -- --storage=file --sync-mode=always
 ```
 
 **Basic client usage:**
@@ -54,8 +62,10 @@ curl http://127.0.0.1:8080/topics/news/records
 ## Development
 
 ```bash
-cargo build && cargo test     # Build and test
-cargo clippy && cargo fmt     # Code quality
+cargo build && cargo test     # Build and run all tests
+cargo test --test '*'         # Integration tests only
+cargo clippy && cargo fmt     # Code quality and formatting
+cargo check                   # Quick compile check
 ```
 
 ## Documentation

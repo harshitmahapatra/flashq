@@ -4,14 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, comprehensive testing, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, and full integration test coverage.
+FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, file storage backend, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, write-ahead logging, and full integration test coverage.
 
 ## Development Commands
 
 ### Building and Running
 - `cargo build` - Build the project (debug mode)
 - `cargo run --bin flashq` - Build and run the interactive demo
-- `cargo run --bin server` - Build and run the HTTP server
+- `cargo run --bin server` - Build and run the HTTP server (in-memory storage)
+- `cargo run --bin server -- --storage=file --data-dir=./data` - Run server with file storage
 - `cargo run --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
 
@@ -44,18 +45,28 @@ Following Rust best practices with library and binary crates:
 - `src/demo.rs` - Interactive demo module with CLI functionality  
 - `src/bin/server.rs` - HTTP server implementation with REST API
 - `src/bin/client.rs` - CLI client for interacting with the server
-- `tests/integration_tests.rs` - Comprehensive integration test suite
+- `src/error.rs` - Comprehensive error handling with structured error types
+- `src/storage/` - Storage backend implementations (memory and file-based)
+- `tests/` - Comprehensive test suite organized by component (HTTP and storage)
 - `Cargo.toml` - Project configuration using Rust 2024 edition
 
 ### Library Crate (`src/lib.rs`)
 - `Record` struct - Record payload with optional key and headers
 - `RecordWithOffset` struct - Record with offset and ISO 8601 timestamp
-- `FlashQ` struct - Main queue implementation with topic-based organization
-- `TopicLog` struct - Append-only log storage for records within topics
-- Consumer group management with offset tracking
+- `FlashQ` struct - Main queue implementation with pluggable storage backends
+- Storage backend abstraction with memory and file implementations
+- Consumer group management with persistent offset tracking
 - `demo` module - Interactive CLI functionality (exposed publicly)
 - Thread-safe using `Arc<Mutex<>>` for concurrent access
 - Comprehensive unit tests for all data structures
+
+### Storage Module (`src/storage/`)
+- `StorageBackend` enum - Pluggable storage backend selection (memory/file)
+- `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer
+- `FileTopicLog` - File-based topic storage with write-ahead logging
+- `FileConsumerGroup` - Persistent consumer group offset management
+- Directory locking mechanism to prevent concurrent access
+- Comprehensive error handling and recovery capabilities
 
 ### Binary Crates
 - **`src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
@@ -93,37 +104,42 @@ cargo run --bin flashq
 
 This provides an excellent way to understand the library API and test functionality without requiring HTTP server setup or external clients.
 
-### Integration Tests (`tests/integration_tests.rs`)
-- **End-to-end workflow testing** - Multi-topic record posting and polling with enhanced structure
-- **HTTP API validation** - All REST endpoints tested including consumer group operations
-- **FIFO ordering verification** - Ensures record ordering guarantees with offset-based positioning
-- **Count parameter testing** - Validates polling limits work correctly
-- **Consumer group testing** - Offset management and coordinated consumption
-- **Enhanced record testing** - Keys, headers, and metadata validation
-- **Replay functionality testing** - from_offset parameter for both basic and consumer group polling
-- **Record size validation testing** - Comprehensive validation of size limits per OpenAPI spec
-- **Error handling** - Tests invalid requests and edge cases
-- **Health check testing** - Server status endpoint validation
+### Test Suite (`tests/`)
+**HTTP Integration Tests (`tests/http/`):**
+- End-to-end workflow testing with multi-topic scenarios
+- Consumer group operations and offset management
+- FIFO ordering verification and replay functionality
+- Record size validation and error handling
+- Health check and OpenAPI compliance testing
+
+**Storage Integration Tests (`tests/storage/`):**
+- File storage backend testing with crash recovery
+- Directory locking and concurrent access prevention  
+- Error simulation (disk full, permission errors)
+- Consumer group persistence across restarts
+- Write-ahead logging validation
 
 ## Architecture Notes
 
 Current implementation features:
 - **Kafka-style messaging**: Records with optional keys and headers for routing/metadata
 - **Topic-based organization**: Records organized by topic strings with separate offset counters
+- **Pluggable storage**: In-memory and file-based storage backends
+- **File storage**: Write-ahead logging with configurable sync modes and commit thresholds
+- **Directory locking**: Prevents concurrent access to file storage directories
+- **Error handling**: Comprehensive error types with structured logging
+- **Crash recovery**: File storage recovers state from persisted logs
 - **Offset-based positioning**: Sequential offsets within topics starting from 0
 - **Non-destructive polling**: Records remain in queue after being read
 - **FIFO ordering**: Records returned in the order they were posted with offset guarantees
 - **Thread safety**: Safe concurrent access using Arc<Mutex<>>
 - **ISO 8601 timestamps**: Human-readable timestamp format for record creation time
-- **Count limiting**: Poll operations can limit number of records returned
-- **Consumer groups**: Kafka-style consumer group offset management for coordinated consumption
-- **Replay functionality**: Seek to specific offsets with `from_offset` parameter for both basic and consumer group polling
+- **Consumer groups**: Persistent consumer group offset management
+- **Replay functionality**: Seek to specific offsets with `from_offset` parameter
 - **Record size validation**: OpenAPI-compliant validation (key: 1024 chars, value: 1MB, headers: 1024 chars each)
 - **HTTP REST API**: Full REST endpoints for posting, polling, and consumer group operations
-- **Enhanced API structures**: Record (requests) and RecordResponse (polling responses)
 - **JSON serialization**: All data structures support serde for API communication
-- **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API
-- **Production ready**: Error handling, health checks, and proper HTTP status codes
+- **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API and storage
 
 ## Documentation
 
@@ -141,11 +157,13 @@ After building with `cargo build --release`:
 
 **Server:**
 ```bash
-# Default port (8080) with INFO-level logging
-./target/release/server
+# In-memory storage (default)
+./target/release/server                    # Port 8080
+./target/release/server 9090              # Custom port
 
-# Custom port with INFO-level logging
-./target/release/server 9090
+# File storage backend
+./target/release/server -- --storage=file --data-dir=./data
+./target/release/server 9090 -- --storage=file --sync-mode=always
 ```
 
 **Logging Behavior:**
