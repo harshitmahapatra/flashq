@@ -1,6 +1,6 @@
+use crate::error::StorageError;
 use crate::storage::r#trait::{ConsumerGroup, TopicLog};
 use crate::{Record, RecordWithOffset};
-use crate::error::StorageError;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -178,12 +178,14 @@ impl TopicLog for FileTopicLog {
         write_buffer.extend_from_slice(&json_payload);
 
         // Write to file with enhanced error handling
-        self.file.write_all(&write_buffer)
+        self.file
+            .write_all(&write_buffer)
             .map_err(|e| StorageError::from_io_error(e, "Failed to write record to file"))?;
 
         // Sync based on configuration with enhanced error handling
         if matches!(self.sync_mode, SyncMode::Immediate) {
-            self.file.sync_all()
+            self.file
+                .sync_all()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to sync file"))?;
         }
 
@@ -192,7 +194,11 @@ impl TopicLog for FileTopicLog {
         Ok(offset)
     }
 
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Result<Vec<RecordWithOffset>, StorageError> {
+    fn get_records_from_offset(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
         let mut records = Vec::new();
 
         // Check if file exists - if not, return empty records
@@ -206,7 +212,8 @@ impl TopicLog for FileTopicLog {
 
         let mut buffer = Vec::new();
         let mut read_file = read_file;
-        read_file.read_to_end(&mut buffer)
+        read_file
+            .read_to_end(&mut buffer)
             .map_err(|e| StorageError::from_io_error(e, "Failed to read file"))?;
 
         let mut cursor = 0;
@@ -242,7 +249,7 @@ impl TopicLog for FileTopicLog {
             if cursor + length > buffer.len() {
                 return Err(StorageError::DataCorruption {
                     context: "file read".to_string(),
-                    details: format!("Partial record detected at cursor {}", cursor),
+                    details: format!("Partial record detected at cursor {cursor}"),
                 });
             }
 
@@ -258,7 +265,10 @@ impl TopicLog for FileTopicLog {
                         found_count += 1;
                     }
                     Err(e) => {
-                        return Err(StorageError::from_serialization_error(e, &format!("record parsing at offset {}", record_offset)));
+                        return Err(StorageError::from_serialization_error(
+                            e,
+                            &format!("record parsing at offset {record_offset}"),
+                        ));
                     }
                 }
             }
@@ -284,7 +294,8 @@ impl TopicLog for FileTopicLog {
 
 impl FileTopicLog {
     pub fn sync(&mut self) -> Result<(), StorageError> {
-        self.file.sync_all()
+        self.file
+            .sync_all()
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync topic log file"))
     }
 }

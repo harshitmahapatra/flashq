@@ -47,17 +47,20 @@ fn test_record_retrieval_from_offset() {
         Some("key1".to_string()),
         "value1".to_string(),
         None,
-    )).unwrap();
+    ))
+    .unwrap();
     log.append(Record::new(
         Some("key2".to_string()),
         "value2".to_string(),
         None,
-    )).unwrap();
+    ))
+    .unwrap();
     log.append(Record::new(
         Some("key3".to_string()),
         "value3".to_string(),
         None,
-    )).unwrap();
+    ))
+    .unwrap();
 
     // Action & Expectation: Get all records from start
     let all_records = log.get_records_from_offset(0, None).unwrap();
@@ -78,9 +81,12 @@ fn test_record_retrieval_with_count_limit() {
     let mut log =
         FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
 
-    log.append(Record::new(None, "value1".to_string(), None)).unwrap();
-    log.append(Record::new(None, "value2".to_string(), None)).unwrap();
-    log.append(Record::new(None, "value3".to_string(), None)).unwrap();
+    log.append(Record::new(None, "value1".to_string(), None))
+        .unwrap();
+    log.append(Record::new(None, "value2".to_string(), None))
+        .unwrap();
+    log.append(Record::new(None, "value3".to_string(), None))
+        .unwrap();
 
     // Action & Expectation: Get limited number of records
     let limited_records = log.get_records_from_offset(0, Some(2)).unwrap();
@@ -98,7 +104,9 @@ fn test_offset_consistency() {
 
     // Action: Add records and verify offsets
     for i in 0..5 {
-        let offset = log.append(Record::new(None, format!("value{i}"), None)).unwrap();
+        let offset = log
+            .append(Record::new(None, format!("value{i}"), None))
+            .unwrap();
 
         // Expectation: Sequential offsets
         assert_eq!(offset, i);

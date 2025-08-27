@@ -1,10 +1,14 @@
-use crate::{Record, RecordWithOffset};
 use crate::error::StorageError;
+use crate::{Record, RecordWithOffset};
 use std::collections::HashMap;
 
 pub trait TopicLog: Send + Sync {
     fn append(&mut self, record: Record) -> Result<u64, StorageError>;
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Result<Vec<RecordWithOffset>, StorageError>;
+    fn get_records_from_offset(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn next_offset(&self) -> u64;

@@ -13,8 +13,10 @@ fn test_file_topic_log_recovery() {
     // Action: Create log, add records, and drop it
     {
         let mut log = FileTopicLog::new(&topic_name, config.sync_mode, &temp_dir).unwrap();
-        log.append(Record::new(None, "first".to_string(), None)).unwrap();
-        log.append(Record::new(None, "second".to_string(), None)).unwrap();
+        log.append(Record::new(None, "first".to_string(), None))
+            .unwrap();
+        log.append(Record::new(None, "second".to_string(), None))
+            .unwrap();
         log.sync().unwrap();
     } // Log goes out of scope
 

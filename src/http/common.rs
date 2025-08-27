@@ -1,6 +1,6 @@
 //! HTTP API request and response types
 
-use crate::{Record, RecordWithOffset, FlashQError};
+use crate::{FlashQError, Record, RecordWithOffset};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -440,19 +440,27 @@ impl From<FlashQError> for ErrorResponse {
             FlashQError::ConsumerGroupNotFound { group_id } => Self::group_not_found(&group_id),
             FlashQError::ConsumerGroupAlreadyExists { group_id } => Self::with_details(
                 "conflict",
-                &format!("Consumer group '{}' already exists", group_id),
+                &format!("Consumer group '{group_id}' already exists"),
                 serde_json::json!({ "group_id": group_id }),
             ),
-            FlashQError::InvalidOffset { offset, topic, max_offset } => Self::with_details(
+            FlashQError::InvalidOffset {
+                offset,
+                topic,
+                max_offset,
+            } => Self::with_details(
                 "invalid_offset",
-                &format!("Invalid offset {} for topic '{}', max offset is {}", offset, topic, max_offset),
+                &format!(
+                    "Invalid offset {offset} for topic '{topic}', max offset is {max_offset}"
+                ),
                 serde_json::json!({
                     "offset": offset,
                     "topic": topic,
                     "max_offset": max_offset
                 }),
             ),
-            FlashQError::Storage(storage_err) => Self::internal_error(&format!("Storage error: {}", storage_err)),
+            FlashQError::Storage(storage_err) => {
+                Self::internal_error(&format!("Storage error: {storage_err}"))
+            }
         }
     }
 }

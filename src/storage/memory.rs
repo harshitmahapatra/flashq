@@ -1,6 +1,6 @@
 use super::{ConsumerGroup, TopicLog};
-use crate::{Record, RecordWithOffset};
 use crate::error::StorageError;
+use crate::{Record, RecordWithOffset};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -33,18 +33,22 @@ impl TopicLog for InMemoryTopicLog {
         Ok(current_offset)
     }
 
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Result<Vec<RecordWithOffset>, StorageError> {
+    fn get_records_from_offset(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
         let start_index = offset
             .try_into()
-            .map_err(|_| StorageError::DataCorruption { 
+            .map_err(|_| StorageError::DataCorruption {
                 context: "memory storage".to_string(),
-                details: format!("offset {} too large to convert to array index", offset)
+                details: format!("offset {offset} too large to convert to array index"),
             })?;
-        
+
         if start_index >= self.records.len() {
             return Ok(Vec::new());
         }
-        
+
         let slice = &self.records[start_index..];
         let limited_slice = match count {
             Some(limit) => &slice[..limit.min(slice.len())],

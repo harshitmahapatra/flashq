@@ -107,7 +107,11 @@ impl FlashQ {
         topic_log.append(record).map_err(FlashQError::from)
     }
 
-    pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, FlashQError> {
+    pub fn post_records(
+        &self,
+        topic: String,
+        records: Vec<Record>,
+    ) -> Result<Vec<u64>, FlashQError> {
         let mut topic_log_map = self.topics.lock().unwrap();
         let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
@@ -138,7 +142,9 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let topic_log_map = self.topics.lock().unwrap();
         match topic_log_map.get(topic) {
-            Some(topic_log) => topic_log.get_records_from_offset(offset, count).map_err(FlashQError::from),
+            Some(topic_log) => topic_log
+                .get_records_from_offset(offset, count)
+                .map_err(FlashQError::from),
             None => Err(FlashQError::TopicNotFound {
                 topic: topic.to_string(),
             }),
