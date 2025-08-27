@@ -73,7 +73,7 @@ impl Default for FlashQ {
 
 impl FlashQ {
     pub fn new() -> Self {
-        Self::with_storage_backend(storage::StorageBackend::Memory)
+        Self::with_storage_backend(storage::StorageBackend::new_memory())
     }
 
     pub fn with_storage_backend(storage_backend: storage::StorageBackend) -> Self {
@@ -271,7 +271,7 @@ impl FlashQ {
 
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File(_) => std::path::PathBuf::from("./data"),
+            storage::StorageBackend::File { .. } => std::path::PathBuf::from("./data"),
             storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };
@@ -311,7 +311,7 @@ impl FlashQ {
 
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File(_) => std::path::PathBuf::from("./data"),
+            storage::StorageBackend::File { .. } => std::path::PathBuf::from("./data"),
             storage::StorageBackend::FileWithPath { data_dir, .. } => data_dir.clone(),
             storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
         };

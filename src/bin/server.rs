@@ -11,7 +11,7 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     let mut port = 8080;
-    let mut storage_backend = flashq::storage::StorageBackend::Memory;
+    let mut storage_backend = flashq::storage::StorageBackend::new_memory();
 
     let mut i = 1;
     while i < args.len() {
@@ -24,11 +24,17 @@ async fn main() {
                     std::process::exit(1);
                 }
                 match args[i].as_str() {
-                    "memory" => storage_backend = flashq::storage::StorageBackend::Memory,
+                    "memory" => storage_backend = flashq::storage::StorageBackend::new_memory(),
                     "file" => {
-                        storage_backend = flashq::storage::StorageBackend::File(
+                        storage_backend = match flashq::storage::StorageBackend::new_file(
                             flashq::storage::file::SyncMode::Immediate,
-                        )
+                        ) {
+                            Ok(backend) => backend,
+                            Err(e) => {
+                                eprintln!("Error: Failed to initialize file storage: {e}");
+                                std::process::exit(1);
+                            }
+                        }
                     }
                     _ => {
                         eprintln!(
@@ -48,9 +54,17 @@ async fn main() {
                     std::process::exit(1);
                 }
                 let data_dir = std::path::PathBuf::from(&args[i]);
-                storage_backend = flashq::storage::StorageBackend::FileWithPath {
-                    sync_mode: flashq::storage::file::SyncMode::Immediate,
+                storage_backend = match flashq::storage::StorageBackend::new_file_with_path(
+                    flashq::storage::file::SyncMode::Immediate,
                     data_dir,
+                ) {
+                    Ok(backend) => backend,
+                    Err(e) => {
+                        eprintln!(
+                            "Error: Failed to initialize file storage with custom path: {e}"
+                        );
+                        std::process::exit(1);
+                    }
                 };
             }
             arg => {

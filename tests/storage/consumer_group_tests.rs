@@ -9,16 +9,14 @@ fn test_consumer_group_creation_backends() {
     let group_id = create_test_consumer_group("creation");
 
     // Action & Expectation: Memory backend
-    let memory_backend = StorageBackend::Memory;
+    let memory_backend = StorageBackend::new_memory();
     let memory_group = memory_backend.create_consumer_group(&group_id).unwrap();
     assert_eq!(memory_group.group_id(), &group_id);
     assert_eq!(memory_group.get_offset("test_topic"), 0);
 
     // Action & Expectation: File backend
-    let file_backend = StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    };
+    let file_backend =
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap();
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();
     assert_eq!(file_group.group_id(), &group_id);
     assert_eq!(file_group.get_offset("test_topic"), 0);
@@ -34,19 +32,14 @@ fn test_consumer_group_persistence() {
 
     // Action: Create consumer group, set offset, drop it
     {
-        let backend = StorageBackend::FileWithPath {
-            sync_mode: config.sync_mode,
-            data_dir: temp_dir.clone(),
-        };
+        let backend =
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap();
         let mut consumer_group = backend.create_consumer_group(&group_id).unwrap();
         consumer_group.set_offset(topic_name.clone(), 5);
     }
 
     // Action: Create new consumer group with same ID
-    let backend = StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: temp_dir.clone(),
-    };
+    let backend = StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap();
     let recovered_group = backend.create_consumer_group(&group_id).unwrap();
 
     // Expectation: Should recover the offset
@@ -63,10 +56,9 @@ fn test_consumer_group_topic_recovery() {
 
     // Action: Create FlashQ, add records and consumer group
     {
-        let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-            sync_mode: config.sync_mode,
-            data_dir: temp_dir.clone(),
-        });
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
 
         // Add some records
         queue
@@ -95,10 +87,9 @@ fn test_consumer_group_topic_recovery() {
     }
 
     // Action: Create new FlashQ instance
-    let new_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: temp_dir.clone(),
-    });
+    let new_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+    );
 
     // Expectation: Consumer group should resume from correct offset
     let records = new_queue
@@ -116,10 +107,9 @@ fn test_multiple_consumer_groups_isolation() {
     let group2 = create_test_consumer_group("group2");
     let topic_name = config.topic_name.clone();
 
-    let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    });
+    let queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+    );
 
     // Action: Add records
     queue

@@ -10,11 +10,10 @@ fn test_memory_vs_file_basic_operations() {
     let topic_name = config.topic_name.clone();
 
     // Action: Test same operations on both backends
-    let memory_queue = FlashQ::with_storage_backend(StorageBackend::Memory);
-    let file_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    });
+    let memory_queue = FlashQ::with_storage_backend(StorageBackend::new_memory());
+    let file_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+    );
 
     let test_record = Record::new(Some("test_key".to_string()), "test_value".to_string(), None);
 
@@ -43,11 +42,10 @@ fn test_consumer_group_compatibility() {
     let group_id = create_test_consumer_group("compat");
     let topic_name = config.topic_name.clone();
 
-    let memory_queue = FlashQ::with_storage_backend(StorageBackend::Memory);
-    let file_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    });
+    let memory_queue = FlashQ::with_storage_backend(StorageBackend::new_memory());
+    let file_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+    );
 
     // Action: Add identical records to both
     for i in 0..3 {
@@ -94,10 +92,9 @@ fn test_sync_mode_behavior() {
 
     for (i, sync_mode) in sync_modes.iter().enumerate() {
         // Action: Create queue with specific sync mode
-        let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-            sync_mode: *sync_mode,
-            data_dir: config.temp_dir.clone(),
-        });
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(*sync_mode, config.temp_dir.clone()).unwrap(),
+        );
 
         // Use unique topic name for each sync mode
         let mode_topic = format!("{topic_name}_{i}");
@@ -122,11 +119,9 @@ fn test_file_storage_vs_memory_storage_interface() {
     let group_id = create_test_consumer_group("interface");
 
     // Action & Expectation: Both backends should implement same interface
-    let memory_backend = StorageBackend::Memory;
-    let file_backend = StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    };
+    let memory_backend = StorageBackend::new_memory();
+    let file_backend =
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap();
 
     // Consumer group creation should work identically
     let memory_group = memory_backend.create_consumer_group(&group_id).unwrap();

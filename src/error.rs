@@ -42,6 +42,10 @@ pub enum StorageError {
     Unavailable {
         context: String,
     },
+    DirectoryLocked {
+        context: String,
+        pid: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +109,10 @@ impl fmt::Display for StorageError {
             StorageError::Unavailable { context } => {
                 write!(f, "Storage unavailable in {context}")
             }
+            StorageError::DirectoryLocked { context, pid } => match pid {
+                Some(pid) => write!(f, "Directory locked in {context} (PID: {pid})"),
+                None => write!(f, "Directory locked in {context}"),
+            },
         }
     }
 }

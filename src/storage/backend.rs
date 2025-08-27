@@ -1,26 +1,142 @@
+use crate::error::StorageError;
 use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
+use fs4::fs_std::FileExt;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use sysinfo::{ProcessesToUpdate, System};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum StorageBackend {
     Memory,
-    File(crate::storage::file::SyncMode),
+    File {
+        sync_mode: crate::storage::file::SyncMode,
+        _directory_lock: std::fs::File, // Directory lock for "./data"
+    },
     FileWithPath {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: std::path::PathBuf,
+        _directory_lock: std::fs::File, // Directory lock for custom path
     },
 }
 
+// Helper function to acquire directory lock
+fn acquire_directory_lock<P: AsRef<Path>>(data_dir: P) -> Result<File, StorageError> {
+    let data_dir = data_dir.as_ref();
+    let lock_path = data_dir.join(".flashq.lock");
+
+    // Create data directory if it doesn't exist
+    if !data_dir.exists() {
+        std::fs::create_dir_all(data_dir)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to create data directory"))?;
+    }
+
+    // Try to create and lock the file
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&lock_path)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to create lock file"))?;
+
+    // Try to acquire exclusive lock (non-blocking)
+    match lock_file.try_lock_exclusive() {
+        Ok(true) => {
+            // Write current process info to lock file for diagnostics
+            let pid = std::process::id();
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let lock_info = format!("PID: {pid}\nTimestamp: {timestamp}\n");
+
+            if lock_file.set_len(0).is_err() {
+                // Ignore errors - lock_info write is best effort
+            }
+            if (&lock_file).write_all(lock_info.as_bytes()).is_err() {
+                // Ignore errors - lock_info write is best effort
+            }
+
+            Ok(lock_file)
+        }
+        Ok(false) | Err(_) => {
+            // Try to read existing lock file to get PID info
+            let existing_pid = std::fs::read_to_string(&lock_path)
+                .ok()
+                .and_then(|content| {
+                    content
+                        .lines()
+                        .find(|line| line.starts_with("PID:"))
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .and_then(|pid_str| pid_str.parse::<u32>().ok())
+                });
+
+            // Check if the process is still running
+            let pid = match existing_pid {
+                Some(pid) => {
+                    let mut system = System::new();
+                    system.refresh_processes(ProcessesToUpdate::All, false);
+                    if system
+                        .processes()
+                        .get(&sysinfo::Pid::from(pid as usize))
+                        .is_some()
+                    {
+                        Some(pid)
+                    } else {
+                        // Stale lock - try to remove it and retry once
+                        if std::fs::remove_file(&lock_path).is_ok() {
+                            // Retry lock acquisition once for stale lock
+                            return acquire_directory_lock(data_dir);
+                        }
+                        None
+                    }
+                }
+                None => None,
+            };
+
+            Err(StorageError::DirectoryLocked {
+                context: "Storage directory is already in use by another FlashQ instance"
+                    .to_string(),
+                pid,
+            })
+        }
+    }
+}
 impl StorageBackend {
+    pub fn new_memory() -> Self {
+        StorageBackend::Memory
+    }
+
+    pub fn new_file(sync_mode: crate::storage::file::SyncMode) -> Result<Self, StorageError> {
+        let data_dir = PathBuf::from("./data");
+        let directory_lock = acquire_directory_lock(&data_dir)?;
+        Ok(StorageBackend::File {
+            sync_mode,
+            _directory_lock: directory_lock,
+        })
+    }
+
+    pub fn new_file_with_path<P: AsRef<Path>>(
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: P,
+    ) -> Result<Self, StorageError> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let directory_lock = acquire_directory_lock(&data_dir)?;
+        Ok(StorageBackend::FileWithPath {
+            sync_mode,
+            data_dir,
+            _directory_lock: directory_lock,
+        })
+    }
+
     pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog>, Box<dyn std::error::Error>> {
         match self {
             StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
-            StorageBackend::File(sync_mode) => {
+            StorageBackend::File { sync_mode, .. } => {
                 let file_log = crate::storage::file::FileTopicLog::new_default(topic, *sync_mode)?;
                 Ok(Box::new(file_log))
             }
             StorageBackend::FileWithPath {
                 sync_mode,
                 data_dir,
+                ..
             } => {
                 let file_log =
                     crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
@@ -37,7 +153,7 @@ impl StorageBackend {
             StorageBackend::Memory => {
                 Ok(Box::new(InMemoryConsumerGroup::new(group_id.to_string())))
             }
-            StorageBackend::File(sync_mode) => {
+            StorageBackend::File { sync_mode, .. } => {
                 let consumer_group =
                     crate::storage::file::FileConsumerGroup::new_default(group_id, *sync_mode)?;
                 Ok(Box::new(consumer_group))
@@ -45,6 +161,7 @@ impl StorageBackend {
             StorageBackend::FileWithPath {
                 sync_mode,
                 data_dir,
+                ..
             } => {
                 let consumer_group =
                     crate::storage::file::FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
@@ -62,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_storage_backend_memory() {
-        let backend = StorageBackend::Memory;
+        let backend = StorageBackend::new_memory();
         let mut storage = backend.create("test_topic").unwrap();
 
         assert_eq!(storage.len(), 0);
@@ -77,17 +194,11 @@ mod tests {
     }
 
     #[test]
-    fn test_storage_backend_enum_equality() {
-        let backend1 = StorageBackend::Memory;
-        let backend2 = StorageBackend::Memory;
-        assert_eq!(backend1, backend2);
-
-        use crate::storage::file::SyncMode;
-        let backend3 = StorageBackend::File(SyncMode::Immediate);
-        let backend4 = StorageBackend::File(SyncMode::Immediate);
-        assert_eq!(backend3, backend4);
-
-        assert_ne!(backend1, backend3);
+    fn test_memory_backend_creation() {
+        // Test memory backend creation (no filesystem involved)
+        let backend = StorageBackend::new_memory();
+        let _storage = backend.create("test_topic").unwrap();
+        let _consumer_group = backend.create_consumer_group("test_group").unwrap();
     }
 
     #[test]

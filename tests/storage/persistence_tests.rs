@@ -42,10 +42,9 @@ fn test_flashq_persistence_across_instances() {
 
     // Action: Create FlashQ, add records, and drop it
     {
-        let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-            sync_mode: config.sync_mode,
-            data_dir: temp_dir.clone(),
-        });
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
 
         queue
             .post_record(
@@ -62,10 +61,9 @@ fn test_flashq_persistence_across_instances() {
     } // Queue goes out of scope
 
     // Action: Create new FlashQ instance
-    let new_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: temp_dir.clone(),
-    });
+    let new_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+    );
 
     // Expectation: Should recover existing records
     let records = new_queue.poll_records(&topic_name, None).unwrap();
@@ -85,10 +83,9 @@ fn test_offset_continuation_after_recovery() {
 
     // Action: Create queue, add records, drop it
     {
-        let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-            sync_mode: config.sync_mode,
-            data_dir: temp_dir.clone(),
-        });
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
         queue
             .post_record(
                 topic_name.clone(),
@@ -98,10 +95,9 @@ fn test_offset_continuation_after_recovery() {
     }
 
     // Action: Create new instance and add more records
-    let new_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: temp_dir.clone(),
-    });
+    let new_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+    );
 
     let new_offset = new_queue
         .post_record(
@@ -125,10 +121,9 @@ fn test_empty_data_directory_recovery() {
     let config = TestConfig::new("empty_recovery");
 
     // Action: Create FlashQ with empty data directory
-    let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
-        sync_mode: config.sync_mode,
-        data_dir: config.temp_dir.clone(),
-    });
+    let queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+    );
 
     // Expectation: Should handle empty directory gracefully - polling non-existent topic should return error
     let poll_result = queue.poll_records(&config.topic_name, None);

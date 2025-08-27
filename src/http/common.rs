@@ -449,9 +449,7 @@ impl From<FlashQError> for ErrorResponse {
                 max_offset,
             } => Self::with_details(
                 "invalid_offset",
-                &format!(
-                    "Invalid offset {offset} for topic '{topic}', max offset is {max_offset}"
-                ),
+                &format!("Invalid offset {offset} for topic '{topic}', max offset is {max_offset}"),
                 serde_json::json!({
                     "offset": offset,
                     "topic": topic,
