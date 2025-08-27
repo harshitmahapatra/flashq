@@ -1,72 +1,128 @@
-use flashq::Record;
+use super::test_utilities::*;
 use flashq::storage::StorageBackend;
 use flashq::storage::file::SyncMode;
-use std::time::{SystemTime, UNIX_EPOCH};
+use flashq::{FlashQ, Record};
 
 #[test]
-fn test_storage_backend_file() {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let test_id = format!("{}_{}", std::process::id(), timestamp);
-    let temp_dir = std::env::temp_dir().join(format!("flashq_backend_test_{test_id}"));
-    let topic_name = format!("test_topic_{test_id}");
+fn test_memory_vs_file_basic_operations() {
+    // Setup
+    let config = TestConfig::new("basic_compat");
+    let topic_name = config.topic_name.clone();
 
-    let backend = StorageBackend::FileWithPath {
-        sync_mode: SyncMode::Immediate,
-        data_dir: temp_dir.clone(),
-    };
-    let mut storage = backend.create(&topic_name).unwrap();
+    // Action: Test same operations on both backends
+    let memory_queue = FlashQ::with_storage_backend(StorageBackend::Memory);
+    let file_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
+        sync_mode: config.sync_mode,
+        data_dir: config.temp_dir.clone(),
+    });
 
-    assert_eq!(storage.len(), 0);
-    assert!(storage.is_empty());
-    assert_eq!(storage.next_offset(), 0);
+    let test_record = Record::new(Some("test_key".to_string()), "test_value".to_string(), None);
 
-    let record = Record::new(None, "test".to_string(), None);
-    let offset = storage.append(record);
-    assert_eq!(offset, 0);
-    assert_eq!(storage.len(), 1);
-    assert_eq!(storage.next_offset(), 1);
+    // Action & Expectation: Both should behave identically
+    let memory_offset = memory_queue.post_record(topic_name.clone(), test_record.clone()).unwrap();
+    let file_offset = file_queue.post_record(topic_name.clone(), test_record.clone()).unwrap();
+    
+    assert_eq!(memory_offset, file_offset); // Both should start at 0
+    
+    let memory_records = memory_queue.poll_records(&topic_name, None).unwrap();
+    let file_records = file_queue.poll_records(&topic_name, None).unwrap();
+    
+    assert_eq!(memory_records.len(), file_records.len());
+    assert_eq!(memory_records[0].record.value, file_records[0].record.value);
+    assert_eq!(memory_records[0].offset, file_records[0].offset);
+}
 
-    // Clean up
-    std::fs::remove_dir_all(&temp_dir).ok();
+#[test]  
+fn test_consumer_group_compatibility() {
+    // Setup
+    let config = TestConfig::new("consumer_compat");
+    let group_id = create_test_consumer_group("compat");
+    let topic_name = config.topic_name.clone();
+
+    let memory_queue = FlashQ::with_storage_backend(StorageBackend::Memory);
+    let file_queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
+        sync_mode: config.sync_mode,
+        data_dir: config.temp_dir.clone(),
+    });
+
+    // Action: Add identical records to both
+    for i in 0..3 {
+        let record = Record::new(None, format!("message_{}", i), None);
+        memory_queue.post_record(topic_name.clone(), record.clone()).unwrap();
+        file_queue.post_record(topic_name.clone(), record.clone()).unwrap();
+    }
+
+    // Action: Create consumer groups and consume partially
+    let _memory_group = memory_queue.create_consumer_group(group_id.clone()).unwrap();
+    let _file_group = file_queue.create_consumer_group(group_id.clone()).unwrap();
+
+    let memory_batch = memory_queue.poll_records_for_consumer_group(&group_id, &topic_name, Some(2)).unwrap();
+    let file_batch = file_queue.poll_records_for_consumer_group(&group_id, &topic_name, Some(2)).unwrap();
+
+    // Expectation: Both should behave identically
+    assert_eq!(memory_batch.len(), file_batch.len());
+    assert_eq!(memory_batch.len(), 2);
+    
+    for (memory_record, file_record) in memory_batch.iter().zip(file_batch.iter()) {
+        assert_eq!(memory_record.record.value, file_record.record.value);
+        assert_eq!(memory_record.offset, file_record.offset);
+    }
 }
 
 #[test]
-fn test_file_storage_vs_memory_storage_compatibility() {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let test_id = format!("{}_{}", std::process::id(), timestamp);
-    let topic_name = format!("compatibility_test_{test_id}");
-    let temp_dir = std::env::temp_dir().join(format!("flashq_compatibility_test_{test_id}"));
+fn test_sync_mode_behavior() {
+    // Setup
+    let config = TestConfig::new("sync_modes");
+    let topic_name = config.topic_name.clone();
 
-    // Test that both backends provide the same interface and behavior
+    // Test different sync modes
+    let sync_modes = [SyncMode::Immediate, SyncMode::None];
+    
+    for (i, sync_mode) in sync_modes.iter().enumerate() {
+        // Action: Create queue with specific sync mode
+        let queue = FlashQ::with_storage_backend(StorageBackend::FileWithPath {
+            sync_mode: *sync_mode,
+            data_dir: config.temp_dir.clone(),
+        });
+
+        // Use unique topic name for each sync mode
+        let mode_topic = format!("{}_{}", topic_name, i);
+
+        // Action: Post record
+        let record = Record::new(None, format!("sync_test_{:?}", sync_mode), None);
+        let offset = queue.post_record(mode_topic.clone(), record).unwrap();
+
+        // Expectation: Should work regardless of sync mode
+        assert_eq!(offset, 0);
+        
+        let records = queue.poll_records(&mode_topic, None).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record.value, format!("sync_test_{:?}", sync_mode));
+    }
+}
+
+#[test]
+fn test_file_storage_vs_memory_storage_interface() {
+    // Setup
+    let config = TestConfig::new("interface_compat");
+    let group_id = create_test_consumer_group("interface");
+
+    // Action & Expectation: Both backends should implement same interface
     let memory_backend = StorageBackend::Memory;
-    let mut memory_storage = memory_backend.create(&topic_name).unwrap();
-
     let file_backend = StorageBackend::FileWithPath {
-        sync_mode: SyncMode::Immediate,
-        data_dir: temp_dir.clone(),
+        sync_mode: config.sync_mode,
+        data_dir: config.temp_dir.clone(),
     };
-    let mut file_storage = file_backend.create(&topic_name).unwrap();
 
-    let record = Record::new(Some("test_key".to_string()), "test_value".to_string(), None);
-
-    let memory_offset = memory_storage.append(record.clone());
-    let file_offset = file_storage.append(record);
-
-    let memory_records = memory_storage.get_records_from_offset(0, None);
-    let file_records = file_storage.get_records_from_offset(0, None);
-
-    // Both should give same results
-    assert_eq!(memory_offset, file_offset);
-    assert_eq!(memory_records.len(), file_records.len());
-    assert_eq!(memory_records[0].record.value, file_records[0].record.value);
-    assert_eq!(memory_records[0].record.key, file_records[0].record.key);
-
-    // Clean up
-    std::fs::remove_dir_all(&temp_dir).ok();
+    // Consumer group creation should work identically
+    let memory_group = memory_backend.create_consumer_group(&group_id).unwrap();
+    let file_group = file_backend.create_consumer_group(&group_id).unwrap();
+    
+    assert_eq!(memory_group.group_id(), file_group.group_id());
+    
+    // Default offset behavior should be identical
+    assert_eq!(
+        memory_group.get_offset("any_topic"), 
+        file_group.get_offset("any_topic")
+    );
 }
