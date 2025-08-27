@@ -207,7 +207,8 @@ async fn test_consumer_group_persistence_across_restarts() {
         .unwrap()
         .as_nanos();
     let test_id = format!("{}_{}", std::process::id(), timestamp);
-    let shared_data_dir = std::env::temp_dir().join(format!("flashq_consumer_persistence_test_{test_id}"));
+    let shared_data_dir =
+        std::env::temp_dir().join(format!("flashq_consumer_persistence_test_{test_id}"));
 
     let topic = unique_topic();
     let group_id1 = unique_consumer_group();
@@ -226,7 +227,7 @@ async fn test_consumer_group_persistence_across_restarts() {
             client
                 .post_record(&topic, &format!("Message {i}"))
                 .await
-                .expect(&format!("Should post record {i}"));
+                .unwrap_or_else(|_| panic!("Should post record {i}"));
         }
 
         // Create consumer groups
@@ -251,14 +252,14 @@ async fn test_consumer_group_persistence_across_restarts() {
             .await
             .expect("Should parse fetch response");
         assert_eq!(fetch_data.records.len(), 2);
-        
+
         // Update group 1 offset to 2
         client
             .update_consumer_group_offset(&group_id1, &topic, 2)
             .await
             .expect("Should update group 1 offset");
 
-        // Group 2 consumes first 3 records  
+        // Group 2 consumes first 3 records
         let fetch_response = client
             .fetch_records_for_consumer_group(&group_id2, &topic, Some(3))
             .await
@@ -365,7 +366,8 @@ async fn test_consumer_group_cross_restart_updates() {
         .unwrap()
         .as_nanos();
     let test_id = format!("{}_{}", std::process::id(), timestamp);
-    let shared_data_dir = std::env::temp_dir().join(format!("flashq_consumer_updates_test_{test_id}"));
+    let shared_data_dir =
+        std::env::temp_dir().join(format!("flashq_consumer_updates_test_{test_id}"));
 
     let topic = unique_topic();
     let group_id = unique_consumer_group();
@@ -383,7 +385,7 @@ async fn test_consumer_group_cross_restart_updates() {
             client
                 .post_record(&topic, &format!("Message {i}"))
                 .await
-                .expect(&format!("Should post record {i}"));
+                .unwrap_or_else(|_| panic!("Should post record {i}"));
         }
 
         // Create consumer group and consume some records

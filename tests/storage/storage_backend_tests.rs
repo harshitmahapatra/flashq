@@ -111,10 +111,7 @@ fn test_sync_mode_behavior() {
 
         let records = queue.poll_records(&mode_topic, None).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].record.value,
-            format!("sync_test_{sync_mode:?}")
-        );
+        assert_eq!(records[0].record.value, format!("sync_test_{sync_mode:?}"));
     }
 }
 
