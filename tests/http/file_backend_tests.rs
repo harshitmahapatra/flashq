@@ -200,6 +200,277 @@ async fn test_file_backend_persistence_across_restarts() {
 }
 
 #[tokio::test]
+async fn test_consumer_group_persistence_across_restarts() {
+    // Create a unique temporary directory for this test
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let test_id = format!("{}_{}", std::process::id(), timestamp);
+    let shared_data_dir = std::env::temp_dir().join(format!("flashq_consumer_persistence_test_{test_id}"));
+
+    let topic = unique_topic();
+    let group_id1 = unique_consumer_group();
+    let group_id2 = unique_consumer_group();
+
+    // First server instance - create consumer groups and set offsets
+    {
+        let server = TestServer::start_with_data_dir(&shared_data_dir)
+            .await
+            .expect("Server should start with file backend");
+
+        let client = TestClient::new(&server);
+
+        // Post several records
+        for i in 1..=5 {
+            client
+                .post_record(&topic, &format!("Message {i}"))
+                .await
+                .expect(&format!("Should post record {i}"));
+        }
+
+        // Create consumer groups
+        client
+            .create_consumer_group(&group_id1)
+            .await
+            .expect("Should create consumer group 1");
+
+        client
+            .create_consumer_group(&group_id2)
+            .await
+            .expect("Should create consumer group 2");
+
+        // Group 1 consumes first 2 records
+        let fetch_response = client
+            .fetch_records_for_consumer_group(&group_id1, &topic, Some(2))
+            .await
+            .expect("Should fetch records for group 1");
+
+        let fetch_data: FetchResponse = fetch_response
+            .json()
+            .await
+            .expect("Should parse fetch response");
+        assert_eq!(fetch_data.records.len(), 2);
+        
+        // Update group 1 offset to 2
+        client
+            .update_consumer_group_offset(&group_id1, &topic, 2)
+            .await
+            .expect("Should update group 1 offset");
+
+        // Group 2 consumes first 3 records  
+        let fetch_response = client
+            .fetch_records_for_consumer_group(&group_id2, &topic, Some(3))
+            .await
+            .expect("Should fetch records for group 2");
+
+        let fetch_data: FetchResponse = fetch_response
+            .json()
+            .await
+            .expect("Should parse fetch response");
+        assert_eq!(fetch_data.records.len(), 3);
+
+        // Update group 2 offset to 3
+        client
+            .update_consumer_group_offset(&group_id2, &topic, 3)
+            .await
+            .expect("Should update group 2 offset");
+
+        // Debug: Check what consumer group files were created
+        eprintln!("DEBUG: Files in consumer_groups directory after first server:");
+        let consumer_groups_dir = shared_data_dir.join("consumer_groups");
+        if consumer_groups_dir.exists() {
+            for entry in fs::read_dir(&consumer_groups_dir).unwrap() {
+                let entry = entry.unwrap();
+                eprintln!("  - {:?}", entry.path());
+            }
+        }
+    } // Server drops here
+
+    // Small delay to ensure server shutdown
+    sleep(Duration::from_millis(100)).await;
+
+    // Second server instance - should recover consumer group state
+    {
+        let server = TestServer::start_with_data_dir(&shared_data_dir)
+            .await
+            .expect("Server should start with file backend after restart");
+
+        let client = TestClient::new(&server);
+
+        // Get consumer group offsets - should be recovered from disk
+        let offset_response = client
+            .get_consumer_group_offset(&group_id1, &topic)
+            .await
+            .expect("Should get consumer group 1 offset");
+
+        assert_eq!(offset_response.status(), 200);
+        let offset_data: OffsetResponse = offset_response
+            .json()
+            .await
+            .expect("Should parse offset response");
+        assert_eq!(offset_data.committed_offset, 2);
+
+        let offset_response = client
+            .get_consumer_group_offset(&group_id2, &topic)
+            .await
+            .expect("Should get consumer group 2 offset");
+
+        assert_eq!(offset_response.status(), 200);
+        let offset_data: OffsetResponse = offset_response
+            .json()
+            .await
+            .expect("Should parse offset response");
+        assert_eq!(offset_data.committed_offset, 3);
+
+        // Verify consumer groups can fetch from correct offsets
+        let fetch_response = client
+            .fetch_records_for_consumer_group(&group_id1, &topic, None)
+            .await
+            .expect("Should fetch remaining records for group 1");
+
+        let fetch_data: FetchResponse = fetch_response
+            .json()
+            .await
+            .expect("Should parse fetch response");
+        assert_eq!(fetch_data.records.len(), 3); // Records 2, 3, 4 (offsets 2-4)
+        assert_eq!(fetch_data.records[0].record.value, "Message 3");
+        assert_eq!(fetch_data.records[0].offset, 2);
+
+        let fetch_response = client
+            .fetch_records_for_consumer_group(&group_id2, &topic, None)
+            .await
+            .expect("Should fetch remaining records for group 2");
+
+        let fetch_data: FetchResponse = fetch_response
+            .json()
+            .await
+            .expect("Should parse fetch response");
+        assert_eq!(fetch_data.records.len(), 2); // Records 3, 4 (offsets 3-4)
+        assert_eq!(fetch_data.records[0].record.value, "Message 4");
+        assert_eq!(fetch_data.records[0].offset, 3);
+    }
+
+    // Clean up the shared directory
+    if shared_data_dir.exists() {
+        fs::remove_dir_all(shared_data_dir).ok();
+    }
+}
+
+#[tokio::test]
+async fn test_consumer_group_cross_restart_updates() {
+    // Test that consumer group offset updates persist across server restarts
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let test_id = format!("{}_{}", std::process::id(), timestamp);
+    let shared_data_dir = std::env::temp_dir().join(format!("flashq_consumer_updates_test_{test_id}"));
+
+    let topic = unique_topic();
+    let group_id = unique_consumer_group();
+
+    // First server - create consumer group and set initial offset
+    {
+        let server = TestServer::start_with_data_dir(&shared_data_dir)
+            .await
+            .expect("Server should start");
+
+        let client = TestClient::new(&server);
+
+        // Post records
+        for i in 1..=10 {
+            client
+                .post_record(&topic, &format!("Message {i}"))
+                .await
+                .expect(&format!("Should post record {i}"));
+        }
+
+        // Create consumer group and consume some records
+        client
+            .create_consumer_group(&group_id)
+            .await
+            .expect("Should create consumer group");
+
+        client
+            .update_consumer_group_offset(&group_id, &topic, 5)
+            .await
+            .expect("Should set initial offset");
+    }
+
+    sleep(Duration::from_millis(100)).await;
+
+    // Second server - update offset further
+    {
+        let server = TestServer::start_with_data_dir(&shared_data_dir)
+            .await
+            .expect("Server should restart");
+
+        let client = TestClient::new(&server);
+
+        // Verify initial offset was persisted
+        let offset_response = client
+            .get_consumer_group_offset(&group_id, &topic)
+            .await
+            .expect("Should get offset");
+
+        let offset_data: OffsetResponse = offset_response
+            .json()
+            .await
+            .expect("Should parse offset response");
+        assert_eq!(offset_data.committed_offset, 5);
+
+        // Update offset
+        client
+            .update_consumer_group_offset(&group_id, &topic, 8)
+            .await
+            .expect("Should update offset");
+    }
+
+    sleep(Duration::from_millis(100)).await;
+
+    // Third server - verify final offset persisted
+    {
+        let server = TestServer::start_with_data_dir(&shared_data_dir)
+            .await
+            .expect("Server should restart again");
+
+        let client = TestClient::new(&server);
+
+        // Verify updated offset was persisted
+        let offset_response = client
+            .get_consumer_group_offset(&group_id, &topic)
+            .await
+            .expect("Should get final offset");
+
+        let offset_data: OffsetResponse = offset_response
+            .json()
+            .await
+            .expect("Should parse offset response");
+        assert_eq!(offset_data.committed_offset, 8);
+
+        // Fetch from this offset to verify it works
+        let fetch_response = client
+            .fetch_records_for_consumer_group(&group_id, &topic, None)
+            .await
+            .expect("Should fetch from persisted offset");
+
+        let fetch_data: FetchResponse = fetch_response
+            .json()
+            .await
+            .expect("Should parse fetch response");
+        assert_eq!(fetch_data.records.len(), 2); // Records 8, 9 (offsets 8-9)
+        assert_eq!(fetch_data.records[0].record.value, "Message 9");
+        assert_eq!(fetch_data.records[0].offset, 8);
+    }
+
+    // Clean up
+    if shared_data_dir.exists() {
+        fs::remove_dir_all(shared_data_dir).ok();
+    }
+}
+
+#[tokio::test]
 async fn test_file_backend_creates_data_directory() {
     let server = TestServer::start_with_storage("file")
         .await
