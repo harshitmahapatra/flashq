@@ -91,9 +91,7 @@ fn test_concurrent_access_prevention() {
 
         match result {
             Err(StorageError::DirectoryLocked { .. }) => {}
-            _ => panic!(
-                "Attempt {i} should have failed with DirectoryLocked error"
-            ),
+            _ => panic!("Attempt {i} should have failed with DirectoryLocked error"),
         }
     }
 }
