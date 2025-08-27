@@ -102,21 +102,39 @@ async fn test_multiple_topic_offsets() {
 
     // Post records to both topics
     for i in 0..3 {
-        helper.post_record(topic1, &format!("Topic1 Record {i}")).await.unwrap();
-        helper.post_record(topic2, &format!("Topic2 Record {i}")).await.unwrap();
+        helper
+            .post_record(topic1, &format!("Topic1 Record {i}"))
+            .await
+            .unwrap();
+        helper
+            .post_record(topic2, &format!("Topic2 Record {i}"))
+            .await
+            .unwrap();
     }
 
     // Set different offsets for each topic
-    helper.update_consumer_group_offset(group_id, topic1, 1).await.unwrap();
-    helper.update_consumer_group_offset(group_id, topic2, 2).await.unwrap();
+    helper
+        .update_consumer_group_offset(group_id, topic1, 1)
+        .await
+        .unwrap();
+    helper
+        .update_consumer_group_offset(group_id, topic2, 2)
+        .await
+        .unwrap();
 
     // Verify offsets are independent
-    let response1 = helper.get_consumer_group_offset(group_id, topic1).await.unwrap();
+    let response1 = helper
+        .get_consumer_group_offset(group_id, topic1)
+        .await
+        .unwrap();
     let offset_response1: OffsetResponse = response1.json().await.unwrap();
     assert_eq!(offset_response1.committed_offset, 1);
     assert_eq!(offset_response1.lag, 2);
 
-    let response2 = helper.get_consumer_group_offset(group_id, topic2).await.unwrap();
+    let response2 = helper
+        .get_consumer_group_offset(group_id, topic2)
+        .await
+        .unwrap();
     let offset_response2: OffsetResponse = response2.json().await.unwrap();
     assert_eq!(offset_response2.committed_offset, 2);
     assert_eq!(offset_response2.lag, 1);
@@ -136,6 +154,8 @@ async fn test_offset_operations_for_nonexistent_groups() {
     assert!(response.is_err() || !response.unwrap().status().is_success());
 
     // Try to update offset for non-existent group
-    let response = helper.update_consumer_group_offset(invalid_group, topic, 5).await;
+    let response = helper
+        .update_consumer_group_offset(invalid_group, topic, 5)
+        .await;
     assert!(response.is_err() || !response.unwrap().status().is_success());
 }

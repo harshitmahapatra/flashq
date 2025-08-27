@@ -8,7 +8,7 @@ fn unique_consumer_group() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("test_group_{}", timestamp)
+    format!("test_group_{timestamp}")
 }
 
 fn unique_topic() -> String {
@@ -16,7 +16,7 @@ fn unique_topic() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("test_topic_{}", timestamp)
+    format!("test_topic_{timestamp}")
 }
 
 #[tokio::test]
@@ -28,15 +28,23 @@ async fn test_memory_backend_basic_operations() {
     let topic = unique_topic();
 
     // Test basic post and poll operations with memory backend (default)
-    let response = client.post_record(&topic, "Memory test record").await.unwrap();
+    let response = client
+        .post_record(&topic, "Memory test record")
+        .await
+        .unwrap();
     assert!(response.status().is_success());
 
-    let response = client.poll_records_for_testing(&topic, Some(1)).await.unwrap();
-    let poll_data = client.assert_poll_response(response, 1, Some(&["Memory test record"])).await;
+    let response = client
+        .poll_records_for_testing(&topic, Some(1))
+        .await
+        .unwrap();
+    let poll_data = client
+        .assert_poll_response(response, 1, Some(&["Memory test record"]))
+        .await;
     assert_eq!(poll_data.records.len(), 1);
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_file_backend_basic_operations() {
     let server = TestServer::start_with_storage("file")
         .await
@@ -45,11 +53,19 @@ async fn test_file_backend_basic_operations() {
     let topic = unique_topic();
 
     // Test basic post and poll operations with file backend
-    let response = client.post_record(&topic, "File test record").await.unwrap();
+    let response = client
+        .post_record(&topic, "File test record")
+        .await
+        .unwrap();
     assert!(response.status().is_success());
 
-    let response = client.poll_records_for_testing(&topic, Some(1)).await.unwrap();
-    let poll_data = client.assert_poll_response(response, 1, Some(&["File test record"])).await;
+    let response = client
+        .poll_records_for_testing(&topic, Some(1))
+        .await
+        .unwrap();
+    let poll_data = client
+        .assert_poll_response(response, 1, Some(&["File test record"]))
+        .await;
     assert_eq!(poll_data.records.len(), 1);
 
     // Verify data directory was created
@@ -62,10 +78,15 @@ async fn test_file_backend_basic_operations() {
 #[tokio::test]
 async fn test_file_backend_persistence_across_restarts() {
     let topic = unique_topic();
-    
+
     // Create a temporary directory for this test
-    let temp_dir = std::env::temp_dir().join(format!("flashq_persistence_test_{}", 
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "flashq_persistence_test_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     // Start server with file backend
@@ -76,7 +97,10 @@ async fn test_file_backend_persistence_across_restarts() {
 
     // Post records
     for i in 0..5 {
-        client.post_record(&topic, &format!("Persistent record {}", i)).await.unwrap();
+        client
+            .post_record(&topic, &format!("Persistent record {i}"))
+            .await
+            .unwrap();
     }
 
     // Verify records exist
@@ -95,7 +119,10 @@ async fn test_file_backend_persistence_across_restarts() {
     let client2 = TestClient::new(&server2);
 
     // Verify records persisted across restart
-    let response = client2.poll_records_for_testing(&topic, None).await.unwrap();
+    let response = client2
+        .poll_records_for_testing(&topic, None)
+        .await
+        .unwrap();
     let poll_data = client2.assert_poll_response(response, 5, None).await;
     assert_eq!(poll_data.high_water_mark, 5);
     assert_eq!(poll_data.records[0].record.value, "Persistent record 0");
@@ -110,10 +137,15 @@ async fn test_file_backend_persistence_across_restarts() {
 async fn test_consumer_group_persistence_across_restarts() {
     let topic = unique_topic();
     let group_id = unique_consumer_group();
-    
+
     // Create a temporary directory for this test
-    let temp_dir = std::env::temp_dir().join(format!("flashq_consumer_persistence_test_{}", 
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "flashq_consumer_persistence_test_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     // Start server with file backend
@@ -124,16 +156,25 @@ async fn test_consumer_group_persistence_across_restarts() {
 
     // Create consumer group and post records
     client.create_consumer_group(&group_id).await.unwrap();
-    
+
     for i in 0..3 {
-        client.post_record(&topic, &format!("Consumer record {}", i)).await.unwrap();
+        client
+            .post_record(&topic, &format!("Consumer record {i}"))
+            .await
+            .unwrap();
     }
 
     // Commit offset to 2
-    client.update_consumer_group_offset(&group_id, &topic, 2).await.unwrap();
+    client
+        .update_consumer_group_offset(&group_id, &topic, 2)
+        .await
+        .unwrap();
 
     // Verify offset
-    let response = client.get_consumer_group_offset(&group_id, &topic).await.unwrap();
+    let response = client
+        .get_consumer_group_offset(&group_id, &topic)
+        .await
+        .unwrap();
     let offset_response: OffsetResponse = response.json().await.unwrap();
     assert_eq!(offset_response.committed_offset, 2);
 
@@ -148,7 +189,10 @@ async fn test_consumer_group_persistence_across_restarts() {
     let client2 = TestClient::new(&server2);
 
     // Verify consumer group and offset persisted
-    let response = client2.get_consumer_group_offset(&group_id, &topic).await.unwrap();
+    let response = client2
+        .get_consumer_group_offset(&group_id, &topic)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
     let offset_response: OffsetResponse = response.json().await.unwrap();
     assert_eq!(offset_response.committed_offset, 2);
@@ -162,14 +206,14 @@ async fn test_consumer_group_persistence_across_restarts() {
 #[tokio::test]
 async fn test_memory_vs_file_backend_consistency() {
     let topic = unique_topic();
-    
+
     // Test with memory backend
     let memory_server = TestServer::start()
         .await
         .expect("Failed to start memory server");
     let memory_client = TestClient::new(&memory_server);
 
-    // Test with file backend  
+    // Test with file backend
     let file_server = TestServer::start_with_storage("file")
         .await
         .expect("Failed to start file server");
@@ -177,23 +221,33 @@ async fn test_memory_vs_file_backend_consistency() {
 
     // Post same records to both backends
     let test_records = vec!["Record A", "Record B", "Record C"];
-    
+
     for record in &test_records {
         memory_client.post_record(&topic, record).await.unwrap();
         file_client.post_record(&topic, record).await.unwrap();
     }
 
     // Poll from both backends
-    let memory_response = memory_client.poll_records_for_testing(&topic, None).await.unwrap();
-    let memory_data = memory_client.assert_poll_response(memory_response, 3, Some(&test_records)).await;
+    let memory_response = memory_client
+        .poll_records_for_testing(&topic, None)
+        .await
+        .unwrap();
+    let memory_data = memory_client
+        .assert_poll_response(memory_response, 3, Some(&test_records))
+        .await;
 
-    let file_response = file_client.poll_records_for_testing(&topic, None).await.unwrap();  
-    let file_data = file_client.assert_poll_response(file_response, 3, Some(&test_records)).await;
+    let file_response = file_client
+        .poll_records_for_testing(&topic, None)
+        .await
+        .unwrap();
+    let file_data = file_client
+        .assert_poll_response(file_response, 3, Some(&test_records))
+        .await;
 
     // Verify both backends have consistent behavior
     assert_eq!(memory_data.records.len(), file_data.records.len());
     assert_eq!(memory_data.high_water_mark, file_data.high_water_mark);
-    
+
     for (memory_record, file_record) in memory_data.records.iter().zip(file_data.records.iter()) {
         assert_eq!(memory_record.offset, file_record.offset);
         assert_eq!(memory_record.record.value, file_record.record.value);
@@ -210,15 +264,18 @@ async fn test_file_backend_creates_data_directory() {
     let topic = unique_topic();
 
     // Post a record to ensure directory creation
-    client.post_record(&topic, "Directory test record").await.unwrap();
+    client
+        .post_record(&topic, "Directory test record")
+        .await
+        .unwrap();
 
     // Verify data directory exists
     if let Some(data_dir) = server.data_dir() {
         assert!(data_dir.exists());
         assert!(data_dir.is_dir());
-        
+
         // Check that topic log file was created
-        let topic_file = data_dir.join(format!("{}.log", topic));
+        let topic_file = data_dir.join(format!("{topic}.log"));
         assert!(topic_file.exists());
         assert!(topic_file.is_file());
     } else {

@@ -121,13 +121,15 @@ async fn test_basic_polling_for_testing() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    
-    let poll_data = helper.assert_poll_response(
-        response, 
-        3, 
-        Some(&["Poll Record 0", "Poll Record 1", "Poll Record 2"])
-    ).await;
-    
+
+    let poll_data = helper
+        .assert_poll_response(
+            response,
+            3,
+            Some(&["Poll Record 0", "Poll Record 1", "Poll Record 2"]),
+        )
+        .await;
+
     assert_eq!(poll_data.records.len(), 3);
     assert_eq!(poll_data.high_water_mark, 5);
 }
@@ -164,10 +166,7 @@ async fn test_polling_with_max_records_limit() {
     assert_eq!(poll_data.records.len(), 5);
 
     // Test no limit (should return all records)
-    let response = helper
-        .poll_records_for_testing(topic, None)
-        .await
-        .unwrap();
+    let response = helper.poll_records_for_testing(topic, None).await.unwrap();
     let poll_data = helper.assert_poll_response(response, 10, None).await;
     assert_eq!(poll_data.records.len(), 10);
 }
