@@ -95,3 +95,25 @@ fn test_concurrent_access_prevention() {
         }
     }
 }
+
+#[test]
+fn test_lock_file_cleanup_on_drop() {
+    let temp_dir = tempdir().expect("Failed to create temp dir");
+    let test_data_dir = temp_dir.path().join("test_data");
+
+    let lock_file_path = test_data_dir.join(".flashq.lock");
+
+    // Create backend and verify lock file exists
+    let backend = StorageBackend::new_file_with_path(
+        flashq::storage::file::SyncMode::Immediate,
+        &test_data_dir,
+    )
+    .expect("Backend creation should succeed");
+
+    assert!(lock_file_path.exists(), "Lock file should exist after backend creation");
+
+    // Drop backend and verify lock file is removed
+    drop(backend);
+
+    assert!(!lock_file_path.exists(), "Lock file should be removed after backend drop");
+}

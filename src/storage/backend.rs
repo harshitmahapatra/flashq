@@ -15,6 +15,18 @@ pub enum StorageBackend {
         _directory_lock: std::fs::File,
     },
 }
+impl Drop for StorageBackend {
+    fn drop(&mut self) {
+        if let StorageBackend::File { data_dir, .. } = self {
+            let lock_path = data_dir.join(".flashq.lock");
+            if lock_path.exists() {
+                if let Err(e) = std::fs::remove_file(&lock_path) {
+                    eprintln!("Warning: Failed to remove lock file {:?}: {}", lock_path, e);
+                }
+            }
+        }
+    }
+}
 
 impl StorageBackend {
     pub fn new_memory() -> Self {
