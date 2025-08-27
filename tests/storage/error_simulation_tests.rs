@@ -7,7 +7,6 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 
-
 fn create_disk_full_scenario(temp_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let fill_path = temp_dir.join("disk_filler");
     let mut file = File::create(&fill_path)?;
@@ -39,7 +38,6 @@ fn corrupt_log_file(file_path: &std::path::Path) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-
 #[test]
 fn test_disk_full_during_append() {
     let config = TestConfig::new("disk_full");
@@ -48,11 +46,7 @@ fn test_disk_full_during_append() {
 
     create_disk_full_scenario(config.temp_dir_path()).ok();
 
-    let large_record = Record::new(
-        Some("key".to_string()),
-        "x".repeat(1024 * 1024),
-        None,
-    );
+    let large_record = Record::new(Some("key".to_string()), "x".repeat(1024 * 1024), None);
 
     let result = log.append(large_record);
 
@@ -96,7 +90,6 @@ fn test_insufficient_space_recovery() {
         }
     }
 }
-
 
 #[test]
 fn test_permission_denied_directory_creation() {
@@ -169,7 +162,6 @@ fn test_permission_denied_file_write() {
     std::fs::set_permissions(config.temp_dir_path(), cleanup_perms).unwrap();
 }
 
-
 #[test]
 fn test_file_read_failure() {
     let config = TestConfig::new("read_failure");
@@ -230,7 +222,6 @@ fn test_wal_corruption_recovery() {
         }
     }
 }
-
 
 #[test]
 fn test_partial_record_corruption() {
@@ -295,7 +286,6 @@ fn test_json_corruption_detection() {
     }
 }
 
-
 #[test]
 fn test_error_state_recovery() {
     let config = TestConfig::new("error_recovery");
@@ -342,7 +332,7 @@ fn test_storage_error_source_conversion() {
 fn test_serialization_error_conversion() {
     let invalid_json = "{ invalid: json }";
     let parse_result: Result<serde_json::Value, _> = serde_json::from_str(invalid_json);
-    
+
     match parse_result {
         Err(json_error) => {
             let storage_error =
