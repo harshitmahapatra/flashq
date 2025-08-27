@@ -1,22 +1,16 @@
 use super::test_utilities::{TestClient, TestServer};
 use flashq::http::*;
-use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 // Helper functions for generating unique test identifiers
 fn unique_consumer_group() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("test_group_{timestamp}")
+    let test_id = Uuid::new_v4().to_string().replace('-', "");
+    format!("test_group_{test_id}")
 }
 
 fn unique_topic() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("test_topic_{timestamp}")
+    let test_id = Uuid::new_v4().to_string().replace('-', "");
+    format!("test_topic_{test_id}")
 }
 
 #[tokio::test]
@@ -80,17 +74,13 @@ async fn test_file_backend_persistence_across_restarts() {
     let topic = unique_topic();
 
     // Create a temporary directory for this test
-    let temp_dir = std::env::temp_dir().join(format!(
-        "flashq_persistence_test_{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = tempfile::Builder::new()
+        .prefix("flashq_persistence_test_")
+        .tempdir()
+        .expect("Failed to create temporary directory");
 
     // Start server with file backend
-    let server = TestServer::start_with_data_dir(&temp_dir)
+    let server = TestServer::start_with_data_dir(temp_dir.path())
         .await
         .expect("Failed to start test server");
     let client = TestClient::new(&server);
@@ -113,7 +103,7 @@ async fn test_file_backend_persistence_across_restarts() {
     drop(client);
 
     // Start a new server with the same data directory
-    let server2 = TestServer::start_with_data_dir(&temp_dir)
+    let server2 = TestServer::start_with_data_dir(temp_dir.path())
         .await
         .expect("Failed to restart test server");
     let client2 = TestClient::new(&server2);
@@ -130,7 +120,7 @@ async fn test_file_backend_persistence_across_restarts() {
 
     // Clean up
     drop(server2);
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    // TempDir automatically cleans up when dropped
 }
 
 #[tokio::test]
@@ -139,17 +129,13 @@ async fn test_consumer_group_persistence_across_restarts() {
     let group_id = unique_consumer_group();
 
     // Create a temporary directory for this test
-    let temp_dir = std::env::temp_dir().join(format!(
-        "flashq_consumer_persistence_test_{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = tempfile::Builder::new()
+        .prefix("flashq_consumer_persistence_test_")
+        .tempdir()
+        .expect("Failed to create temporary directory");
 
     // Start server with file backend
-    let server = TestServer::start_with_data_dir(&temp_dir)
+    let server = TestServer::start_with_data_dir(temp_dir.path())
         .await
         .expect("Failed to start test server");
     let client = TestClient::new(&server);
@@ -183,7 +169,7 @@ async fn test_consumer_group_persistence_across_restarts() {
     drop(client);
 
     // Start a new server with the same data directory
-    let server2 = TestServer::start_with_data_dir(&temp_dir)
+    let server2 = TestServer::start_with_data_dir(temp_dir.path())
         .await
         .expect("Failed to restart test server");
     let client2 = TestClient::new(&server2);
@@ -200,7 +186,7 @@ async fn test_consumer_group_persistence_across_restarts() {
 
     // Clean up
     drop(server2);
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    // TempDir automatically cleans up when dropped
 }
 
 #[tokio::test]

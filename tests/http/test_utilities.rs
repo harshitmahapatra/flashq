@@ -106,8 +106,7 @@ pub fn get_timeout_config() -> (u32, u64) {
 pub struct TestServer {
     process: Child,
     pub port: u16,
-    temp_dir: Option<std::path::PathBuf>,
-    cleanup_on_drop: bool,
+    temp_dir: Option<tempfile::TempDir>,
 }
 
 impl TestServer {
@@ -151,7 +150,6 @@ impl TestServer {
                         process,
                         port,
                         temp_dir: None,
-                        cleanup_on_drop: true,
                     });
                 }
                 Ok(false) => continue, // Retry
@@ -179,16 +177,14 @@ impl TestServer {
         let mut cmd = Command::new(&server_binary);
         cmd.args([&port.to_string()]);
 
-        // For file storage, create a unique temporary directory for each test
+        // For file storage, create a temporary directory for each test
         let temp_dir = if storage == "file" {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let test_id = format!("{}_{}", std::process::id(), timestamp);
-            let temp_dir = std::env::temp_dir().join(format!("flashq_http_test_{test_id}"));
+            let temp_dir = tempfile::Builder::new()
+                .prefix("flashq_http_test_")
+                .tempdir()
+                .expect("Failed to create temporary directory");
 
-            cmd.args(["--data-dir", temp_dir.to_str().unwrap()]);
+            cmd.args(["--data-dir", temp_dir.path().to_str().unwrap()]);
             Some(temp_dir)
         } else {
             cmd.args(["--storage", storage]);
@@ -196,7 +192,6 @@ impl TestServer {
         };
 
         let mut process = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
-
         // Wait for server to start and verify it's responding
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -224,7 +219,6 @@ impl TestServer {
                         process,
                         port,
                         temp_dir,
-                        cleanup_on_drop: true,
                     });
                 }
                 Ok(false) => continue, // Retry
@@ -285,7 +279,7 @@ impl TestServer {
 
     /// Get the temporary data directory (for file storage tests)
     pub fn data_dir(&self) -> Option<&std::path::Path> {
-        self.temp_dir.as_deref()
+        self.temp_dir.as_ref().map(|t| t.path())
     }
 
     /// Start server with a specific data directory (for persistence testing)
@@ -337,8 +331,7 @@ impl TestServer {
                     return Ok(TestServer {
                         process,
                         port,
-                        temp_dir: Some(data_dir_path.to_path_buf()),
-                        cleanup_on_drop: false, // Don't cleanup - persistence tests need the data
+                        temp_dir: None, // External directory - no cleanup
                     });
                 }
                 Ok(false) => continue, // Retry
@@ -359,15 +352,7 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
-
-        // Clean up temporary directory only if cleanup is enabled
-        if self.cleanup_on_drop {
-            if let Some(temp_dir) = &self.temp_dir {
-                if temp_dir.exists() {
-                    let _ = std::fs::remove_dir_all(temp_dir);
-                }
-            }
-        }
+        // TempDir automatically cleans up when dropped if present
     }
 }
 

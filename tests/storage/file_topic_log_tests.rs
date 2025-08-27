@@ -8,7 +8,7 @@ fn test_basic_append_and_retrieval() {
     // Setup
     let config = TestConfig::new("basic_ops");
     let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
+        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
 
     // Action: Append records
     let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
@@ -41,7 +41,7 @@ fn test_record_retrieval_from_offset() {
     // Setup
     let config = TestConfig::new("retrieval");
     let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
+        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
 
     log.append(Record::new(
         Some("key1".to_string()),
@@ -79,7 +79,7 @@ fn test_record_retrieval_with_count_limit() {
     // Setup
     let config = TestConfig::new("count_limit");
     let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
+        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
 
     log.append(Record::new(None, "value1".to_string(), None))
         .unwrap();
@@ -100,7 +100,7 @@ fn test_offset_consistency() {
     // Setup
     let config = TestConfig::new("offset_consistency");
     let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
+        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
 
     // Action: Add records and verify offsets
     for i in 0..5 {

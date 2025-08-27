@@ -7,10 +7,10 @@ use flashq::{FlashQ, Record};
 fn test_file_topic_log_recovery() {
     let config = TestConfig::new("log_recovery");
     let topic_name = config.topic_name.clone();
-    let temp_dir = config.temp_dir.clone();
 
     {
-        let mut log = FileTopicLog::new(&topic_name, config.sync_mode, &temp_dir).unwrap();
+        let mut log =
+            FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
         log.append(Record::new(None, "first".to_string(), None))
             .unwrap();
         log.append(Record::new(None, "second".to_string(), None))
@@ -18,7 +18,8 @@ fn test_file_topic_log_recovery() {
         log.sync().unwrap();
     }
 
-    let recovered_log = FileTopicLog::new(&topic_name, config.sync_mode, &temp_dir).unwrap();
+    let recovered_log =
+        FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
 
     assert_eq!(recovered_log.len(), 2);
     assert_eq!(recovered_log.next_offset(), 2);
@@ -34,7 +35,7 @@ fn test_flashq_persistence_across_instances() {
     // Setup
     let config = TestConfig::new("flashq_persistence");
     let topic_name = config.topic_name.clone();
-    let temp_dir = config.temp_dir.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
 
     {
         let queue = FlashQ::with_storage_backend(
@@ -71,7 +72,7 @@ fn test_offset_continuation_after_recovery() {
     // Setup
     let config = TestConfig::new("offset_continuation");
     let topic_name = config.topic_name.clone();
-    let temp_dir = config.temp_dir.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
 
     {
         let queue = FlashQ::with_storage_backend(
@@ -110,7 +111,7 @@ fn test_empty_data_directory_recovery() {
     let config = TestConfig::new("empty_recovery");
 
     let queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
     );
 
     let poll_result = queue.poll_records(&config.topic_name, None);

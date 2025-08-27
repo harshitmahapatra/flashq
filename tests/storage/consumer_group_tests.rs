@@ -13,7 +13,7 @@ fn test_consumer_group_creation_backends() {
     assert_eq!(memory_group.get_offset("test_topic"), 0);
 
     let file_backend =
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap();
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap();
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();
     assert_eq!(file_group.group_id(), &group_id);
     assert_eq!(file_group.get_offset("test_topic"), 0);
@@ -24,7 +24,7 @@ fn test_consumer_group_persistence() {
     let config = TestConfig::new("consumer_persistence");
     let group_id = create_test_consumer_group("persistence");
     let topic_name = config.topic_name.clone();
-    let temp_dir = config.temp_dir.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
 
     {
         let backend =
@@ -45,7 +45,7 @@ fn test_consumer_group_topic_recovery() {
     let config = TestConfig::new("topic_recovery");
     let group_id = create_test_consumer_group("topic_recovery");
     let topic_name = config.topic_name.clone();
-    let temp_dir = config.temp_dir.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
 
     {
         let queue = FlashQ::with_storage_backend(
@@ -95,7 +95,7 @@ fn test_multiple_consumer_groups_isolation() {
     let topic_name = config.topic_name.clone();
 
     let queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir.clone()).unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
     );
 
     queue
