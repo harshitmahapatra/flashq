@@ -70,7 +70,7 @@ mod tests {
         assert_eq!(storage.next_offset(), 0);
 
         let record = Record::new(None, "test".to_string(), None);
-        let offset = storage.append(record);
+        let offset = storage.append(record).unwrap();
         assert_eq!(offset, 0);
         assert_eq!(storage.len(), 1);
         assert_eq!(storage.next_offset(), 1);
@@ -97,8 +97,8 @@ mod tests {
         let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
         let record2 = Record::new(Some("key2".to_string()), "value2".to_string(), None);
 
-        let offset1 = storage.append(record1);
-        let offset2 = storage.append(record2);
+        let offset1 = storage.append(record1).unwrap();
+        let offset2 = storage.append(record2).unwrap();
 
         assert_eq!(offset1, 0);
         assert_eq!(offset2, 1);
@@ -123,7 +123,7 @@ mod tests {
             Some(headers.clone()),
         );
 
-        let offset = storage.append(record);
+        let offset = storage.append(record).unwrap();
         assert_eq!(offset, 0);
 
         let records = storage.get_records_from_offset(0, None);

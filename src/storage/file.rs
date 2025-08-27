@@ -1,5 +1,5 @@
 use crate::storage::r#trait::{ConsumerGroup, TopicLog};
-use crate::{Record, RecordWithOffset};
+use crate::{FlashQError, Record, RecordWithOffset};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -156,17 +156,14 @@ impl FileTopicLog {
 }
 
 impl TopicLog for FileTopicLog {
-    fn append(&mut self, record: Record) -> u64 {
+    fn append(&mut self, record: Record) -> Result<u64, FlashQError> {
         let offset = self.next_offset;
 
         // Serialize record to JSON
-        let json_payload = match serde_json::to_vec(&record) {
-            Ok(json) => json,
-            Err(e) => {
-                eprintln!("Failed to serialize record: {e}");
-                return offset; // Return current offset without incrementing on error
-            }
-        };
+        let json_payload = serde_json::to_vec(&record)
+            .map_err(|e| FlashQError::SerializationError {
+                message: format!("Failed to serialize record: {e}"),
+            })?;
 
         // Write binary format: length(4) + offset(8) + json_payload
         let length = json_payload.len() as u32;
@@ -181,23 +178,19 @@ impl TopicLog for FileTopicLog {
         // JSON payload
         write_buffer.extend_from_slice(&json_payload);
 
-        // Write to file
-        if let Err(e) = self.file.write_all(&write_buffer) {
-            eprintln!("Failed to write record to file: {e}");
-            return offset; // Return current offset without incrementing on error
-        }
+        // Write to file with enhanced error handling
+        self.file.write_all(&write_buffer)
+            .map_err(|e| FlashQError::from_io_error(e, "Failed to write record to file"))?;
 
-        // Sync based on configuration
+        // Sync based on configuration with enhanced error handling
         if matches!(self.sync_mode, SyncMode::Immediate) {
-            if let Err(e) = self.file.sync_all() {
-                eprintln!("Failed to sync file: {e}");
-                // Continue anyway - data is written, just not synced
-            }
+            self.file.sync_all()
+                .map_err(|e| FlashQError::from_io_error(e, "Failed to sync file"))?;
         }
 
         self.next_offset += 1;
         self.record_count += 1;
-        offset
+        Ok(offset)
     }
 
     fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
@@ -296,8 +289,9 @@ impl TopicLog for FileTopicLog {
 }
 
 impl FileTopicLog {
-    pub fn sync(&mut self) -> Result<(), std::io::Error> {
+    pub fn sync(&mut self) -> Result<(), FlashQError> {
         self.file.sync_all()
+            .map_err(|e| FlashQError::from_io_error(e, "Failed to sync topic log file"))
     }
 }
 

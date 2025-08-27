@@ -1,8 +1,8 @@
-use crate::{Record, RecordWithOffset};
+use crate::{FlashQError, Record, RecordWithOffset};
 use std::collections::HashMap;
 
 pub trait TopicLog: Send + Sync {
-    fn append(&mut self, record: Record) -> u64;
+    fn append(&mut self, record: Record) -> Result<u64, FlashQError>;
     fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;

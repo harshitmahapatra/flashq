@@ -25,6 +25,21 @@ pub enum FlashQError {
         topic: String,
         max_offset: u64,
     },
+    StorageError {
+        message: String,
+    },
+    SerializationError {
+        message: String,
+    },
+    IoError {
+        message: String,
+    },
+    DiskFull {
+        message: String,
+    },
+    PermissionDenied {
+        message: String,
+    },
 }
 
 impl fmt::Display for FlashQError {
@@ -45,6 +60,11 @@ impl fmt::Display for FlashQError {
                 f,
                 "Invalid offset {offset} for topic {topic} with max offset {max_offset}"
             ),
+            FlashQError::StorageError { message } => write!(f, "Storage error: {message}"),
+            FlashQError::SerializationError { message } => write!(f, "Serialization error: {message}"),
+            FlashQError::IoError { message } => write!(f, "IO error: {message}"),
+            FlashQError::DiskFull { message } => write!(f, "Disk full: {message}"),
+            FlashQError::PermissionDenied { message } => write!(f, "Permission denied: {message}"),
         }
     }
 }
@@ -59,6 +79,45 @@ impl FlashQError {
                 | FlashQError::ConsumerGroupNotFound { .. }
                 | FlashQError::InvalidOffset { .. }
         )
+    }
+
+    pub fn is_client_error(&self) -> bool {
+        matches!(
+            self,
+            FlashQError::TopicNotFound { .. }
+                | FlashQError::ConsumerGroupNotFound { .. }
+                | FlashQError::ConsumerGroupAlreadyExists { .. }
+                | FlashQError::InvalidOffset { .. }
+        )
+    }
+
+    /// Convert an IO error to the appropriate FlashQError variant
+    pub fn from_io_error(e: std::io::Error, context: &str) -> Self {
+        match e.kind() {
+            std::io::ErrorKind::PermissionDenied => FlashQError::PermissionDenied {
+                message: format!("{context}: {e}"),
+            },
+            std::io::ErrorKind::OutOfMemory => FlashQError::DiskFull {
+                message: format!("{context}: Out of memory - {e}"),
+            },
+            // On Unix systems, ENOSPC (No space left on device) maps to Other
+            // We need to check the raw OS error or error message
+            std::io::ErrorKind::Other => {
+                let error_msg = e.to_string().to_lowercase();
+                if error_msg.contains("no space left") || error_msg.contains("disk full") {
+                    FlashQError::DiskFull {
+                        message: format!("{context}: {e}"),
+                    }
+                } else {
+                    FlashQError::IoError {
+                        message: format!("{context}: {e}"),
+                    }
+                }
+            },
+            _ => FlashQError::IoError {
+                message: format!("{context}: {e}"),
+            },
+        }
     }
 }
 
@@ -148,17 +207,17 @@ impl FlashQ {
         queue
     }
 
-    pub fn post_record(&self, topic: String, record: Record) -> Result<u64, String> {
+    pub fn post_record(&self, topic: String, record: Record) -> Result<u64, FlashQError> {
         let mut topic_log_map = self.topics.lock().unwrap();
         let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
                 .create(&topic)
                 .expect("Failed to create storage backend")
         });
-        Ok(topic_log.append(record))
+        topic_log.append(record)
     }
 
-    pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, String> {
+    pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<Vec<u64>, FlashQError> {
         let mut topic_log_map = self.topics.lock().unwrap();
         let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
@@ -168,7 +227,7 @@ impl FlashQ {
 
         let mut offsets = Vec::new();
         for record in records {
-            offsets.push(topic_log.append(record));
+            offsets.push(topic_log.append(record)?);
         }
         Ok(offsets)
     }
