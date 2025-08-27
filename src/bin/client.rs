@@ -8,6 +8,8 @@ use flashq::http::cli::{Cli, handle_cli_command};
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     let cli = Cli::parse();
     let server_url = format!("http://127.0.0.1:{}", cli.port);
     let client = reqwest::Client::new();

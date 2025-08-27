@@ -30,3 +30,7 @@ CLAUDE.local.md
 # Added by cargo
 
 /target
+
+# Data dir for integration tests
+
+/data

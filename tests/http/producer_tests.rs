@@ -1,4 +1,4 @@
-use super::http_test_helpers::{TestClient, TestServer};
+use super::test_utilities::{TestClient, TestServer};
 use flashq::Record;
 use flashq::http::*;
 

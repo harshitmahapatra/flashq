@@ -1,5 +1,5 @@
-use flashq::Record;
 use flashq::http::*;
+use flashq::{Record, debug, error, info};
 use std::env;
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -31,7 +31,7 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 
 pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     SERVER_INIT.call_once(|| {
-        eprintln!("Building server binary for integration tests...");
+        info!("Building server binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "server"])
             .output()
@@ -46,7 +46,7 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
         let binary_path = PathBuf::from("target/debug/server");
         *SERVER_BINARY_PATH.lock().unwrap() = Some(binary_path);
-        eprintln!("Server binary built successfully");
+        info!("Server binary built successfully");
     });
 
     let binary_path = SERVER_BINARY_PATH
@@ -61,7 +61,7 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     CLIENT_INIT.call_once(|| {
-        eprintln!("Building client binary for integration tests...");
+        info!("Building client binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "client"])
             .output()
@@ -76,7 +76,7 @@ pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
         let binary_path = PathBuf::from("target/debug/client");
         *CLIENT_BINARY_PATH.lock().unwrap() = Some(binary_path);
-        eprintln!("Client binary built successfully");
+        info!("Client binary built successfully");
     });
 
     let binary_path = CLIENT_BINARY_PATH
@@ -92,7 +92,7 @@ pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 pub fn get_timeout_config() -> (u32, u64) {
     // Returns (max_attempts, sleep_ms)
     if env::var("CI").is_ok() {
-        eprintln!("Running in CI environment - using extended timeouts");
+        info!("Running in CI environment - using extended timeouts");
         (60, 500) // 30 seconds total in CI
     } else {
         (30, 500) // 15 seconds locally
@@ -106,6 +106,7 @@ pub fn get_timeout_config() -> (u32, u64) {
 pub struct TestServer {
     process: Child,
     pub port: u16,
+    temp_dir: Option<tempfile::TempDir>,
 }
 
 impl TestServer {
@@ -114,7 +115,7 @@ impl TestServer {
         let server_binary = ensure_server_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
-        eprintln!("Starting server on port {port} using binary: {server_binary:?}");
+        info!("Starting server on port {port} using binary: {server_binary:?}");
 
         let mut process = Command::new(&server_binary)
             .args([&port.to_string()])
@@ -133,29 +134,102 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                eprintln!("Server process exited with status: {exit_status}");
+                error!("Server process exited with status: {exit_status}");
                 return Err("Server process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
-                    eprintln!(
+                    info!(
                         "Server started successfully on port {} after {} attempts",
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer { process, port });
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir: None,
+                    });
                 }
                 Ok(false) => continue, // Retry
                 Err(e) => {
-                    eprintln!("Health check attempt {} failed: {}", attempt + 1, e);
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
                     continue;
                 }
             }
         }
 
-        eprintln!("Server failed to start within {max_attempts} attempts");
+        error!("Server failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Server failed to start within timeout".into())
+    }
+
+    pub async fn start_with_storage(storage: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let server_binary = ensure_server_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        info!(
+            "Starting server on port {port} with {storage} storage using binary: {server_binary:?}"
+        );
+
+        let mut cmd = Command::new(&server_binary);
+        cmd.args([&port.to_string()]);
+
+        // For file storage, create a temporary directory for each test
+        let temp_dir = if storage == "file" {
+            let temp_dir = tempfile::Builder::new()
+                .prefix("flashq_http_test_")
+                .tempdir()
+                .expect("Failed to create temporary directory");
+
+            cmd.args(["--data-dir", temp_dir.path().to_str().unwrap()]);
+            Some(temp_dir)
+        } else {
+            cmd.args(["--storage", storage]);
+            None
+        };
+
+        let mut process = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        // Wait for server to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                error!("Server process exited with status: {exit_status}");
+                return Err("Server process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    info!(
+                        "Server started successfully on port {} with {storage} storage after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir,
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        error!("Server failed to start within {max_attempts} attempts");
         let _ = process.kill();
         Err("Server failed to start within timeout".into())
     }
@@ -177,7 +251,7 @@ impl TestServer {
                     if response.status().is_success() {
                         return Ok(true);
                     } else {
-                        eprintln!(
+                        debug!(
                             "Health check attempt {}.{}: HTTP {}",
                             attempt,
                             retry + 1,
@@ -186,7 +260,7 @@ impl TestServer {
                     }
                 }
                 Err(e) if retry < 2 => {
-                    eprintln!(
+                    debug!(
                         "Health check attempt {}.{} failed, retrying: {}",
                         attempt,
                         retry + 1,
@@ -202,12 +276,81 @@ impl TestServer {
 
         Ok(false) // All retries failed
     }
+
+    /// Get the temporary data directory (for file storage tests)
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.temp_dir.as_ref().map(|t| t.path())
+    }
+
+    /// Start server with a specific data directory (for persistence testing)
+    pub async fn start_with_data_dir<P: AsRef<std::path::Path>>(
+        data_dir: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let server_binary = ensure_server_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        let data_dir_path = data_dir.as_ref();
+        info!("Starting server on port {port} with file storage using data dir: {data_dir_path:?}");
+
+        let mut process = Command::new(&server_binary)
+            .args([
+                &port.to_string(),
+                "--data-dir",
+                data_dir_path.to_str().unwrap(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        // Wait for server to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                error!("Server process exited with status: {exit_status}");
+                return Err("Server process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    info!(
+                        "Server started successfully on port {} with custom data dir after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestServer {
+                        process,
+                        port,
+                        temp_dir: None, // External directory - no cleanup
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        error!("Server failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Server failed to start within timeout".into())
+    }
 }
 
 impl Drop for TestServer {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
+        // TempDir automatically cleans up when dropped if present
     }
 }
 

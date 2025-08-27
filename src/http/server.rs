@@ -1,7 +1,7 @@
 //! HTTP server implementation for FlashQ
 
 use super::common::*;
-use crate::{FlashQ, FlashQError, Record};
+use crate::{FlashQ, Record, error, info, trace};
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -9,49 +9,18 @@ use axum::{
     response::Json,
     routing::{delete, get, post},
 };
-use chrono::Utc;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
 // =============================================================================
-// CONFIGURATION & LOGGING
+// APPLICATION STATE
 // =============================================================================
-
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub enum LogLevel {
-    Error = 0,
-    Info = 2,
-    Trace = 4,
-}
-
-impl LogLevel {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LogLevel::Error => "ERROR",
-            LogLevel::Info => "INFO",
-            LogLevel::Trace => "TRACE",
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct AppConfig {
-    pub log_level: LogLevel,
-}
 
 pub type AppState = Arc<AppStateInner>;
 
 #[derive(Clone)]
 pub struct AppStateInner {
     pub queue: Arc<FlashQ>,
-    pub config: AppConfig,
-}
-
-pub fn log(app_log_level: LogLevel, message_log_level: LogLevel, message: &str) {
-    if message_log_level <= app_log_level {
-        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-        println!("{timestamp} [{}] {message}", message_log_level.as_str());
-    }
 }
 
 // =============================================================================
@@ -77,6 +46,8 @@ pub fn error_to_status_code(error_code: &str) -> StatusCode {
     match error_code {
         "invalid_parameter" | "validation_error" => StatusCode::BAD_REQUEST,
         "topic_not_found" | "group_not_found" => StatusCode::NOT_FOUND,
+        "conflict" => StatusCode::CONFLICT,
+        "invalid_offset" => StatusCode::BAD_REQUEST,
         "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
         "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -88,9 +59,9 @@ pub fn error_to_status_code(error_code: &str) -> StatusCode {
 // =============================================================================
 
 pub async fn health_check(
-    State(app_state): State<AppState>,
+    State(_app_state): State<AppState>,
 ) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
-    log(app_state.config.log_level, LogLevel::Trace, "GET /health");
+    trace!("GET /health");
     Ok(Json(HealthCheckResponse {
         status: "healthy".to_string(),
         service: "flashq".to_string(),
@@ -108,13 +79,9 @@ pub async fn produce_records(
 ) -> Result<Json<ProduceResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "POST /topics/{}/records topic validation failed: {}",
-                topic, error_response.message
-            ),
+        error!(
+            "POST /topics/{}/records topic validation failed: {}",
+            topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -124,13 +91,9 @@ pub async fn produce_records(
 
     // Validate produce request
     if let Err(error_response) = validate_produce_request(&request) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "POST /topics/{}/records validation failed: {}",
-                topic, error_response.message
-            ),
+        error!(
+            "POST /topics/{}/records validation failed: {}",
+            topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -153,12 +116,8 @@ pub async fn produce_records(
 
     match app_state.queue.post_records(topic.clone(), records) {
         Ok(offsets) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
-                ),
+            trace!(
+                "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
             );
 
             let timestamp = chrono::Utc::now().to_rfc3339();
@@ -175,12 +134,8 @@ pub async fn produce_records(
             }))
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!("POST /topics/{topic}/records failed: {error}"),
-            );
-            let error_response = ErrorResponse::internal_error(&error.to_string());
+            error!("POST /topics/{topic}/records failed: {error}");
+            let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -195,13 +150,9 @@ pub async fn create_consumer_group(
 ) -> Result<Json<ConsumerGroupResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "POST /consumer/{} validation failed: {}",
-                params.group_id, error_response.message
-            ),
+        error!(
+            "POST /consumer/{} validation failed: {}",
+            params.group_id, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -214,11 +165,7 @@ pub async fn create_consumer_group(
         .create_consumer_group(params.group_id.clone())
     {
         Ok(_) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!("POST /consumer/{} - group created", params.group_id),
-            );
+            trace!("POST /consumer/{} - group created", params.group_id);
 
             let response = ConsumerGroupResponse {
                 group_id: params.group_id,
@@ -227,13 +174,9 @@ pub async fn create_consumer_group(
             Ok(Json(response))
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!("POST /consumer/{} failed: {}", params.group_id, error),
-            );
+            error!("POST /consumer/{} failed: {}", params.group_id, error);
 
-            let error_response = ErrorResponse::internal_error(&error.to_string());
+            let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -248,13 +191,9 @@ pub async fn leave_consumer_group(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "DELETE /consumer/{} validation failed: {}",
-                params.group_id, error_response.message
-            ),
+        error!(
+            "DELETE /consumer/{} validation failed: {}",
+            params.group_id, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -264,25 +203,13 @@ pub async fn leave_consumer_group(
 
     match app_state.queue.delete_consumer_group(&params.group_id) {
         Ok(_) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!("DELETE /consumer/{} - consumer group left", params.group_id),
-            );
+            trace!("DELETE /consumer/{} - consumer group left", params.group_id);
             Ok(StatusCode::NO_CONTENT)
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!("DELETE /consumer/{} failed: {}", params.group_id, error),
-            );
+            error!("DELETE /consumer/{} failed: {}", params.group_id, error);
 
-            let error_response = if error.is_not_found() {
-                ErrorResponse::group_not_found(&params.group_id)
-            } else {
-                ErrorResponse::internal_error(&error.to_string())
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -298,13 +225,9 @@ pub async fn get_consumer_group_offset(
 ) -> Result<Json<OffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{}/offset group validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "GET /consumer/{}/topics/{}/offset group validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -314,13 +237,9 @@ pub async fn get_consumer_group_offset(
 
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&params.topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{}/offset topic validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "GET /consumer/{}/topics/{}/offset topic validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -333,13 +252,9 @@ pub async fn get_consumer_group_offset(
         .get_consumer_group_offset(&params.group_id, &params.topic)
     {
         Ok(committed_offset) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "GET /consumer/{}/topics/{}/offset - offset: {}",
-                    params.group_id, params.topic, committed_offset
-                ),
+            trace!(
+                "GET /consumer/{}/topics/{}/offset - offset: {}",
+                params.group_id, params.topic, committed_offset
             );
 
             let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
@@ -356,22 +271,12 @@ pub async fn get_consumer_group_offset(
             Ok(Json(response))
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!(
-                    "GET /consumer/{}/topics/{}/offset failed: {}",
-                    params.group_id, params.topic, error
-                ),
+            error!(
+                "GET /consumer/{}/topics/{}/offset failed: {}",
+                params.group_id, params.topic, error
             );
 
-            let error_response = match &error {
-                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                FlashQError::ConsumerGroupNotFound { group_id } => {
-                    ErrorResponse::group_not_found(group_id)
-                }
-                _ => ErrorResponse::internal_error(&error.to_string()),
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -388,13 +293,9 @@ pub async fn commit_consumer_group_offset(
 ) -> Result<Json<GetConsumerGroupOffsetResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "POST /consumer/{}/topics/{}/offset group validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "POST /consumer/{}/topics/{}/offset group validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -404,13 +305,9 @@ pub async fn commit_consumer_group_offset(
 
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&params.topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "POST /consumer/{}/topics/{}/offset topic validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "POST /consumer/{}/topics/{}/offset topic validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -424,13 +321,9 @@ pub async fn commit_consumer_group_offset(
         request.offset,
     ) {
         Ok(_) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "POST /consumer/{}/topics/{}/offset - offset: {}",
-                    params.group_id, params.topic, request.offset
-                ),
+            trace!(
+                "POST /consumer/{}/topics/{}/offset - offset: {}",
+                params.group_id, params.topic, request.offset
             );
             Ok(Json(GetConsumerGroupOffsetResponse {
                 group_id: params.group_id.clone(),
@@ -439,22 +332,12 @@ pub async fn commit_consumer_group_offset(
             }))
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!(
-                    "POST /consumer/{}/topics/{}/offset failed: {}",
-                    params.group_id, params.topic, error
-                ),
+            error!(
+                "POST /consumer/{}/topics/{}/offset failed: {}",
+                params.group_id, params.topic, error
             );
 
-            let error_response = match &error {
-                FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-                FlashQError::ConsumerGroupNotFound { group_id } => {
-                    ErrorResponse::group_not_found(group_id)
-                }
-                _ => ErrorResponse::internal_error(&error.to_string()),
-            };
+            let error_response = ErrorResponse::from(error);
 
             Err((
                 error_to_status_code(&error_response.error),
@@ -471,13 +354,9 @@ pub async fn fetch_records_for_consumer_group(
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{} group validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "GET /consumer/{}/topics/{} group validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -487,13 +366,9 @@ pub async fn fetch_records_for_consumer_group(
 
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&params.topic) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{} topic validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "GET /consumer/{}/topics/{} topic validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -503,13 +378,9 @@ pub async fn fetch_records_for_consumer_group(
 
     // Validate query parameters
     if let Err(error_response) = validate_poll_query(&query) {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{} query validation failed: {}",
-                params.group_id, params.topic, error_response.message
-            ),
+        error!(
+            "GET /consumer/{}/topics/{} query validation failed: {}",
+            params.group_id, params.topic, error_response.message
         );
         return Err((
             error_to_status_code(&error_response.error),
@@ -535,21 +406,11 @@ pub async fn fetch_records_for_consumer_group(
     };
 
     let create_error_response = |error| {
-        log(
-            app_state.config.log_level,
-            LogLevel::Error,
-            &format!(
-                "GET /consumer/{}/topics/{}/offset: {}",
-                params.group_id, params.topic, error
-            ),
+        error!(
+            "GET /consumer/{}/topics/{}/offset: {}",
+            params.group_id, params.topic, error
         );
-        match &error {
-            FlashQError::TopicNotFound { topic } => ErrorResponse::topic_not_found(topic),
-            FlashQError::ConsumerGroupNotFound { group_id } => {
-                ErrorResponse::group_not_found(group_id)
-            }
-            _ => ErrorResponse::internal_error(&error.to_string()),
-        }
+        ErrorResponse::from(error)
     };
 
     match records_result {
@@ -559,17 +420,13 @@ pub async fn fetch_records_for_consumer_group(
                 None => String::new(),
             };
 
-            log(
-                app_state.config.log_level,
-                LogLevel::Trace,
-                &format!(
-                    "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} records returned",
-                    params.group_id,
-                    params.topic,
-                    limit,
-                    offset_info,
-                    records.len()
-                ),
+            trace!(
+                "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} records returned",
+                params.group_id,
+                params.topic,
+                limit,
+                offset_info,
+                records.len()
             );
 
             let record_responses: Vec<crate::RecordWithOffset> = if include_headers {
@@ -601,13 +458,9 @@ pub async fn fetch_records_for_consumer_group(
                     Ok(Json(response))
                 }
                 Err(error) => {
-                    log(
-                        app_state.config.log_level,
-                        LogLevel::Error,
-                        &format!(
-                            "GET /consumer/{}/topics/{}/offset: {}",
-                            params.group_id, params.topic, error
-                        ),
+                    error!(
+                        "GET /consumer/{}/topics/{}/offset: {}",
+                        params.group_id, params.topic, error
                     );
                     let error_response = create_error_response(error);
                     Err((
@@ -618,13 +471,9 @@ pub async fn fetch_records_for_consumer_group(
             }
         }
         Err(error) => {
-            log(
-                app_state.config.log_level,
-                LogLevel::Error,
-                &format!(
-                    "GET /consumer/{}/topics/{} failed: {}",
-                    params.group_id, params.topic, error
-                ),
+            error!(
+                "GET /consumer/{}/topics/{} failed: {}",
+                params.group_id, params.topic, error
             );
 
             let error_response = create_error_response(error);
@@ -663,24 +512,19 @@ pub fn create_router(app_state: AppState) -> Router {
         .with_state(app_state)
 }
 
-/// Creates application state with configuration
-pub fn create_app_state(log_level: LogLevel) -> AppState {
-    let config = AppConfig { log_level };
+/// Creates application state with storage backend
+pub fn create_app_state(storage_backend: crate::storage::StorageBackend) -> AppState {
     Arc::new(AppStateInner {
-        queue: Arc::new(FlashQ::new()),
-        config,
+        queue: Arc::new(FlashQ::with_storage_backend(storage_backend)),
     })
 }
 
-/// Starts the HTTP server on the specified port
-pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let log_level = if cfg!(debug_assertions) {
-        LogLevel::Trace
-    } else {
-        LogLevel::Info
-    };
-
-    let app_state = create_app_state(log_level);
+/// Starts the HTTP server on the specified port with the given storage backend
+pub async fn start_server(
+    port: u16,
+    storage_backend: crate::storage::StorageBackend,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app_state = create_app_state(storage_backend);
     let app = create_router(app_state.clone());
 
     let bind_address = format!("127.0.0.1:{port}");
@@ -688,11 +532,7 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to bind to address {bind_address}: {e}"))?;
 
-    log(
-        app_state.config.log_level,
-        LogLevel::Info,
-        &format!("FlashQ Server starting on http://{bind_address}"),
-    );
+    info!("FlashQ Server starting on http://{bind_address}");
 
     axum::serve(listener, app)
         .await
@@ -708,20 +548,6 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_log_level_as_str() {
-        assert_eq!(LogLevel::Error.as_str(), "ERROR");
-        assert_eq!(LogLevel::Info.as_str(), "INFO");
-        assert_eq!(LogLevel::Trace.as_str(), "TRACE");
-    }
-
-    #[test]
-    fn test_log_level_ordering() {
-        assert!(LogLevel::Error < LogLevel::Info);
-        assert!(LogLevel::Info < LogLevel::Trace);
-        assert!(LogLevel::Error < LogLevel::Trace);
-    }
 
     #[test]
     fn test_error_to_status_code() {

@@ -1,48 +1,207 @@
-use crate::storage::{InMemoryTopicLog, TopicLog};
+use crate::error::StorageError;
+use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
+use crate::warn;
+use fs4::fs_std::FileExt;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::Path;
+use sysinfo::{ProcessesToUpdate, System};
 
-/// Storage backend configuration
-///
-/// Specifies which storage implementation to use for topic logs.
-/// Currently only supports in-memory storage, with future extensibility
-/// for file-based and database storage backends.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum StorageBackend {
-    /// In-memory storage - records persist only during process lifetime
     Memory,
+    File {
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: std::path::PathBuf,
+        wal_commit_threshold: usize,
+        _directory_lock: std::fs::File,
+    },
+}
+impl Drop for StorageBackend {
+    fn drop(&mut self) {
+        if let StorageBackend::File { data_dir, .. } = self {
+            let lock_path = data_dir.join(".flashq.lock");
+            if lock_path.exists() {
+                if let Err(e) = std::fs::remove_file(&lock_path) {
+                    warn!("Failed to remove lock file {lock_path:?}: {e}");
+                }
+            }
+        }
+    }
 }
 
 impl StorageBackend {
-    /// Create a new storage backend instance
-    ///
-    /// Returns a boxed trait object implementing TopicLog, allowing different
-    /// storage implementations to be used interchangeably. The concrete type
-    /// is determined by the StorageBackend variant:
-    ///
-    /// - `Memory`: Creates an InMemoryTopicLog that stores records in a Vec
-    ///
-    /// # Returns
-    ///
-    /// A boxed TopicLog trait object ready for use. The returned instance
-    /// starts empty with offset 0 and can immediately accept record operations.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use flashq::storage::{StorageBackend, TopicLog};
-    /// use flashq::Record;
-    ///
-    /// let backend = StorageBackend::Memory;
-    /// let mut storage = backend.create();
-    ///
-    /// let record = Record::new(None, "test".to_string(), None);
-    /// let offset = storage.append(record);
-    /// assert_eq!(offset, 0);
-    /// ```
-    pub fn create(&self) -> Box<dyn TopicLog> {
+    pub fn new_memory() -> Self {
+        StorageBackend::Memory
+    }
+
+    pub fn new_file(sync_mode: crate::storage::file::SyncMode) -> Result<Self, StorageError> {
+        Self::new_file_with_path(sync_mode, "./data")
+    }
+
+    pub fn new_file_with_path<P: AsRef<Path>>(
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: P,
+    ) -> Result<Self, StorageError> {
+        Self::new_file_with_config(sync_mode, data_dir, 10)
+    }
+
+    pub fn new_file_with_config<P: AsRef<Path>>(
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: P,
+        wal_commit_threshold: usize,
+    ) -> Result<Self, StorageError> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let directory_lock = acquire_directory_lock(&data_dir)?;
+        Ok(StorageBackend::File {
+            sync_mode,
+            data_dir,
+            wal_commit_threshold,
+            _directory_lock: directory_lock,
+        })
+    }
+
+    pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog>, Box<dyn std::error::Error>> {
         match self {
-            StorageBackend::Memory => Box::new(InMemoryTopicLog::new()),
+            StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
+            StorageBackend::File {
+                sync_mode,
+                data_dir,
+                wal_commit_threshold,
+                ..
+            } => {
+                let file_log = crate::storage::file::FileTopicLog::new(
+                    topic,
+                    *sync_mode,
+                    data_dir,
+                    *wal_commit_threshold,
+                )?;
+                Ok(Box::new(file_log))
+            }
         }
     }
+
+    pub fn create_consumer_group(
+        &self,
+        group_id: &str,
+    ) -> Result<Box<dyn ConsumerGroup>, Box<dyn std::error::Error>> {
+        match self {
+            StorageBackend::Memory => {
+                Ok(Box::new(InMemoryConsumerGroup::new(group_id.to_string())))
+            }
+            StorageBackend::File {
+                sync_mode,
+                data_dir,
+                ..
+            } => {
+                let consumer_group =
+                    crate::storage::file::FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
+                Ok(Box::new(consumer_group))
+            }
+        }
+    }
+}
+
+fn acquire_directory_lock<P: AsRef<Path>>(data_dir: P) -> Result<File, StorageError> {
+    let data_dir = data_dir.as_ref();
+
+    ensure_data_directory_exists(data_dir)?;
+    let lock_path = data_dir.join(".flashq.lock");
+    let lock_file = create_lock_file(&lock_path)?;
+
+    match attempt_to_acquire_lock(&lock_file) {
+        Ok(()) => {
+            write_lock_metadata(&lock_file)?;
+            Ok(lock_file)
+        }
+        Err(StorageError::LockAcquisitionFailed) => handle_lock_conflict(&lock_path, data_dir),
+        Err(e) => Err(e),
+    }
+}
+fn ensure_data_directory_exists(data_dir: &Path) -> Result<(), StorageError> {
+    if !data_dir.exists() {
+        std::fs::create_dir_all(data_dir)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to create data directory"))?;
+    }
+    Ok(())
+}
+
+fn create_lock_file(lock_path: &Path) -> Result<File, StorageError> {
+    if lock_path.exists() {
+        OpenOptions::new()
+            .write(true)
+            .open(lock_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open existing lock file"))
+    } else {
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(lock_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to create lock file"))
+    }
+}
+
+fn attempt_to_acquire_lock(lock_file: &File) -> Result<(), StorageError> {
+    match lock_file.try_lock_exclusive() {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => Err(StorageError::LockAcquisitionFailed),
+    }
+}
+
+fn write_lock_metadata(lock_file: &File) -> Result<(), StorageError> {
+    let pid = std::process::id();
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let lock_info = format!("PID: {pid}\nTimestamp: {timestamp}\n");
+
+    let _ = lock_file.set_len(0);
+    (&*lock_file)
+        .write_all(lock_info.as_bytes())
+        .map_err(|e| StorageError::from_io_error(e, "Failed to write lock metadata"))
+}
+
+fn handle_lock_conflict<P: AsRef<Path>>(
+    lock_path: &Path,
+    data_dir: P,
+) -> Result<File, StorageError> {
+    let existing_pid = extract_pid_from_lock_file(lock_path);
+
+    match existing_pid {
+        Some(pid) if is_process_alive(pid) => Err(StorageError::DirectoryLocked {
+            context: "Storage directory is already in use by another FlashQ instance".to_string(),
+            pid: Some(pid),
+        }),
+        Some(_) | None => {
+            if std::fs::remove_file(lock_path).is_ok() {
+                acquire_directory_lock(data_dir)
+            } else {
+                Err(StorageError::DirectoryLocked {
+                    context: "Storage directory is already in use by another FlashQ instance"
+                        .to_string(),
+                    pid: None,
+                })
+            }
+        }
+    }
+}
+
+fn extract_pid_from_lock_file(lock_path: &Path) -> Option<u32> {
+    std::fs::read_to_string(lock_path).ok().and_then(|content| {
+        content
+            .lines()
+            .find(|line| line.starts_with("PID:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|pid_str| pid_str.parse::<u32>().ok())
+    })
+}
+
+fn is_process_alive(pid: u32) -> bool {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, false);
+    system
+        .processes()
+        .get(&sysinfo::Pid::from(pid as usize))
+        .is_some()
 }
 
 #[cfg(test)]
@@ -52,19 +211,27 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn test_storage_backend_memory_creation() {
-        let backend = StorageBackend::Memory;
-        let storage = backend.create();
+    fn test_storage_backend_memory() {
+        let backend = StorageBackend::new_memory();
+        let mut storage = backend.create("test_topic").unwrap();
+
         assert_eq!(storage.len(), 0);
         assert!(storage.is_empty());
         assert_eq!(storage.next_offset(), 0);
+
+        let record = Record::new(None, "test".to_string(), None);
+        let offset = storage.append(record).unwrap();
+        assert_eq!(offset, 0);
+        assert_eq!(storage.len(), 1);
+        assert_eq!(storage.next_offset(), 1);
     }
 
     #[test]
-    fn test_storage_backend_enum_equality() {
-        let backend1 = StorageBackend::Memory;
-        let backend2 = StorageBackend::Memory;
-        assert_eq!(backend1, backend2);
+    fn test_memory_backend_creation() {
+        // Test memory backend creation (no filesystem involved)
+        let backend = StorageBackend::new_memory();
+        let _storage = backend.create("test_topic").unwrap();
+        let _consumer_group = backend.create_consumer_group("test_group").unwrap();
     }
 
     #[test]
@@ -74,14 +241,14 @@ mod tests {
         let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
         let record2 = Record::new(Some("key2".to_string()), "value2".to_string(), None);
 
-        let offset1 = storage.append(record1);
-        let offset2 = storage.append(record2);
+        let offset1 = storage.append(record1).unwrap();
+        let offset2 = storage.append(record2).unwrap();
 
         assert_eq!(offset1, 0);
         assert_eq!(offset2, 1);
         assert_eq!(storage.len(), 2);
 
-        let records = storage.get_records_from_offset(0, None);
+        let records = storage.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "value1");
         assert_eq!(records[1].record.value, "value2");
@@ -100,10 +267,10 @@ mod tests {
             Some(headers.clone()),
         );
 
-        let offset = storage.append(record);
+        let offset = storage.append(record).unwrap();
         assert_eq!(offset, 0);
 
-        let records = storage.get_records_from_offset(0, None);
+        let records = storage.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(
             records[0]

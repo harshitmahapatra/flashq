@@ -1,6 +1,6 @@
 //! HTTP API request and response types
 
-use crate::{Record, RecordWithOffset};
+use crate::{FlashQError, Record, RecordWithOffset, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -143,7 +143,7 @@ pub fn parse_headers(header_strings: Option<Vec<String>>) -> Option<HashMap<Stri
                 match (split.next(), split.next()) {
                     (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
                     _ => {
-                        eprintln!("Warning: Invalid header format '{h}', expected KEY=VALUE");
+                        warn!("Invalid header format '{h}', expected KEY=VALUE");
                         None
                     }
                 }
@@ -430,6 +430,36 @@ impl ErrorResponse {
             "Consumer group ID must contain only alphanumeric characters, dots, underscores, and hyphens",
             serde_json::json!({ "parameter": "group_id", "value": group_id }),
         )
+    }
+}
+
+impl From<FlashQError> for ErrorResponse {
+    fn from(err: FlashQError) -> Self {
+        match err {
+            FlashQError::TopicNotFound { topic } => Self::topic_not_found(&topic),
+            FlashQError::ConsumerGroupNotFound { group_id } => Self::group_not_found(&group_id),
+            FlashQError::ConsumerGroupAlreadyExists { group_id } => Self::with_details(
+                "conflict",
+                &format!("Consumer group '{group_id}' already exists"),
+                serde_json::json!({ "group_id": group_id }),
+            ),
+            FlashQError::InvalidOffset {
+                offset,
+                topic,
+                max_offset,
+            } => Self::with_details(
+                "invalid_offset",
+                &format!("Invalid offset {offset} for topic '{topic}', max offset is {max_offset}"),
+                serde_json::json!({
+                    "offset": offset,
+                    "topic": topic,
+                    "max_offset": max_offset
+                }),
+            ),
+            FlashQError::Storage(storage_err) => {
+                Self::internal_error(&format!("Storage error: {storage_err}"))
+            }
+        }
     }
 }
 

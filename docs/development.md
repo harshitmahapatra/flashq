@@ -21,23 +21,27 @@ cargo build --bin server       # Specific binary
 
 ### Test Types
 
-- **Unit** (`src/lib.rs`): Core functionality
-- **Integration** (`tests/*.rs`): HTTP API and CLI client end-to-end
-- **Utilities** (`tests/test_helpers.rs`): Shared infrastructure
+- **Unit** (`src/lib.rs`): Core functionality and data structures
+- **HTTP Integration** (`tests/http/`): REST API endpoints and client functionality
+- **Storage Integration** (`tests/storage/`): File backend, persistence, and crash recovery
+- **Utilities** (`tests/*/test_utilities.rs`): Shared test infrastructure
 
 ### Running Tests
 
 ```bash
-cargo test                              # All tests
+cargo test                              # All tests (unit + integration)
 cargo test --lib                        # Unit tests only
-cargo test --test server_tests          # Specific integration test
+cargo test --test '*'                   # All integration tests
+cargo test --test http_integration_tests # HTTP integration tests
+cargo test --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
 ```
 
 ### Test Coverage
 
-**Server Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
+**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
+**Storage Integration:** File persistence, crash recovery, directory locking, error simulation  
 **Client Integration:** CLI commands, batch operations, consumer group lifecycle  
 **Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
 
@@ -52,11 +56,12 @@ cargo check                     # Fast compile check
 ## Running During Development
 
 ```bash
-cargo run --bin flashq          # Interactive demo
-cargo run --bin server          # HTTP server (debug/TRACE logging)
-cargo run --bin server 9090     # Custom port
-./target/release/server 8080    # Production (INFO logging)
-cargo run --bin client -- health # CLI client
+cargo run --bin flashq                           # Interactive demo
+cargo run --bin server                           # HTTP server (in-memory, TRACE logging)
+cargo run --bin server -- --storage=file         # File storage backend
+cargo run --bin server 9090 -- --storage=file --data-dir=./test-data  # Custom config
+./target/release/server 8080                     # Production (INFO logging)
+cargo run --bin client -- health                 # CLI client
 ```
 
 ## Project Structure
@@ -65,20 +70,23 @@ cargo run --bin client -- health # CLI client
 src/lib.rs              # Core FlashQ + Record types
 src/main.rs             # Entry point 
 src/demo.rs             # Interactive demo
+src/error.rs            # Comprehensive error handling
 src/storage/            # Storage abstraction layer
 ├── mod.rs              # Public exports and documentation
-├── trait.rs            # TopicLog trait definition
-├── backend.rs          # StorageBackend factory
-└── memory.rs           # InMemoryTopicLog implementation
+├── trait.rs            # TopicLog and ConsumerGroup traits
+├── backend.rs          # StorageBackend factory with directory locking
+├── memory.rs           # InMemoryTopicLog implementation
+└── file.rs             # FileTopicLog with WAL and crash recovery
 src/http/               # HTTP components
 ├── mod.rs              # HTTP types and validation
 ├── server.rs           # HTTP server implementation
 ├── client.rs           # HTTP client utilities
 ├── cli.rs              # CLI command structures
 └── common.rs           # Shared validation logic
-src/bin/server.rs       # HTTP server binary
+src/bin/server.rs       # HTTP server binary with storage backend selection
 src/bin/client.rs       # CLI client binary
 tests/http/             # HTTP integration tests
+tests/storage/          # Storage integration tests
 ```
 
 ## Contribution Guidelines
@@ -87,8 +95,32 @@ tests/http/             # HTTP integration tests
 2. **Testing:** Include tests for new functionality
 3. **Process:** Feature branch → tests → `cargo test` → PR
 
+## Storage Development
+
+### File Storage Testing
+
+```bash
+# Test file storage with temporary directories
+cargo test --test storage_integration_tests
+
+# Test specific storage components  
+cargo test --test storage_integration_tests::file_topic_log_tests
+cargo test --test storage_integration_tests::error_simulation_tests
+```
+
+### Storage Backend Selection
+
+```bash
+# In-memory (default)
+cargo run --bin server
+
+# File storage with custom configuration
+cargo run --bin server -- --storage=file --data-dir=./dev-data --sync-mode=periodic --wal-commit-threshold=100
+```
+
 ## Debugging
 
-**Logging:** Debug builds use TRACE, release builds use INFO  
+**Logging:** Debug builds use TRACE, release builds use INFO. Structured logging via `log` crate.  
 **Port conflicts:** `lsof -ti:8080 | xargs kill` or use different port  
-**Test issues:** `cargo test test_name -- --nocapture`
+**Test issues:** `cargo test test_name -- --nocapture`  
+**File storage:** Check `./data/` directory for persistent state and logs

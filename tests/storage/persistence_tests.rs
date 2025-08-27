@@ -1,0 +1,127 @@
+use super::test_utilities::*;
+use flashq::storage::file::FileTopicLog;
+use flashq::storage::{StorageBackend, TopicLog};
+use flashq::{FlashQ, Record};
+
+#[test]
+fn test_file_topic_log_recovery() {
+    let config = TestConfig::new("log_recovery");
+    let topic_name = config.topic_name.clone();
+
+    {
+        let mut log =
+            FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path(), 10).unwrap();
+        log.append(Record::new(None, "first".to_string(), None))
+            .unwrap();
+        log.append(Record::new(None, "second".to_string(), None))
+            .unwrap();
+        log.sync().unwrap();
+    }
+
+    let recovered_log =
+        FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path(), 10).unwrap();
+
+    assert_eq!(recovered_log.len(), 2);
+    assert_eq!(recovered_log.next_offset(), 2);
+
+    let records = recovered_log.get_records_from_offset(0, None).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].record.value, "first");
+    assert_eq!(records[1].record.value, "second");
+}
+
+#[test]
+fn test_flashq_persistence_across_instances() {
+    // Setup
+    let config = TestConfig::new("flashq_persistence");
+    let topic_name = config.topic_name.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
+
+    {
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
+
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "persistent1".to_string(), None),
+            )
+            .unwrap();
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "persistent2".to_string(), None),
+            )
+            .unwrap();
+    }
+    let new_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+    );
+
+    let records = new_queue.poll_records(&topic_name, None).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].record.value, "persistent1");
+    assert_eq!(records[1].record.value, "persistent2");
+    assert_eq!(records[0].offset, 0);
+    assert_eq!(records[1].offset, 1);
+}
+
+#[test]
+fn test_offset_continuation_after_recovery() {
+    // Setup
+    let config = TestConfig::new("offset_continuation");
+    let topic_name = config.topic_name.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
+
+    {
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "before_restart".to_string(), None),
+            )
+            .unwrap();
+    }
+
+    let new_queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+    );
+
+    let new_offset = new_queue
+        .post_record(
+            topic_name.clone(),
+            Record::new(None, "after_restart".to_string(), None),
+        )
+        .unwrap();
+
+    assert_eq!(new_offset, 1);
+
+    let all_records = new_queue.poll_records(&topic_name, None).unwrap();
+    assert_eq!(all_records.len(), 2);
+    assert_eq!(all_records[0].record.value, "before_restart");
+    assert_eq!(all_records[1].record.value, "after_restart");
+}
+
+#[test]
+fn test_empty_data_directory_recovery() {
+    // Setup
+    let config = TestConfig::new("empty_recovery");
+
+    let queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
+    );
+
+    let poll_result = queue.poll_records(&config.topic_name, None);
+    assert!(poll_result.is_err());
+
+    let offset = queue
+        .post_record(
+            config.topic_name.clone(),
+            Record::new(None, "first_record".to_string(), None),
+        )
+        .unwrap();
+    assert_eq!(offset, 0);
+}

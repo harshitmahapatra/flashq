@@ -1,10 +1,8 @@
-use super::TopicLog;
+use super::{ConsumerGroup, TopicLog};
+use crate::error::StorageError;
 use crate::{Record, RecordWithOffset};
+use std::collections::HashMap;
 
-/// In-memory implementation of TopicLog
-///
-/// This is the default storage backend that keeps all records in memory.
-/// Records are stored in a Vec and persist only for the lifetime of the process.
 #[derive(Debug, Clone)]
 pub struct InMemoryTopicLog {
     records: Vec<RecordWithOffset>,
@@ -18,7 +16,6 @@ impl Default for InMemoryTopicLog {
 }
 
 impl InMemoryTopicLog {
-    /// Create a new empty in-memory topic log
     pub fn new() -> Self {
         InMemoryTopicLog {
             records: Vec::new(),
@@ -28,27 +25,36 @@ impl InMemoryTopicLog {
 }
 
 impl TopicLog for InMemoryTopicLog {
-    fn append(&mut self, record: Record) -> u64 {
+    fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let current_offset = self.next_offset;
         let record_with_offset = RecordWithOffset::from_record(record, current_offset);
         self.records.push(record_with_offset);
         self.next_offset += 1;
-        current_offset
+        Ok(current_offset)
     }
 
-    fn get_records_from_offset(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
+    fn get_records_from_offset(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
         let start_index = offset
             .try_into()
-            .expect("offset value too large to convert to array index");
+            .map_err(|_| StorageError::DataCorruption {
+                context: "memory storage".to_string(),
+                details: format!("offset {offset} too large to convert to array index"),
+            })?;
+
         if start_index >= self.records.len() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
+
         let slice = &self.records[start_index..];
         let limited_slice = match count {
             Some(limit) => &slice[..limit.min(slice.len())],
             None => slice,
         };
-        limited_slice.to_vec()
+        Ok(limited_slice.to_vec())
     }
 
     fn len(&self) -> usize {
@@ -81,7 +87,7 @@ mod tests {
     fn test_topic_log_append_single_record() {
         let mut log = InMemoryTopicLog::new();
         let record = Record::new(None, "first record".to_string(), None);
-        let offset = log.append(record);
+        let offset = log.append(record).unwrap();
 
         assert_eq!(offset, 0);
         assert_eq!(log.len(), 1);
@@ -96,9 +102,9 @@ mod tests {
         let record2 = Record::new(None, "record 2".to_string(), None);
         let record3 = Record::new(None, "record 3".to_string(), None);
 
-        let offset1 = log.append(record1);
-        let offset2 = log.append(record2);
-        let offset3 = log.append(record3);
+        let offset1 = log.append(record1).unwrap();
+        let offset2 = log.append(record2).unwrap();
+        let offset3 = log.append(record3).unwrap();
 
         assert_eq!(offset1, 0);
         assert_eq!(offset2, 1);
@@ -114,11 +120,11 @@ mod tests {
         let record2 = Record::new(None, "second".to_string(), None);
         let record3 = Record::new(None, "third".to_string(), None);
 
-        log.append(record1);
-        log.append(record2);
-        log.append(record3);
+        log.append(record1).unwrap();
+        log.append(record2).unwrap();
+        log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(0, None);
+        let records = log.get_records_from_offset(0, None).unwrap();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].record.value, "first");
         assert_eq!(records[1].record.value, "second");
@@ -132,11 +138,11 @@ mod tests {
         let record2 = Record::new(None, "second".to_string(), None);
         let record3 = Record::new(None, "third".to_string(), None);
 
-        log.append(record1);
-        log.append(record2);
-        log.append(record3);
+        log.append(record1).unwrap();
+        log.append(record2).unwrap();
+        log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(1, None);
+        let records = log.get_records_from_offset(1, None).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "second");
         assert_eq!(records[1].record.value, "third");
@@ -149,11 +155,11 @@ mod tests {
         let record2 = Record::new(None, "second".to_string(), None);
         let record3 = Record::new(None, "third".to_string(), None);
 
-        log.append(record1);
-        log.append(record2);
-        log.append(record3);
+        log.append(record1).unwrap();
+        log.append(record2).unwrap();
+        log.append(record3).unwrap();
 
-        let records = log.get_records_from_offset(0, Some(2));
+        let records = log.get_records_from_offset(0, Some(2)).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "first");
         assert_eq!(records[1].record.value, "second");
@@ -163,9 +169,9 @@ mod tests {
     fn test_topic_log_get_records_beyond_log() {
         let mut log = InMemoryTopicLog::new();
         let record = Record::new(None, "only record".to_string(), None);
-        log.append(record);
+        log.append(record).unwrap();
 
-        let records = log.get_records_from_offset(5, None);
+        let records = log.get_records_from_offset(5, None).unwrap();
         assert_eq!(records.len(), 0);
     }
 
@@ -175,11 +181,44 @@ mod tests {
         let record1 = Record::new(None, "msg1".to_string(), None);
         let record2 = Record::new(None, "msg2".to_string(), None);
 
-        let offset1 = log.append(record1);
-        let offset2 = log.append(record2);
+        let offset1 = log.append(record1).unwrap();
+        let offset2 = log.append(record2).unwrap();
 
-        let records = log.get_records_from_offset(0, None);
+        let records = log.get_records_from_offset(0, None).unwrap();
         assert_eq!(records[0].offset, offset1);
         assert_eq!(records[1].offset, offset2);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InMemoryConsumerGroup {
+    group_id: String,
+    topic_offsets: HashMap<String, u64>,
+}
+
+impl InMemoryConsumerGroup {
+    pub fn new(group_id: String) -> Self {
+        InMemoryConsumerGroup {
+            group_id,
+            topic_offsets: HashMap::new(),
+        }
+    }
+}
+
+impl ConsumerGroup for InMemoryConsumerGroup {
+    fn get_offset(&self, topic: &str) -> u64 {
+        self.topic_offsets.get(topic).copied().unwrap_or(0)
+    }
+
+    fn set_offset(&mut self, topic: String, offset: u64) {
+        self.topic_offsets.insert(topic, offset);
+    }
+
+    fn group_id(&self) -> &str {
+        &self.group_id
+    }
+
+    fn get_all_offsets(&self) -> HashMap<String, u64> {
+        self.topic_offsets.clone()
     }
 }
