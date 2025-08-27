@@ -12,6 +12,7 @@ pub enum StorageBackend {
     File {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: std::path::PathBuf,
+        wal_commit_threshold: usize,
         _directory_lock: std::fs::File,
     },
 }
@@ -21,7 +22,7 @@ impl Drop for StorageBackend {
             let lock_path = data_dir.join(".flashq.lock");
             if lock_path.exists() {
                 if let Err(e) = std::fs::remove_file(&lock_path) {
-                    eprintln!("Warning: Failed to remove lock file {:?}: {}", lock_path, e);
+                    eprintln!("Warning: Failed to remove lock file {lock_path:?}: {e}");
                 }
             }
         }
@@ -41,11 +42,20 @@ impl StorageBackend {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: P,
     ) -> Result<Self, StorageError> {
+        Self::new_file_with_config(sync_mode, data_dir, 10)
+    }
+
+    pub fn new_file_with_config<P: AsRef<Path>>(
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: P,
+        wal_commit_threshold: usize,
+    ) -> Result<Self, StorageError> {
         let data_dir = data_dir.as_ref().to_path_buf();
         let directory_lock = acquire_directory_lock(&data_dir)?;
         Ok(StorageBackend::File {
             sync_mode,
             data_dir,
+            wal_commit_threshold,
             _directory_lock: directory_lock,
         })
     }
@@ -56,10 +66,15 @@ impl StorageBackend {
             StorageBackend::File {
                 sync_mode,
                 data_dir,
+                wal_commit_threshold,
                 ..
             } => {
-                let file_log =
-                    crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
+                let file_log = crate::storage::file::FileTopicLog::new(
+                    topic,
+                    *sync_mode,
+                    data_dir,
+                    *wal_commit_threshold,
+                )?;
                 Ok(Box::new(file_log))
             }
         }

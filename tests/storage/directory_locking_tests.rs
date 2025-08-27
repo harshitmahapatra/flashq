@@ -110,10 +110,16 @@ fn test_lock_file_cleanup_on_drop() {
     )
     .expect("Backend creation should succeed");
 
-    assert!(lock_file_path.exists(), "Lock file should exist after backend creation");
+    assert!(
+        lock_file_path.exists(),
+        "Lock file should exist after backend creation"
+    );
 
     // Drop backend and verify lock file is removed
     drop(backend);
 
-    assert!(!lock_file_path.exists(), "Lock file should be removed after backend drop");
+    assert!(
+        !lock_file_path.exists(),
+        "Lock file should be removed after backend drop"
+    );
 }

@@ -75,9 +75,12 @@ fn parse_record_from_bytes(
 pub struct FileTopicLog {
     file_path: PathBuf,
     file: File,
+    wal_file: File,
     next_offset: u64,
     record_count: usize,
+    wal_record_count: usize,
     sync_mode: SyncMode,
+    wal_commit_threshold: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,19 +95,26 @@ impl FileTopicLog {
         topic: &str,
         sync_mode: SyncMode,
         data_dir: P,
+        wal_commit_threshold: usize,
     ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
         let file_path = data_dir.join(format!("{topic}.log"));
+        let wal_file_path = data_dir.join(format!("{topic}.wal"));
+
         let file = Self::open_log_file(&file_path)?;
+        let wal_file = Self::open_wal_file(&wal_file_path)?;
 
         let mut log = FileTopicLog {
             file_path: file_path.clone(),
             file,
+            wal_file,
             next_offset: 0,
             record_count: 0,
+            wal_record_count: 0,
             sync_mode,
+            wal_commit_threshold,
         };
 
         log.recover_from_file()?;
@@ -119,11 +129,27 @@ impl FileTopicLog {
             .open(file_path)
     }
 
-    pub fn new_default(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
-        Self::new(topic, sync_mode, "./data")
+    fn open_wal_file(file_path: &PathBuf) -> Result<File, std::io::Error> {
+        OpenOptions::new()
+            .create(true)
+            .read(true)
+            
+            .append(true)
+            .open(file_path)
+    }
+
+    pub fn new_default(
+        topic: &str,
+        sync_mode: SyncMode,
+        wal_commit_threshold: usize,
+    ) -> Result<Self, std::io::Error> {
+        Self::new(topic, sync_mode, "./data", wal_commit_threshold)
     }
 
     fn recover_from_file(&mut self) -> Result<(), std::io::Error> {
+        // First commit any pending WAL entries
+        self.recover_wal()?;
+
         if !self.file_path.exists() {
             return Ok(());
         }
@@ -133,6 +159,26 @@ impl FileTopicLog {
 
         self.next_offset = offset_counter;
         self.record_count = record_count;
+        Ok(())
+    }
+
+    fn recover_wal(&mut self) -> Result<(), std::io::Error> {
+        let wal_path = self.get_wal_path();
+        if !wal_path.exists() {
+            return Ok(());
+        }
+
+        let wal_metadata = std::fs::metadata(&wal_path)?;
+
+        if wal_metadata.len() > 0 {
+            // Force commit any existing WAL content during recovery
+            // regardless of record count threshold
+            self.wal_record_count = 1; // Ensure non-zero to bypass empty check
+            self.commit_wal_to_main().map_err(|_| {
+                std::io::Error::other("WAL recovery failed")
+            })?;
+            // Don't update counters here - process_recovery_records() will count everything
+        }
         Ok(())
     }
 
@@ -204,17 +250,117 @@ impl FileTopicLog {
         write_buffer
     }
 
-    fn write_record_to_file(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
-        self.file
+    fn write_record_atomically(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
+        self.wal_file
             .write_all(buffer)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to file"))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to WAL"))?;
+
+        // Use sync_mode to control fsync behavior instead of always flushing
+        self.sync_if_needed()?;
+
+        self.wal_record_count += 1;
+
+        if self.wal_record_count >= self.wal_commit_threshold {
+            self.commit_wal_to_main()?;
+        }
+
+        Ok(())
+    }
+
+    fn commit_wal_to_main(&mut self) -> Result<(), StorageError> {
+        if self.wal_record_count == 0 {
+            return Ok(());
+        }
+
+        // Always fsync WAL before merging to ensure durability
+        self.wal_file
+            .sync_all()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL before commit"))?;
+
+        let wal_path = self.get_wal_path();
+        let temp_path = self.get_temp_path();
+
+        self.create_merged_temp_file(&wal_path, &temp_path)?;
+        self.atomic_replace_main_file(&temp_path)?;
+        self.clear_wal_file()?;
+
+        Ok(())
+    }
+
+    fn get_wal_path(&self) -> PathBuf {
+        self.file_path.with_extension("wal")
+    }
+
+    fn get_temp_path(&self) -> PathBuf {
+        self.file_path.with_extension("tmp")
+    }
+
+    fn create_merged_temp_file(
+        &mut self,
+        wal_path: &PathBuf,
+        temp_path: &PathBuf,
+    ) -> Result<(), StorageError> {
+        let mut temp_file = File::create(temp_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to create temp file"))?;
+
+        if self.file_path.exists() {
+            let main_content = std::fs::read(&self.file_path)
+                .map_err(|e| StorageError::from_io_error(e, "Failed to read main file"))?;
+            temp_file.write_all(&main_content).map_err(|e| {
+                StorageError::from_io_error(e, "Failed to write main content to temp")
+            })?;
+        }
+
+        let wal_content = std::fs::read(wal_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to read WAL file"))?;
+        temp_file
+            .write_all(&wal_content)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to write WAL content to temp"))?;
+
+        temp_file
+            .sync_all()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync temp file"))?;
+
+        Ok(())
+    }
+
+    fn atomic_replace_main_file(&mut self, temp_path: &PathBuf) -> Result<(), StorageError> {
+        std::fs::rename(temp_path, &self.file_path).map_err(|e| {
+            StorageError::from_io_error(e, "Failed to atomically replace main file")
+        })?;
+
+        self.file = Self::open_log_file(&self.file_path).map_err(|e| {
+            StorageError::from_io_error(e, "Failed to reopen main file after commit")
+        })?;
+
+        Ok(())
+    }
+
+    fn clear_wal_file(&mut self) -> Result<(), StorageError> {
+        let wal_path = self.get_wal_path();
+
+        // First truncate the WAL file to clear its contents
+        {
+            let _truncate_file = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&wal_path)
+                .map_err(|e| StorageError::from_io_error(e, "Failed to truncate WAL file"))?;
+        }
+
+        // Then reopen in append mode for future writes
+        self.wal_file = Self::open_wal_file(&wal_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to reopen WAL file"))?;
+
+        self.wal_record_count = 0;
+        Ok(())
     }
 
     fn sync_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
-            self.file
+            self.wal_file
                 .sync_all()
-                .map_err(|e| StorageError::from_io_error(e, "Failed to sync file"))
+                .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL file"))
         } else {
             Ok(())
         }
@@ -228,6 +374,22 @@ impl FileTopicLog {
         read_file
             .read_to_end(&mut buffer)
             .map_err(|e| StorageError::from_io_error(e, "Failed to read file"))?;
+        Ok(buffer)
+    }
+
+    fn read_wal_for_query(&self) -> Result<Vec<u8>, StorageError> {
+        let wal_path = self.get_wal_path();
+        if !wal_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut wal_file = File::open(&wal_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open WAL file for reading"))?;
+
+        let mut buffer = Vec::new();
+        wal_file
+            .read_to_end(&mut buffer)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to read WAL file"))?;
         Ok(buffer)
     }
 
@@ -278,8 +440,7 @@ impl TopicLog for FileTopicLog {
         let json_payload = self.serialize_record(&record)?;
         let write_buffer = self.create_record_buffer(&json_payload, offset);
 
-        self.write_record_to_file(&write_buffer)?;
-        self.sync_if_needed()?;
+        self.write_record_atomically(&write_buffer)?;
 
         self.next_offset += 1;
         self.record_count += 1;
@@ -291,12 +452,17 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        if !self.file_path.exists() {
-            return Ok(Vec::new());
+        let mut combined_buffer = Vec::new();
+
+        if self.file_path.exists() {
+            let main_buffer = self.read_file_for_query()?;
+            combined_buffer.extend_from_slice(&main_buffer);
         }
 
-        let buffer = self.read_file_for_query()?;
-        self.extract_matching_records(&buffer, offset, count)
+        let wal_buffer = self.read_wal_for_query()?;
+        combined_buffer.extend_from_slice(&wal_buffer);
+
+        self.extract_matching_records(&combined_buffer, offset, count)
     }
 
     fn len(&self) -> usize {
@@ -311,12 +477,21 @@ impl TopicLog for FileTopicLog {
         self.next_offset
     }
 }
-
 impl FileTopicLog {
     pub fn sync(&mut self) -> Result<(), StorageError> {
+        self.wal_file
+            .sync_all()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL file"))?;
+
         self.file
             .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync topic log file"))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync main file"))
+    }
+}
+
+impl Drop for FileTopicLog {
+    fn drop(&mut self) {
+        let _ = self.sync();
     }
 }
 
