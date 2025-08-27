@@ -1,6 +1,6 @@
 use super::test_utilities::*;
-use flashq::storage::StorageBackend;
 use flashq::FlashQ;
+use flashq::storage::StorageBackend;
 
 #[test]
 fn test_consumer_group_creation_backends() {
@@ -14,7 +14,7 @@ fn test_consumer_group_creation_backends() {
     assert_eq!(memory_group.group_id(), &group_id);
     assert_eq!(memory_group.get_offset("test_topic"), 0);
 
-    // Action & Expectation: File backend  
+    // Action & Expectation: File backend
     let file_backend = StorageBackend::FileWithPath {
         sync_mode: config.sync_mode,
         data_dir: config.temp_dir.clone(),
@@ -67,17 +67,31 @@ fn test_consumer_group_topic_recovery() {
             sync_mode: config.sync_mode,
             data_dir: temp_dir.clone(),
         });
-        
+
         // Add some records
-        queue.post_record(topic_name.clone(), flashq::Record::new(None, "msg1".to_string(), None)).unwrap();
-        queue.post_record(topic_name.clone(), flashq::Record::new(None, "msg2".to_string(), None)).unwrap();
-        
+        queue
+            .post_record(
+                topic_name.clone(),
+                flashq::Record::new(None, "msg1".to_string(), None),
+            )
+            .unwrap();
+        queue
+            .post_record(
+                topic_name.clone(),
+                flashq::Record::new(None, "msg2".to_string(), None),
+            )
+            .unwrap();
+
         // Create consumer group and consume one record, then commit the offset
-        let _consumer_group = queue.create_consumer_group(group_id.clone()).unwrap();
-        let records = queue.poll_records_for_consumer_group(&group_id, &topic_name, Some(1)).unwrap();
+        queue.create_consumer_group(group_id.clone()).unwrap();
+        let records = queue
+            .poll_records_for_consumer_group(&group_id, &topic_name, Some(1))
+            .unwrap();
         assert_eq!(records.len(), 1);
         // Commit the offset after consuming the first record
-        queue.update_consumer_group_offset(&group_id, topic_name.clone(), 1).unwrap();
+        queue
+            .update_consumer_group_offset(&group_id, topic_name.clone(), 1)
+            .unwrap();
     }
 
     // Action: Create new FlashQ instance
@@ -87,7 +101,9 @@ fn test_consumer_group_topic_recovery() {
     });
 
     // Expectation: Consumer group should resume from correct offset
-    let records = new_queue.poll_records_for_consumer_group(&group_id, &topic_name, None).unwrap();
+    let records = new_queue
+        .poll_records_for_consumer_group(&group_id, &topic_name, None)
+        .unwrap();
     assert_eq!(records.len(), 1); // Should only get the second record
     assert_eq!(records[0].record.value, "msg2");
 }
@@ -106,16 +122,30 @@ fn test_multiple_consumer_groups_isolation() {
     });
 
     // Action: Add records
-    queue.post_record(topic_name.clone(), flashq::Record::new(None, "msg1".to_string(), None)).unwrap();
-    queue.post_record(topic_name.clone(), flashq::Record::new(None, "msg2".to_string(), None)).unwrap();
+    queue
+        .post_record(
+            topic_name.clone(),
+            flashq::Record::new(None, "msg1".to_string(), None),
+        )
+        .unwrap();
+    queue
+        .post_record(
+            topic_name.clone(),
+            flashq::Record::new(None, "msg2".to_string(), None),
+        )
+        .unwrap();
 
     // Action: Group1 consumes all records
-    let _group1_consumer = queue.create_consumer_group(group1.clone()).unwrap();
-    let group1_records = queue.poll_records_for_consumer_group(&group1, &topic_name, None).unwrap();
+    queue.create_consumer_group(group1.clone()).unwrap();
+    let group1_records = queue
+        .poll_records_for_consumer_group(&group1, &topic_name, None)
+        .unwrap();
 
     // Action: Group2 starts consuming
-    let _group2_consumer = queue.create_consumer_group(group2.clone()).unwrap();  
-    let group2_records = queue.poll_records_for_consumer_group(&group2, &topic_name, None).unwrap();
+    queue.create_consumer_group(group2.clone()).unwrap();
+    let group2_records = queue
+        .poll_records_for_consumer_group(&group2, &topic_name, None)
+        .unwrap();
 
     // Expectation: Both groups should see all records independently
     assert_eq!(group1_records.len(), 2);

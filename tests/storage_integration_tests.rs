@@ -1,11 +1,13 @@
 // Storage Integration Tests
 //
-// This module organizes all storage-related integration tests into a single test target.
-// Individual test modules are located in the tests/storage/ directory.
+// This module organizes all storage-related integration tests into logical groups.
+// Each module focuses on a specific aspect of storage functionality with clear
+// setup-action-expectation test structure.
 
 mod storage {
     pub mod consumer_group_tests;
     pub mod file_topic_log_tests;
     pub mod persistence_tests;
     pub mod storage_backend_tests;
+    pub mod test_utilities;
 }

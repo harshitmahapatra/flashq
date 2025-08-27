@@ -24,7 +24,7 @@ fn test_file_topic_log_recovery() {
     // Expectation: Should recover existing records
     assert_eq!(recovered_log.len(), 2);
     assert_eq!(recovered_log.next_offset(), 2);
-    
+
     let records = recovered_log.get_records_from_offset(0, None);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].record.value, "first");
@@ -44,9 +44,19 @@ fn test_flashq_persistence_across_instances() {
             sync_mode: config.sync_mode,
             data_dir: temp_dir.clone(),
         });
-        
-        queue.post_record(topic_name.clone(), Record::new(None, "persistent1".to_string(), None)).unwrap();
-        queue.post_record(topic_name.clone(), Record::new(None, "persistent2".to_string(), None)).unwrap();
+
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "persistent1".to_string(), None),
+            )
+            .unwrap();
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "persistent2".to_string(), None),
+            )
+            .unwrap();
     } // Queue goes out of scope
 
     // Action: Create new FlashQ instance
@@ -77,7 +87,12 @@ fn test_offset_continuation_after_recovery() {
             sync_mode: config.sync_mode,
             data_dir: temp_dir.clone(),
         });
-        queue.post_record(topic_name.clone(), Record::new(None, "before_restart".to_string(), None)).unwrap();
+        queue
+            .post_record(
+                topic_name.clone(),
+                Record::new(None, "before_restart".to_string(), None),
+            )
+            .unwrap();
     }
 
     // Action: Create new instance and add more records
@@ -85,12 +100,17 @@ fn test_offset_continuation_after_recovery() {
         sync_mode: config.sync_mode,
         data_dir: temp_dir.clone(),
     });
-    
-    let new_offset = new_queue.post_record(topic_name.clone(), Record::new(None, "after_restart".to_string(), None)).unwrap();
+
+    let new_offset = new_queue
+        .post_record(
+            topic_name.clone(),
+            Record::new(None, "after_restart".to_string(), None),
+        )
+        .unwrap();
 
     // Expectation: Offset should continue from where it left off
     assert_eq!(new_offset, 1);
-    
+
     let all_records = new_queue.poll_records(&topic_name, None).unwrap();
     assert_eq!(all_records.len(), 2);
     assert_eq!(all_records[0].record.value, "before_restart");
@@ -111,8 +131,13 @@ fn test_empty_data_directory_recovery() {
     // Expectation: Should handle empty directory gracefully - polling non-existent topic should return error
     let poll_result = queue.poll_records(&config.topic_name, None);
     assert!(poll_result.is_err()); // Topic doesn't exist yet
-    
+
     // Should be able to add new records
-    let offset = queue.post_record(config.topic_name.clone(), Record::new(None, "first_record".to_string(), None)).unwrap();
+    let offset = queue
+        .post_record(
+            config.topic_name.clone(),
+            Record::new(None, "first_record".to_string(), None),
+        )
+        .unwrap();
     assert_eq!(offset, 0);
 }
