@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
+use lru::LruCache;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -117,8 +118,7 @@ pub struct FileTopicLog {
     sync_mode: SyncMode,
     wal_commit_threshold: usize,
 
-    memory_cache: std::collections::BTreeMap<u64, RecordWithOffset>,
-    cache_max_size: usize,
+    memory_cache: LruCache<u64, RecordWithOffset>,
     offset_index: std::collections::BTreeMap<u64, u64>,
 }
 
@@ -149,8 +149,7 @@ impl FileTopicLog {
             sync_mode,
             wal_commit_threshold,
 
-            memory_cache: std::collections::BTreeMap::new(),
-            cache_max_size: cache_size,
+            memory_cache: LruCache::new(std::num::NonZero::new(cache_size).unwrap_or_else(|| std::num::NonZero::new(1000).unwrap())),
             offset_index: std::collections::BTreeMap::new(),
         };
 
@@ -414,11 +413,12 @@ impl FileTopicLog {
 
     fn try_cache_first(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
         let mut results = Vec::new();
-        let cache_search_limit = count.unwrap_or(self.cache_max_size).min(self.cache_max_size);
+        let cache_capacity = self.memory_cache.cap().into();
+        let cache_search_limit = count.unwrap_or(cache_capacity).min(cache_capacity);
         
         for i in 0..cache_search_limit {
             let current_offset = offset + i as u64;
-            if let Some(cached_record) = self.memory_cache.get(&current_offset) {
+            if let Some(cached_record) = self.memory_cache.peek(&current_offset) {
                 results.push(cached_record.clone());
             } else {
                 break;
@@ -561,15 +561,8 @@ impl FileTopicLog {
     }
 
     fn populate_cache(&mut self, record_with_offset: RecordWithOffset) {
-        self.memory_cache
-            .insert(record_with_offset.offset, record_with_offset);
-
-        // Evict oldest entries if cache exceeds max size
-        while self.memory_cache.len() > self.cache_max_size {
-            if let Some((&oldest_offset, _)) = self.memory_cache.iter().next() {
-                self.memory_cache.remove(&oldest_offset);
-            }
-        }
+        // LruCache automatically handles eviction on insert
+        self.memory_cache.put(record_with_offset.offset, record_with_offset);
     }
 
     fn seek_to_offset(&self, file: &mut File, target_offset: u64) -> Result<(), StorageError> {
