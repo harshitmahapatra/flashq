@@ -54,6 +54,14 @@ fn read_record_header(buffer: &[u8], cursor: usize) -> Option<RecordHeader> {
     Some(RecordHeader { length, offset })
 }
 
+// Phase 2: Simplified header reading for streaming (from fixed-size buffer)
+fn read_record_header_from_buffer(buffer: &[u8; RECORD_HEADER_SIZE]) -> Option<RecordHeader> {
+    let length = u32::from_le_bytes(buffer[0..LENGTH_SIZE].try_into().ok()?);
+    let offset = u64::from_le_bytes(buffer[LENGTH_SIZE..RECORD_HEADER_SIZE].try_into().ok()?);
+
+    Some(RecordHeader { length, offset })
+}
+
 fn write_record_header(buffer: &mut Vec<u8>, length: u32, offset: u64) {
     buffer.extend_from_slice(&length.to_le_bytes());
     buffer.extend_from_slice(&offset.to_le_bytes());
@@ -117,10 +125,10 @@ pub struct FileTopicLog {
     wal_record_count: usize,
     sync_mode: SyncMode,
     wal_commit_threshold: usize,
-    
+
     // Phase 1: Memory-bounded cache
     memory_cache: std::collections::BTreeMap<u64, RecordWithOffset>, // offset -> record
-    cache_max_size: usize, // e.g., 1000 records
+    cache_max_size: usize,                                           // e.g., 1000 records
 }
 
 impl FileTopicLog {
@@ -149,7 +157,7 @@ impl FileTopicLog {
             wal_record_count: 0,
             sync_mode,
             wal_commit_threshold,
-            
+
             // Phase 1: Initialize memory-bounded cache
             memory_cache: std::collections::BTreeMap::new(),
             cache_max_size: cache_size,
@@ -378,75 +386,19 @@ impl FileTopicLog {
         write_buffer
     }
 
-    fn read_combined_data(&self) -> Result<Vec<u8>, StorageError> {
-        let mut combined_buffer = Vec::new();
 
-        if self.file_path.exists() {
-            let main_buffer = read_file_contents(&self.file_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read main file"))?;
-            combined_buffer.extend_from_slice(&main_buffer);
-        }
-
-        let wal_path = self.get_wal_path();
-        if wal_path.exists() {
-            let wal_buffer = read_file_contents(&wal_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read WAL file"))?;
-            combined_buffer.extend_from_slice(&wal_buffer);
-        }
-
-        Ok(combined_buffer)
-    }
-
-    fn extract_matching_records(
-        &self,
-        buffer: &[u8],
-        start_offset: u64,
-        count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let mut records = Vec::new();
-        let mut cursor = 0;
-        let target_count = count.unwrap_or(usize::MAX);
-        let mut found_count = 0;
-
-        while cursor + RECORD_HEADER_SIZE <= buffer.len() && found_count < target_count {
-            let Some(header) = read_record_header(buffer, cursor) else {
-                break;
-            };
-
-            cursor += RECORD_HEADER_SIZE;
-            let length = header.length as usize;
-            let record_offset = header.offset;
-
-            if cursor + length > buffer.len() {
-                return Err(StorageError::DataCorruption {
-                    context: "file read".to_string(),
-                    details: format!("Partial record detected at cursor {cursor}"),
-                });
-            }
-
-            if record_offset >= start_offset {
-                let json_bytes = &buffer[cursor..cursor + length];
-                let record_with_offset = parse_record_from_bytes(json_bytes, record_offset)?;
-                records.push(record_with_offset);
-                found_count += 1;
-            }
-
-            cursor += length;
-        }
-
-        Ok(records)
-    }
-
-    // Phase 1: Cache-first record retrieval
+    // Phase 2: Enhanced cache-first retrieval with streaming disk fallback
     fn get_records_from_cache_or_disk(
         &self,
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
         let mut results = Vec::new();
-        
+
         // 1. Try cache first (limit to avoid overflow)
-        let cache_search_limit = count.unwrap_or(self.cache_max_size).min(self.cache_max_size);
+        let cache_search_limit = count
+            .unwrap_or(self.cache_max_size)
+            .min(self.cache_max_size);
         for i in 0..cache_search_limit {
             let current_offset = offset + i as u64;
             if let Some(cached_record) = self.memory_cache.get(&current_offset) {
@@ -455,7 +407,7 @@ impl FileTopicLog {
                 break; // Cache miss - need disk read
             }
         }
-        
+
         // 2. If cache satisfied request, return early
         if let Some(requested_count) = count {
             if results.len() >= requested_count {
@@ -463,17 +415,160 @@ impl FileTopicLog {
                 return Ok(results);
             }
         }
-        
-        // 3. Otherwise, fall back to current disk reading
-        let combined_buffer = self.read_combined_data()?;
-        self.extract_matching_records(&combined_buffer, offset, count)
+
+        // 3. Phase 2: Use streaming read instead of loading entire files
+        let remaining_count = count.map(|requested| requested.saturating_sub(results.len()));
+
+        if remaining_count == Some(0) {
+            return Ok(results);
+        }
+
+        // Calculate the actual starting offset for disk read
+        let disk_start_offset = offset + results.len() as u64;
+        let mut disk_results = self.read_records_streaming(disk_start_offset, remaining_count)?;
+
+        results.append(&mut disk_results);
+        Ok(results)
+    }
+
+    // Phase 2: Streaming file reads - avoids loading entire files into memory
+    fn read_records_streaming(
+        &self,
+        start_offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        let mut results = Vec::new();
+        let target_count = count.unwrap_or(usize::MAX);
+        let mut current_offset = 0u64;
+
+        // First, read from main file if it exists
+        if self.file_path.exists() {
+            let main_results = self.stream_records_from_file(
+                &self.file_path,
+                start_offset,
+                target_count,
+                current_offset,
+            )?;
+
+            // Update current_offset based on records found in main file
+            if let Some(last_record) = main_results.last() {
+                current_offset = last_record.offset + 1;
+            }
+
+            results.extend(main_results);
+        }
+
+        // If we need more records and haven't reached target, read from WAL
+        if results.len() < target_count {
+            let wal_path = self.get_wal_path();
+            if wal_path.exists() {
+                let remaining_count = target_count - results.len();
+                let wal_results = self.stream_records_from_file(
+                    &wal_path,
+                    start_offset,
+                    remaining_count,
+                    current_offset,
+                )?;
+                results.extend(wal_results);
+            }
+        }
+
+        // Sort by offset to maintain consistency (main + WAL may have overlapping offsets)
+        results.sort_by_key(|r| r.offset);
+
+        // Apply final count limit
+        if let Some(requested_count) = count {
+            results.truncate(requested_count);
+        }
+
+        Ok(results)
+    }
+
+    // Phase 2: Stream records from a single file with targeted range reading
+    fn stream_records_from_file(
+        &self,
+        file_path: &Path,
+        start_offset: u64,
+        max_count: usize,
+        _file_offset_base: u64,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let mut file = File::open(file_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open file for streaming"))?;
+
+        let mut results = Vec::new();
+        let mut header_buffer = [0u8; RECORD_HEADER_SIZE];
+
+        loop {
+            // Try to read record header
+            match file.read_exact(&mut header_buffer) {
+                Ok(_) => {
+                    // Successfully read header
+                    let Some(header) = read_record_header_from_buffer(&header_buffer) else {
+                        // Invalid header, stop reading
+                        break;
+                    };
+
+                    let record_length = header.length as usize;
+                    let record_offset = header.offset;
+
+                    // Skip records before our start_offset
+                    if record_offset < start_offset {
+                        // Skip the record data
+                        file.seek(SeekFrom::Current(record_length as i64))
+                            .map_err(|e| {
+                                StorageError::from_io_error(e, "Failed to seek past record")
+                            })?;
+                        continue;
+                    }
+
+                    // Stop if we have enough records
+                    if results.len() >= max_count {
+                        break;
+                    }
+
+                    // Read the record data
+                    let mut record_data = vec![0u8; record_length];
+                    file.read_exact(&mut record_data).map_err(|e| {
+                        StorageError::from_io_error(e, "Failed to read record data")
+                    })?;
+
+                    // Parse the record
+                    match parse_record_from_bytes(&record_data, record_offset) {
+                        Ok(record_with_offset) => {
+                            results.push(record_with_offset);
+                        }
+                        Err(e) => {
+                            // Log parsing error but continue (resilient to corruption)
+                            eprintln!(
+                                "Warning: Failed to parse record at offset {record_offset}: {e}"
+                            );
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    // Reached end of file naturally
+                    break;
+                }
+                Err(e) => {
+                    return Err(StorageError::from_io_error(
+                        e,
+                        "Failed to read record header",
+                    ));
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     // Phase 1: Cache management methods
     fn populate_cache(&mut self, record_with_offset: RecordWithOffset) {
         // Add to cache
-        self.memory_cache.insert(record_with_offset.offset, record_with_offset);
-        
+        self.memory_cache
+            .insert(record_with_offset.offset, record_with_offset);
+
         // Evict oldest entries if cache exceeds max size
         while self.memory_cache.len() > self.cache_max_size {
             if let Some((&oldest_offset, _)) = self.memory_cache.iter().next() {
@@ -744,7 +839,11 @@ mod tests {
     fn test_parse_record_from_bytes_with_headers() {
         let mut headers = HashMap::new();
         headers.insert("source".to_string(), "test".to_string());
-        let record = Record::new(Some("key1".to_string()), "value1".to_string(), Some(headers));
+        let record = Record::new(
+            Some("key1".to_string()),
+            "value1".to_string(),
+            Some(headers),
+        );
         let json_bytes = serde_json::to_vec(&record).unwrap();
         let offset = 100;
 
@@ -786,11 +885,41 @@ mod tests {
         assert_eq!(periodic, SyncMode::Periodic);
     }
 
+    // ============================================================================================
+    // PHASE 2: STREAMING FILE READS TESTS
+    // ============================================================================================
+
+    #[test]
+    fn test_read_record_header_from_buffer() {
+        let mut buffer = [0u8; RECORD_HEADER_SIZE];
+        let expected_length = 256u32;
+        let expected_offset = 1024u64;
+
+        // Manually construct the header buffer
+        buffer[0..4].copy_from_slice(&expected_length.to_le_bytes());
+        buffer[4..12].copy_from_slice(&expected_offset.to_le_bytes());
+
+        let header = read_record_header_from_buffer(&buffer).unwrap();
+
+        assert_eq!(header.length, expected_length);
+        assert_eq!(header.offset, expected_offset);
+    }
+
+    #[test]
+    fn test_read_record_header_from_buffer_invalid() {
+        // Test with invalid buffer content that might cause parsing issues
+        let buffer = [0xFFu8; RECORD_HEADER_SIZE];
+
+        // Should still parse (even if nonsensical values)
+        let header = read_record_header_from_buffer(&buffer);
+        assert!(header.is_some()); // Binary format should always parse if buffer size is correct
+    }
+
     #[test]
     fn test_sync_mode_copy_clone() {
         let original = SyncMode::Immediate;
         let copied = original;
-        let cloned = original.clone();
+        let cloned = original;
 
         assert_eq!(original, copied);
         assert_eq!(original, cloned);
