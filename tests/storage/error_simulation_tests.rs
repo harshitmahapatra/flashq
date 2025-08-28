@@ -42,7 +42,7 @@ fn corrupt_log_file(file_path: &std::path::Path) -> Result<(), Box<dyn std::erro
 fn test_disk_full_during_append() {
     let config = TestConfig::new("disk_full");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1, 1000).unwrap();
 
     create_disk_full_scenario(config.temp_dir_path()).ok();
 
@@ -64,7 +64,7 @@ fn test_disk_full_during_append() {
 fn test_insufficient_space_recovery() {
     let config = TestConfig::new("space_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1, 1000).unwrap();
 
     let large_record = Record::new(
         Some("huge_key".to_string()),
@@ -95,7 +95,7 @@ fn test_insufficient_space_recovery() {
 fn test_permission_denied_directory_creation() {
     let config = TestConfig::new("permission_test");
     let readonly_dir = create_permission_denied_scenario(config.temp_dir_path()).unwrap();
-    let result = FileTopicLog::new("test_topic", SyncMode::Immediate, &readonly_dir, 1);
+    let result = FileTopicLog::new("test_topic", SyncMode::Immediate, &readonly_dir, 1, 1000);
 
     match result {
         Err(e) => {
@@ -133,6 +133,7 @@ fn test_permission_denied_file_write() {
         SyncMode::Immediate,
         config.temp_dir_path(),
         1,
+        1000,
     );
 
     match result {
@@ -170,6 +171,7 @@ fn test_file_read_failure() {
         SyncMode::Immediate,
         config.temp_dir_path(),
         1,
+        1000,
     )
     .unwrap();
 
@@ -195,7 +197,7 @@ fn test_file_read_failure() {
 fn test_wal_corruption_recovery() {
     let config = TestConfig::new("wal_corruption");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5, 1000).unwrap();
 
     for i in 0..3 {
         let record = Record::new(Some(format!("key{i}")), format!("value{i}"), None);
@@ -205,7 +207,7 @@ fn test_wal_corruption_recovery() {
     let wal_file_path = config.temp_dir_path().join(format!("{topic}.wal"));
     corrupt_log_file(&wal_file_path).unwrap();
 
-    let recovery_result = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5);
+    let recovery_result = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5, 1000);
 
     match recovery_result {
         Ok(recovered_log) => {
@@ -227,7 +229,7 @@ fn test_wal_corruption_recovery() {
 fn test_partial_record_corruption() {
     let config = TestConfig::new("partial_corruption");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1, 1000).unwrap();
 
     let valid_record = Record::new(Some("key".to_string()), "valid_value".to_string(), None);
     log.append(valid_record).unwrap();
@@ -257,7 +259,7 @@ fn test_partial_record_corruption() {
 fn test_json_corruption_detection() {
     let config = TestConfig::new("json_corruption");
     let topic = &config.topic_name;
-    let log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1, 1000).unwrap();
 
     let log_file_path = config.temp_dir_path().join(format!("{topic}.log"));
     let mut file = OpenOptions::new()
@@ -290,7 +292,7 @@ fn test_json_corruption_detection() {
 fn test_error_state_recovery() {
     let config = TestConfig::new("error_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1, 1000).unwrap();
 
     let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
     let offset1 = log.append(record1).unwrap();

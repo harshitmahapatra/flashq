@@ -117,6 +117,10 @@ pub struct FileTopicLog {
     wal_record_count: usize,
     sync_mode: SyncMode,
     wal_commit_threshold: usize,
+    
+    // Phase 1: Memory-bounded cache
+    memory_cache: std::collections::BTreeMap<u64, RecordWithOffset>, // offset -> record
+    cache_max_size: usize, // e.g., 1000 records
 }
 
 impl FileTopicLog {
@@ -125,6 +129,7 @@ impl FileTopicLog {
         sync_mode: SyncMode,
         data_dir: P,
         wal_commit_threshold: usize,
+        cache_size: usize,
     ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
@@ -144,6 +149,10 @@ impl FileTopicLog {
             wal_record_count: 0,
             sync_mode,
             wal_commit_threshold,
+            
+            // Phase 1: Initialize memory-bounded cache
+            memory_cache: std::collections::BTreeMap::new(),
+            cache_max_size: cache_size,
         };
 
         log.recover_from_file()?;
@@ -155,7 +164,7 @@ impl FileTopicLog {
         sync_mode: SyncMode,
         wal_commit_threshold: usize,
     ) -> Result<Self, std::io::Error> {
-        Self::new(topic, sync_mode, "./data", wal_commit_threshold)
+        Self::new(topic, sync_mode, "./data", wal_commit_threshold, 1000)
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
@@ -427,6 +436,51 @@ impl FileTopicLog {
 
         Ok(records)
     }
+
+    // Phase 1: Cache-first record retrieval
+    fn get_records_from_cache_or_disk(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        let mut results = Vec::new();
+        
+        // 1. Try cache first (limit to avoid overflow)
+        let cache_search_limit = count.unwrap_or(self.cache_max_size).min(self.cache_max_size);
+        for i in 0..cache_search_limit {
+            let current_offset = offset + i as u64;
+            if let Some(cached_record) = self.memory_cache.get(&current_offset) {
+                results.push(cached_record.clone());
+            } else {
+                break; // Cache miss - need disk read
+            }
+        }
+        
+        // 2. If cache satisfied request, return early
+        if let Some(requested_count) = count {
+            if results.len() >= requested_count {
+                results.truncate(requested_count);
+                return Ok(results);
+            }
+        }
+        
+        // 3. Otherwise, fall back to current disk reading
+        let combined_buffer = self.read_combined_data()?;
+        self.extract_matching_records(&combined_buffer, offset, count)
+    }
+
+    // Phase 1: Cache management methods
+    fn populate_cache(&mut self, record_with_offset: RecordWithOffset) {
+        // Add to cache
+        self.memory_cache.insert(record_with_offset.offset, record_with_offset);
+        
+        // Evict oldest entries if cache exceeds max size
+        while self.memory_cache.len() > self.cache_max_size {
+            if let Some((&oldest_offset, _)) = self.memory_cache.iter().next() {
+                self.memory_cache.remove(&oldest_offset);
+            }
+        }
+    }
 }
 
 // ================================================================================================
@@ -441,6 +495,10 @@ impl TopicLog for FileTopicLog {
 
         self.write_record_atomically(&write_buffer)?;
 
+        // Phase 1: Populate cache with newly appended record
+        let record_with_offset = RecordWithOffset::from_record(record, offset);
+        self.populate_cache(record_with_offset);
+
         self.next_offset += 1;
         self.record_count += 1;
         Ok(offset)
@@ -451,8 +509,8 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let combined_buffer = self.read_combined_data()?;
-        self.extract_matching_records(&combined_buffer, offset, count)
+        // Phase 1: Use cache-first approach
+        self.get_records_from_cache_or_disk(offset, count)
     }
 
     fn len(&self) -> usize {
@@ -587,5 +645,154 @@ impl ConsumerGroup for FileConsumerGroup {
 
     fn get_all_offsets(&self) -> HashMap<String, u64> {
         self.topic_offsets.clone()
+    }
+}
+
+// ================================================================================================
+// UNIT TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Record;
+    use std::collections::HashMap;
+
+    // ============================================================================================
+    // BINARY FORMAT UTILITIES TESTS
+    // ============================================================================================
+
+    #[test]
+    fn test_record_header_creation() {
+        let header = RecordHeader {
+            length: 42,
+            offset: 1337,
+        };
+
+        assert_eq!(header.length, 42);
+        assert_eq!(header.offset, 1337);
+    }
+
+    #[test]
+    fn test_write_record_header() {
+        let mut buffer = Vec::new();
+        let length = 256u32;
+        let offset = 1024u64;
+
+        write_record_header(&mut buffer, length, offset);
+
+        assert_eq!(buffer.len(), RECORD_HEADER_SIZE);
+        assert_eq!(buffer[0..4], length.to_le_bytes());
+        assert_eq!(buffer[4..12], offset.to_le_bytes());
+    }
+
+    #[test]
+    fn test_read_record_header_valid() {
+        let mut buffer = Vec::new();
+        let length = 512u32;
+        let offset = 2048u64;
+        write_record_header(&mut buffer, length, offset);
+
+        let header = read_record_header(&buffer, 0).unwrap();
+
+        assert_eq!(header.length, 512);
+        assert_eq!(header.offset, 2048);
+    }
+
+    #[test]
+    fn test_read_record_header_insufficient_data() {
+        let buffer = vec![0u8; 5];
+
+        let header = read_record_header(&buffer, 0);
+
+        assert!(header.is_none());
+    }
+
+    #[test]
+    fn test_read_record_header_cursor_beyond_buffer() {
+        let buffer = vec![0u8; RECORD_HEADER_SIZE];
+
+        let header = read_record_header(&buffer, RECORD_HEADER_SIZE);
+
+        assert!(header.is_none());
+    }
+
+    #[test]
+    fn test_parse_record_from_bytes_valid_record() {
+        let record = Record::new(Some("key1".to_string()), "value1".to_string(), None);
+        let json_bytes = serde_json::to_vec(&record).unwrap();
+        let offset = 42;
+
+        let result = parse_record_from_bytes(&json_bytes, offset).unwrap();
+
+        assert_eq!(result.offset, 42);
+        assert_eq!(result.record.key, Some("key1".to_string()));
+        assert_eq!(result.record.value, "value1");
+    }
+
+    #[test]
+    fn test_parse_record_from_bytes_invalid_json() {
+        let invalid_json = b"invalid json data";
+        let offset = 42;
+
+        let result = parse_record_from_bytes(invalid_json, offset);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_record_from_bytes_with_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("source".to_string(), "test".to_string());
+        let record = Record::new(Some("key1".to_string()), "value1".to_string(), Some(headers));
+        let json_bytes = serde_json::to_vec(&record).unwrap();
+        let offset = 100;
+
+        let result = parse_record_from_bytes(&json_bytes, offset).unwrap();
+
+        assert_eq!(result.offset, 100);
+        assert_eq!(result.record.key, Some("key1".to_string()));
+        assert_eq!(result.record.value, "value1");
+        assert!(result.record.headers.is_some());
+    }
+
+    // ============================================================================================
+    // DATA STRUCTURE TESTS
+    // ============================================================================================
+
+    #[test]
+    fn test_consumer_group_data_creation() {
+        let mut offsets = HashMap::new();
+        offsets.insert("topic1".to_string(), 42);
+        offsets.insert("topic2".to_string(), 84);
+
+        let data = ConsumerGroupData {
+            group_id: "test_group".to_string(),
+            topic_offsets: offsets.clone(),
+        };
+
+        assert_eq!(data.group_id, "test_group");
+        assert_eq!(data.topic_offsets, offsets);
+    }
+
+    #[test]
+    fn test_sync_mode_enum_values() {
+        let none = SyncMode::None;
+        let immediate = SyncMode::Immediate;
+        let periodic = SyncMode::Periodic;
+
+        assert_eq!(none, SyncMode::None);
+        assert_eq!(immediate, SyncMode::Immediate);
+        assert_eq!(periodic, SyncMode::Periodic);
+    }
+
+    #[test]
+    fn test_sync_mode_copy_clone() {
+        let original = SyncMode::Immediate;
+        let copied = original;
+        let cloned = original.clone();
+
+        assert_eq!(original, copied);
+        assert_eq!(original, cloned);
     }
 }

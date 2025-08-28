@@ -75,6 +75,7 @@ impl StorageBackend {
                     *sync_mode,
                     data_dir,
                     *wal_commit_threshold,
+                    1000, // Default cache size
                 )?;
                 Ok(Box::new(file_log))
             }
