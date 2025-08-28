@@ -8,9 +8,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-// ================================================================================================
-// CONSTANTS & TYPES
-// ================================================================================================
+// Constants and Types
 
 const LENGTH_SIZE: usize = 4;
 const OFFSET_SIZE: usize = 8;
@@ -35,9 +33,7 @@ struct ConsumerGroupData {
     topic_offsets: HashMap<String, u64>,
 }
 
-// ================================================================================================
-// BINARY FORMAT UTILITIES
-// ================================================================================================
+// Binary Format Utilities
 
 fn read_record_header(buffer: &[u8], cursor: usize) -> Option<RecordHeader> {
     if cursor + RECORD_HEADER_SIZE > buffer.len() {
@@ -54,7 +50,6 @@ fn read_record_header(buffer: &[u8], cursor: usize) -> Option<RecordHeader> {
     Some(RecordHeader { length, offset })
 }
 
-// Phase 2: Simplified header reading for streaming (from fixed-size buffer)
 fn read_record_header_from_buffer(buffer: &[u8; RECORD_HEADER_SIZE]) -> Option<RecordHeader> {
     let length = u32::from_le_bytes(buffer[0..LENGTH_SIZE].try_into().ok()?);
     let offset = u64::from_le_bytes(buffer[LENGTH_SIZE..RECORD_HEADER_SIZE].try_into().ok()?);
@@ -77,9 +72,7 @@ fn parse_record_from_bytes(
     Ok(RecordWithOffset::from_record(record, offset))
 }
 
-// ================================================================================================
-// FILE I/O UTILITIES
-// ================================================================================================
+// File I/O Utilities
 
 fn ensure_directory_exists<P: AsRef<Path>>(dir: P) -> Result<(), std::io::Error> {
     let dir = dir.as_ref();
@@ -112,9 +105,7 @@ fn read_file_contents(file_path: &Path) -> Result<Vec<u8>, std::io::Error> {
     Ok(buffer)
 }
 
-// ================================================================================================
-// FILE TOPIC LOG IMPLEMENTATION
-// ================================================================================================
+// FileTopicLog Implementation
 
 pub struct FileTopicLog {
     file_path: PathBuf,
@@ -126,9 +117,9 @@ pub struct FileTopicLog {
     sync_mode: SyncMode,
     wal_commit_threshold: usize,
 
-    // Phase 1: Memory-bounded cache
-    memory_cache: std::collections::BTreeMap<u64, RecordWithOffset>, // offset -> record
-    cache_max_size: usize,                                           // e.g., 1000 records
+    memory_cache: std::collections::BTreeMap<u64, RecordWithOffset>,
+    cache_max_size: usize,
+    offset_index: std::collections::BTreeMap<u64, u64>,
 }
 
 impl FileTopicLog {
@@ -158,9 +149,9 @@ impl FileTopicLog {
             sync_mode,
             wal_commit_threshold,
 
-            // Phase 1: Initialize memory-bounded cache
             memory_cache: std::collections::BTreeMap::new(),
             cache_max_size: cache_size,
+            offset_index: std::collections::BTreeMap::new(),
         };
 
         log.recover_from_file()?;
@@ -186,7 +177,6 @@ impl FileTopicLog {
     }
 }
 
-// Recovery Implementation
 impl FileTopicLog {
     fn recover_from_file(&mut self) -> Result<(), std::io::Error> {
         self.recover_wal()?;
@@ -224,6 +214,8 @@ impl FileTopicLog {
         let mut record_count = 0;
 
         while cursor + RECORD_HEADER_SIZE <= buffer.len() {
+            let record_start_position = cursor as u64;
+
             let Some(header) = read_record_header(buffer, cursor) else {
                 break;
             };
@@ -243,6 +235,8 @@ impl FileTopicLog {
             if self.validate_record_json(json_bytes) {
                 offset_counter = offset_counter.max(offset + 1);
                 record_count += 1;
+
+                self.offset_index.insert(offset, record_start_position);
             } else {
                 self.truncate_at_position((cursor - length - RECORD_HEADER_SIZE) as u64)?;
                 break;
@@ -264,15 +258,23 @@ impl FileTopicLog {
     }
 }
 
-// Write-Ahead Logging Implementation
 impl FileTopicLog {
     fn write_record_atomically(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
+        use std::io::Seek;
+
+        let current_wal_position = self
+            .wal_file.stream_position()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to get WAL file position"))?;
+
         self.wal_file
             .write_all(buffer)
             .map_err(|e| StorageError::from_io_error(e, "Failed to write record to WAL"))?;
 
         sync_file_if_needed(&self.wal_file, self.sync_mode)
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL file"))?;
+
+        let offset = self.next_offset;
+        self.offset_index.insert(offset, current_wal_position);
 
         self.wal_record_count += 1;
 
@@ -370,7 +372,6 @@ impl FileTopicLog {
     }
 }
 
-// Record Processing Implementation
 impl FileTopicLog {
     fn serialize_record(&self, record: &Record) -> Result<Vec<u8>, StorageError> {
         serde_json::to_vec(record)
@@ -386,52 +387,54 @@ impl FileTopicLog {
         write_buffer
     }
 
-
-    // Phase 2: Enhanced cache-first retrieval with streaming disk fallback
     fn get_records_from_cache_or_disk(
         &self,
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let mut results = Vec::new();
+        let mut results = self.try_cache_first(offset, count);
+        
+        if self.cache_satisfied_request(&results, count) {
+            if let Some(requested_count) = count {
+                results.truncate(requested_count);
+            }
+            return Ok(results);
+        }
 
-        // 1. Try cache first (limit to avoid overflow)
-        let cache_search_limit = count
-            .unwrap_or(self.cache_max_size)
-            .min(self.cache_max_size);
+        let remaining_count = count.map(|requested| requested.saturating_sub(results.len()));
+        if remaining_count == Some(0) {
+            return Ok(results);
+        }
+
+        let disk_start_offset = offset + results.len() as u64;
+        let mut disk_results = self.read_records_streaming(disk_start_offset, remaining_count)?;
+        results.append(&mut disk_results);
+        Ok(results)
+    }
+
+    fn try_cache_first(&self, offset: u64, count: Option<usize>) -> Vec<RecordWithOffset> {
+        let mut results = Vec::new();
+        let cache_search_limit = count.unwrap_or(self.cache_max_size).min(self.cache_max_size);
+        
         for i in 0..cache_search_limit {
             let current_offset = offset + i as u64;
             if let Some(cached_record) = self.memory_cache.get(&current_offset) {
                 results.push(cached_record.clone());
             } else {
-                break; // Cache miss - need disk read
+                break;
             }
         }
-
-        // 2. If cache satisfied request, return early
-        if let Some(requested_count) = count {
-            if results.len() >= requested_count {
-                results.truncate(requested_count);
-                return Ok(results);
-            }
-        }
-
-        // 3. Phase 2: Use streaming read instead of loading entire files
-        let remaining_count = count.map(|requested| requested.saturating_sub(results.len()));
-
-        if remaining_count == Some(0) {
-            return Ok(results);
-        }
-
-        // Calculate the actual starting offset for disk read
-        let disk_start_offset = offset + results.len() as u64;
-        let mut disk_results = self.read_records_streaming(disk_start_offset, remaining_count)?;
-
-        results.append(&mut disk_results);
-        Ok(results)
+        results
     }
 
-    // Phase 2: Streaming file reads - avoids loading entire files into memory
+    fn cache_satisfied_request(&self, results: &[RecordWithOffset], count: Option<usize>) -> bool {
+        if let Some(requested_count) = count {
+            results.len() >= requested_count
+        } else {
+            false
+        }
+    }
+
     fn read_records_streaming(
         &self,
         start_offset: u64,
@@ -484,7 +487,6 @@ impl FileTopicLog {
         Ok(results)
     }
 
-    // Phase 2: Stream records from a single file with targeted range reading
     fn stream_records_from_file(
         &self,
         file_path: &Path,
@@ -496,6 +498,8 @@ impl FileTopicLog {
 
         let mut file = File::open(file_path)
             .map_err(|e| StorageError::from_io_error(e, "Failed to open file for streaming"))?;
+
+        self.seek_to_offset(&mut file, start_offset)?;
 
         let mut results = Vec::new();
         let mut header_buffer = [0u8; RECORD_HEADER_SIZE];
@@ -513,9 +517,7 @@ impl FileTopicLog {
                     let record_length = header.length as usize;
                     let record_offset = header.offset;
 
-                    // Skip records before our start_offset
                     if record_offset < start_offset {
-                        // Skip the record data
                         file.seek(SeekFrom::Current(record_length as i64))
                             .map_err(|e| {
                                 StorageError::from_io_error(e, "Failed to seek past record")
@@ -523,24 +525,20 @@ impl FileTopicLog {
                         continue;
                     }
 
-                    // Stop if we have enough records
                     if results.len() >= max_count {
                         break;
                     }
 
-                    // Read the record data
                     let mut record_data = vec![0u8; record_length];
                     file.read_exact(&mut record_data).map_err(|e| {
                         StorageError::from_io_error(e, "Failed to read record data")
                     })?;
 
-                    // Parse the record
                     match parse_record_from_bytes(&record_data, record_offset) {
                         Ok(record_with_offset) => {
                             results.push(record_with_offset);
                         }
                         Err(e) => {
-                            // Log parsing error but continue (resilient to corruption)
                             eprintln!(
                                 "Warning: Failed to parse record at offset {record_offset}: {e}"
                             );
@@ -548,7 +546,6 @@ impl FileTopicLog {
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    // Reached end of file naturally
                     break;
                 }
                 Err(e) => {
@@ -563,9 +560,7 @@ impl FileTopicLog {
         Ok(results)
     }
 
-    // Phase 1: Cache management methods
     fn populate_cache(&mut self, record_with_offset: RecordWithOffset) {
-        // Add to cache
         self.memory_cache
             .insert(record_with_offset.offset, record_with_offset);
 
@@ -576,11 +571,26 @@ impl FileTopicLog {
             }
         }
     }
+
+    fn seek_to_offset(&self, file: &mut File, target_offset: u64) -> Result<(), StorageError> {
+        use std::io::{Seek, SeekFrom};
+
+        let file_position =
+            if let Some((&_, &position)) = self.offset_index.range(..=target_offset).last() {
+                position
+            } else {
+                0
+            };
+
+        file.seek(SeekFrom::Start(file_position))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to seek to indexed position"))?;
+
+        Ok(())
+    }
+
 }
 
-// ================================================================================================
-// TOPIC LOG TRAIT IMPLEMENTATION
-// ================================================================================================
+// TopicLog Trait Implementation
 
 impl TopicLog for FileTopicLog {
     fn append(&mut self, record: Record) -> Result<u64, StorageError> {
@@ -590,7 +600,6 @@ impl TopicLog for FileTopicLog {
 
         self.write_record_atomically(&write_buffer)?;
 
-        // Phase 1: Populate cache with newly appended record
         let record_with_offset = RecordWithOffset::from_record(record, offset);
         self.populate_cache(record_with_offset);
 
@@ -604,7 +613,6 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        // Phase 1: Use cache-first approach
         self.get_records_from_cache_or_disk(offset, count)
     }
 
@@ -627,9 +635,7 @@ impl Drop for FileTopicLog {
     }
 }
 
-// ================================================================================================
-// FILE CONSUMER GROUP IMPLEMENTATION
-// ================================================================================================
+// FileConsumerGroup Implementation
 
 pub struct FileConsumerGroup {
     group_id: String,
@@ -717,9 +723,7 @@ impl FileConsumerGroup {
     }
 }
 
-// ================================================================================================
-// CONSUMER GROUP TRAIT IMPLEMENTATION
-// ================================================================================================
+// ConsumerGroup Trait Implementation
 
 impl ConsumerGroup for FileConsumerGroup {
     fn get_offset(&self, topic: &str) -> u64 {
@@ -743,9 +747,7 @@ impl ConsumerGroup for FileConsumerGroup {
     }
 }
 
-// ================================================================================================
-// UNIT TESTS
-// ================================================================================================
+// Unit Tests
 
 #[cfg(test)]
 mod tests {
@@ -753,9 +755,6 @@ mod tests {
     use crate::Record;
     use std::collections::HashMap;
 
-    // ============================================================================================
-    // BINARY FORMAT UTILITIES TESTS
-    // ============================================================================================
 
     #[test]
     fn test_record_header_creation() {
@@ -855,9 +854,6 @@ mod tests {
         assert!(result.record.headers.is_some());
     }
 
-    // ============================================================================================
-    // DATA STRUCTURE TESTS
-    // ============================================================================================
 
     #[test]
     fn test_consumer_group_data_creation() {
@@ -885,9 +881,6 @@ mod tests {
         assert_eq!(periodic, SyncMode::Periodic);
     }
 
-    // ============================================================================================
-    // PHASE 2: STREAMING FILE READS TESTS
-    // ============================================================================================
 
     #[test]
     fn test_read_record_header_from_buffer() {

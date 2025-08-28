@@ -463,3 +463,111 @@ fn test_streaming_partial_count_satisfied() {
     assert_eq!(subset[0].record.value, "partial_record_20");
     assert_eq!(subset[2].record.value, "partial_record_22");
 }
+
+// ================================================================================================
+// PHASE 3: OFFSET INDEX TESTS
+// ================================================================================================
+
+#[test]
+fn test_offset_index_builds_during_append() {
+    let config = TestConfig::new("offset_index_append");
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        1000,
+        100,
+    )
+    .unwrap();
+
+    let offset1 = log
+        .append(Record::new(None, "value1".to_string(), None))
+        .unwrap();
+    let offset2 = log
+        .append(Record::new(None, "value2".to_string(), None))
+        .unwrap();
+
+    assert_eq!(offset1, 0);
+    assert_eq!(offset2, 1);
+}
+
+#[test]
+fn test_offset_index_recovers_from_file() {
+    let config = TestConfig::new("offset_index_recovery");
+
+    {
+        let mut log = FileTopicLog::new(
+            &config.topic_name,
+            config.sync_mode,
+            config.temp_dir_path(),
+            1,
+            100,
+        )
+        .unwrap();
+
+        log.append(Record::new(None, "value1".to_string(), None))
+            .unwrap();
+        log.append(Record::new(None, "value2".to_string(), None))
+            .unwrap();
+    }
+
+    let recovered_log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        1000,
+        100,
+    )
+    .unwrap();
+
+    let records = recovered_log.get_records_from_offset(1, Some(1)).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].offset, 1);
+}
+
+#[test]
+fn test_fast_offset_seeking() {
+    let config = TestConfig::new("fast_seeking");
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        1,
+        50,
+    )
+    .unwrap();
+
+    for i in 0..100 {
+        log.append(Record::new(None, format!("value_{i}"), None))
+            .unwrap();
+    }
+
+    let mid_records = log.get_records_from_offset(50, Some(5)).unwrap();
+    assert_eq!(mid_records.len(), 5);
+    assert_eq!(mid_records[0].offset, 50);
+    assert_eq!(mid_records[4].offset, 54);
+}
+
+#[test]
+fn test_index_consistency_after_wal_commits() {
+    let config = TestConfig::new("index_wal_commits");
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        3,
+        100,
+    )
+    .unwrap();
+
+    for i in 0..10 {
+        log.append(Record::new(None, format!("wal_value_{i}"), None))
+            .unwrap();
+    }
+
+    let range = log.get_records_from_offset(4, Some(3)).unwrap();
+    assert_eq!(range.len(), 3);
+    assert_eq!(range[0].offset, 4);
+    assert_eq!(range[1].offset, 5);
+    assert_eq!(range[2].offset, 6);
+}
