@@ -1,11 +1,11 @@
 use crate::error::StorageError;
 use crate::storage::r#trait::{ConsumerGroup, TopicLog};
 use crate::{Record, RecordWithOffset, warn};
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use lru::LruCache;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -149,7 +149,10 @@ impl FileTopicLog {
             sync_mode,
             wal_commit_threshold,
 
-            memory_cache: LruCache::new(std::num::NonZero::new(cache_size).unwrap_or_else(|| std::num::NonZero::new(1000).unwrap())),
+            memory_cache: LruCache::new(
+                std::num::NonZero::new(cache_size)
+                    .unwrap_or_else(|| std::num::NonZero::new(1000).unwrap()),
+            ),
             offset_index: std::collections::BTreeMap::new(),
         };
 
@@ -262,7 +265,8 @@ impl FileTopicLog {
         use std::io::Seek;
 
         let current_wal_position = self
-            .wal_file.stream_position()
+            .wal_file
+            .stream_position()
             .map_err(|e| StorageError::from_io_error(e, "Failed to get WAL file position"))?;
 
         self.wal_file
@@ -392,7 +396,7 @@ impl FileTopicLog {
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
         let mut results = self.try_cache_first(offset, count);
-        
+
         if self.cache_satisfied_request(&results, count) {
             if let Some(requested_count) = count {
                 results.truncate(requested_count);
@@ -415,7 +419,7 @@ impl FileTopicLog {
         let mut results = Vec::new();
         let cache_capacity = self.memory_cache.cap().into();
         let cache_search_limit = count.unwrap_or(cache_capacity).min(cache_capacity);
-        
+
         for i in 0..cache_search_limit {
             let current_offset = offset + i as u64;
             if let Some(cached_record) = self.memory_cache.peek(&current_offset) {
@@ -562,7 +566,8 @@ impl FileTopicLog {
 
     fn populate_cache(&mut self, record_with_offset: RecordWithOffset) {
         // LruCache automatically handles eviction on insert
-        self.memory_cache.put(record_with_offset.offset, record_with_offset);
+        self.memory_cache
+            .put(record_with_offset.offset, record_with_offset);
     }
 
     fn seek_to_offset(&self, file: &mut File, target_offset: u64) -> Result<(), StorageError> {
@@ -580,7 +585,6 @@ impl FileTopicLog {
 
         Ok(())
     }
-
 }
 
 // TopicLog Trait Implementation
@@ -748,7 +752,6 @@ mod tests {
     use crate::Record;
     use std::collections::HashMap;
 
-
     #[test]
     fn test_record_header_creation() {
         let header = RecordHeader {
@@ -847,7 +850,6 @@ mod tests {
         assert!(result.record.headers.is_some());
     }
 
-
     #[test]
     fn test_consumer_group_data_creation() {
         let mut offsets = HashMap::new();
@@ -873,7 +875,6 @@ mod tests {
         assert_eq!(immediate, SyncMode::Immediate);
         assert_eq!(periodic, SyncMode::Periodic);
     }
-
 
     #[test]
     fn test_read_record_header_from_buffer() {
