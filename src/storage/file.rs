@@ -543,9 +543,7 @@ impl FileTopicLog {
                             results.push(record_with_offset);
                         }
                         Err(e) => {
-                            eprintln!(
-                                "Warning: Failed to parse record at offset {record_offset}: {e}"
-                            );
+                            warn!("Warning: Failed to parse record at offset {record_offset}: {e}");
                         }
                     }
                 }
