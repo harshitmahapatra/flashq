@@ -11,8 +11,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 - Batch operations (up to 1000 records)
 - HTTP REST API with JSON
 - Thread-safe concurrent access
-- File storage backend with directory locking and crash recovery
-- Write-ahead logging with configurable commit thresholds
+- File storage with write-ahead logging, crash recovery, and memory optimizations
 - Error handling with structured logging
 - Pluggable storage backends (in-memory and file-based)
 
