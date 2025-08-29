@@ -12,7 +12,7 @@ fn main() {
 fn create_1kb_record(index: usize) -> Record {
     let payload = "x".repeat(1024);
     Record::new(
-        Some(format!("key_{}", index)),
+        Some(format!("key_{index}")),
         payload,
         Some({
             let mut headers = HashMap::new();
