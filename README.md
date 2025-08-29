@@ -15,6 +15,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 - Write-ahead logging with configurable commit thresholds
 - Error handling with structured logging
 - Pluggable storage backends (in-memory and file-based)
+- Performance benchmarking with memory profiling
 
 ## Quick Start
 
@@ -64,6 +65,7 @@ curl http://127.0.0.1:8080/topics/news/records
 ```bash
 cargo build && cargo test     # Build and run all tests
 cargo test --test '*'         # Integration tests only
+cargo bench                   # Run performance benchmarks
 cargo clippy && cargo fmt     # Code quality and formatting
 cargo check                   # Quick compile check
 ```
@@ -71,6 +73,7 @@ cargo check                   # Quick compile check
 ## Documentation
 
 - **[API Reference](docs/api.md)** - Complete HTTP API documentation
+- **[Performance](docs/performace.md)** - Benchmarking results and storage backend comparison
 - **[Architecture](docs/architecture.md)** - Internal design and project structure
 - **[Development Guide](docs/development.md)** - Development workflow and contribution guidelines
 

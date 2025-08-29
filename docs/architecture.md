@@ -43,6 +43,7 @@ graph TD
 - HTTP server: REST API with validation and consumer groups
 - CLI client: Structured command interface
 - Interactive demo: Educational exploration tool
+- Performance benchmarking: Divan benchmarks with memory profiling
 
 **Key Features:**
 - Thread-safe concurrent access (`Arc<Mutex<>>`)
@@ -121,18 +122,27 @@ sequenceDiagram
 - Concurrency: Single lock bottleneck per storage backend
 
 **Trade-offs:**
-- **Memory vs File**: Speed vs persistence
+- **Memory vs File**: Speed vs persistence (930x performance difference)
 - **WAL sync modes**: Durability vs performance
 - **Directory locking**: Safety vs multi-process access
 - **Commit thresholds**: Write batching vs durability
 - FIFO ordering vs parallelism
 
+## Benchmarking Architecture
+
+**Framework**: Divan with AllocProfiler for memory tracking
+**Test Structure**: 1KB records with keys, headers, and payloads
+- Empty topic tests: 500 record batches  
+- Large dataset tests: 100 records with 2K record context
+- Memory profiling tracks allocations, deallocations, and peak usage
+
 ## Storage Backend Comparison
 
 | Feature | Memory | File |
 |---------|--------|------|
-| **Speed** | Fastest | Fast with WAL batching |
+| **Speed** | 133K-2.77M records/sec | 101-2.97K records/sec |
+| **Latency** | 180-820 µs | 168-990 ms |
+| **Memory Usage** | 726KB-3.3MB | 539KB-4.4MB |
 | **Persistence** | None | Full durability |
 | **Recovery** | No | Crash recovery from WAL |
 | **Concurrency** | Multi-thread only | Multi-process safe |
-| **Resource Usage** | RAM only | Disk + minimal RAM |
