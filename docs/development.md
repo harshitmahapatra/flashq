@@ -24,6 +24,7 @@ cargo build --bin server       # Specific binary
 - **Unit** (`src/lib.rs`): Core functionality and data structures
 - **HTTP Integration** (`tests/http/`): REST API endpoints and client functionality
 - **Storage Integration** (`tests/storage/`): File backend, persistence, and crash recovery
+- **Benchmarks** (`benches/`): Performance testing with memory profiling
 - **Utilities** (`tests/*/test_utilities.rs`): Shared test infrastructure
 
 ### Running Tests
@@ -36,6 +37,14 @@ cargo test --test http_integration_tests # HTTP integration tests
 cargo test --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
+```
+
+### Benchmarking
+
+```bash
+cargo bench                              # Run all benchmarks
+cargo bench --bench memory_storage       # Memory storage benchmarks only
+cargo bench --bench file_storage         # File storage benchmarks only
 ```
 
 ### Test Coverage
@@ -87,6 +96,9 @@ src/bin/server.rs       # HTTP server binary with storage backend selection
 src/bin/client.rs       # CLI client binary
 tests/http/             # HTTP integration tests
 tests/storage/          # Storage integration tests
+benches/                # Performance benchmarks
+├── memory_storage.rs   # Memory backend benchmarks
+└── file_storage.rs     # File backend benchmarks
 ```
 
 ## Contribution Guidelines
