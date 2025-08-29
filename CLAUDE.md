@@ -30,6 +30,14 @@ FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, 
 - `cargo fmt` - Format code according to Rust style guidelines
 - `cargo check` - Quick compile check without generating binaries
 
+### Benchmarking
+```bash
+cargo bench                              # Run all benchmarks
+cargo bench --bench memory_storage       # Memory storage benchmarks only
+cargo bench --bench file_storage         # File storage benchmarks only
+```
+
+
 ### OpenAPI Specification Validation
 - `openapi-generator validate -i docs/openapi.yaml` - Validate OpenAPI specification syntax and structure
 
