@@ -33,7 +33,9 @@ pub fn sync_file_if_needed(file: &File, sync_mode: SyncMode) -> Result<(), std::
     }
 }
 
-pub fn deserialize_record(reader: &mut BufReader<File>) -> Result<RecordWithOffset, StorageError> {
+pub fn deserialize_record<R: Read>(
+    reader: &mut BufReader<R>,
+) -> Result<RecordWithOffset, StorageError> {
     let payload_size = read_u32(reader, "Failed to read payload size")?;
     let offset = read_u64(reader, "Failed to read offset")?;
 
@@ -133,4 +135,72 @@ fn assemble_record_buffer(
     buffer.extend_from_slice(timestamp_bytes);
     buffer.extend_from_slice(json_payload);
     buffer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_assemble_record_buffer_structure() {
+        let payload_size = 100u32;
+        let offset = 12345u64;
+        let timestamp_len = 20u32;
+        let timestamp_bytes = vec![0; timestamp_len as usize];
+        let json_payload = vec![1; 76];
+
+        let buffer = assemble_record_buffer(
+            payload_size,
+            offset,
+            timestamp_len,
+            &timestamp_bytes,
+            &json_payload,
+        );
+
+        let mut expected_buffer = Vec::new();
+        expected_buffer.extend_from_slice(&payload_size.to_be_bytes());
+        expected_buffer.extend_from_slice(&offset.to_be_bytes());
+        expected_buffer.extend_from_slice(&timestamp_len.to_be_bytes());
+        expected_buffer.extend_from_slice(&timestamp_bytes);
+        expected_buffer.extend_from_slice(&json_payload);
+
+        assert_eq!(buffer, expected_buffer);
+    }
+
+    #[test]
+    fn test_serialize_record_payload_valid_json() {
+        let record = Record {
+            value: json!({ "test": "data" }).to_string(),
+            key: None,
+            headers: None,
+        };
+
+        let serialized = serialize_record_payload(&record).unwrap();
+
+        let deserialized: Record = serde_json::from_slice(&serialized).unwrap();
+        assert_eq!(deserialized, record);
+    }
+
+    #[test]
+    fn test_record_serialization_deserialization_roundtrip() {
+        let record = Record {
+            value: json!({ "a": 1, "b": "hello" }).to_string(),
+            key: Some("my-key".to_string()),
+            headers: None,
+        };
+        let offset = 999;
+
+        let serialized_data = serialize_record(&record, offset).unwrap();
+        let mut reader = BufReader::new(Cursor::new(serialized_data));
+        let deserialized_record_with_offset = deserialize_record(&mut reader).unwrap();
+
+        assert_eq!(deserialized_record_with_offset.record, record);
+        assert_eq!(deserialized_record_with_offset.offset, offset);
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&deserialized_record_with_offset.timestamp)
+                .is_ok()
+        );
+    }
 }
