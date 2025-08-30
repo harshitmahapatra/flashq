@@ -85,7 +85,14 @@ src/storage/            # Storage abstraction layer
 ├── trait.rs            # TopicLog and ConsumerGroup traits
 ├── backend.rs          # StorageBackend factory with directory locking
 ├── memory.rs           # InMemoryTopicLog implementation
-└── file.rs             # FileTopicLog with WAL and crash recovery
+└── file/               # Kafka-aligned segment-based file storage
+    ├── mod.rs          # File storage module exports
+    ├── common.rs       # Shared serialization utilities
+    ├── topic_log.rs    # FileTopicLog implementation
+    ├── consumer_group.rs # File-based consumer groups
+    ├── segment.rs      # LogSegment implementation
+    ├── segment_manager.rs # Segment lifecycle management
+    └── index.rs        # Sparse indexing for segments
 src/http/               # HTTP components
 ├── mod.rs              # HTTP types and validation
 ├── server.rs           # HTTP server implementation

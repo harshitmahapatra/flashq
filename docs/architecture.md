@@ -18,10 +18,22 @@ graph TD
     
     subgraph "Storage Backends"
         I[InMemoryTopicLog]
-        J[FileTopicLog + WAL]
+        J[FileTopicLog + Segments]
         K[InMemoryConsumerGroup]
         L[FileConsumerGroup]
     end
+    
+    subgraph "File Storage Components"
+        M[SegmentManager]
+        N[LogSegment]
+        O[SparseIndex]
+        P[Serialization Utils]
+    end
+    
+    J --> M
+    M --> N
+    N --> O
+    J --> P
     
     G --> I
     G --> J
@@ -37,7 +49,10 @@ graph TD
 - `TopicLog` trait: Storage abstraction for append-only topic logs
 - `ConsumerGroup` trait: Storage abstraction for offset management
 - `StorageBackend`: Factory with directory locking and backend selection
-- `FileTopicLog`: File-based storage with write-ahead logging and crash recovery
+- `FileTopicLog`: Kafka-aligned segment-based file storage with crash recovery
+- `SegmentManager`: Manages log segment lifecycle and rolling
+- `LogSegment`: Individual segment files with sparse indexing
+- `SparseIndex`: Efficient offset-to-position mapping within segments
 - `InMemoryTopicLog`: Fast in-memory storage implementation
 - Error handling: Comprehensive error types with structured logging
 - HTTP server: REST API with validation and consumer groups
@@ -48,9 +63,9 @@ graph TD
 **Key Features:**
 - Thread-safe concurrent access (`Arc<Mutex<>>`)
 - Trait-based storage abstraction for pluggable backends
-- File storage with write-ahead logging and configurable sync modes
+- Kafka-aligned segment-based file storage with rolling segments
 - Directory locking prevents concurrent access to file storage
-- Crash recovery from persisted write-ahead logs
+- Crash recovery from segment files with sparse indexing
 - Comprehensive error handling with structured logging
 - Owned data returns for improved performance and safety
 - OpenAPI-compliant validation and error handling
@@ -85,28 +100,38 @@ sequenceDiagram
 - Append-only logs ensure FIFO ordering  
 - Non-destructive polling (records persist)
 - Thread-safe with `Arc<Mutex<>>`
-- Write-ahead logging for durability and crash recovery
+- Segment-based storage for scalability and Kafka alignment
 
-## Write-Ahead Log (WAL)
+## Segment-Based Storage
 
 **File Storage Architecture:**
-- **WAL Structure**: Records written sequentially with length prefixes for recovery
-- **Commit Thresholds**: Configurable batching (default: 10 records) before sync
-- **Sync Modes**: `Always`, `Periodic`, `Never` for different durability guarantees  
-- **Crash Recovery**: Rebuilds state from WAL during startup, handles partial writes
+- **Segment Structure**: Kafka-aligned .log files with sequential naming (000000000000000000.log)
+- **Rolling Segments**: New segments created when configured thresholds are met
+- **Sparse Index**: Efficient offset-to-file-position mapping within segments
+- **Crash Recovery**: Rebuilds state by scanning existing segment files on startup
 - **Directory Locking**: Process-level locks prevent concurrent access to storage directory
 
-**WAL Format:**
+**Segment Format:**
 ```
-[4-byte length][8-byte offset][serialized record][4-byte length][8-byte offset][serialized record]...
+[4-byte payload_size][8-byte offset][4-byte timestamp_len][timestamp][record_json]
+```
+
+**Directory Structure:**
+```
+data/
+└── {topic}/
+    ├── 00000000000000000000.log  # First segment
+    ├── 00000000000000000010.log  # Second segment (starting at offset 10)
+    └── ...
 ```
 
 ## Design Decisions
 
 **Architecture Choices:**
 - **Storage abstraction**: Trait-based pluggable backends with memory and file implementations
-- **Write-ahead logging**: Durability with configurable performance trade-offs
+- **Segment-based storage**: Kafka-aligned architecture for scalability and industry compatibility
 - **Directory locking**: Prevents data corruption from concurrent processes
+- **Sparse indexing**: Efficient offset lookup without loading entire segments
 - **Error handling**: Comprehensive error types with context preservation
 - **Owned data**: Returns `Vec<RecordWithOffset>` vs references
 - **Safe casting**: `try_into()` with bounds checking
@@ -117,15 +142,15 @@ sequenceDiagram
 **Complexity:**
 - Memory storage: O(n) total records
 - File storage: O(1) append, O(k) for k records read
-- Post: O(1) append operation (with optional WAL sync)
+- Post: O(1) append operation (with segment indexing)
 - Poll: O(k) for k records
 - Concurrency: Single lock bottleneck per storage backend
 
 **Trade-offs:**
 - **Memory vs File**: Speed vs persistence (930x performance difference)
-- **WAL sync modes**: Durability vs performance
+- **Segment rolling**: Storage efficiency vs lookup complexity
 - **Directory locking**: Safety vs multi-process access
-- **Commit thresholds**: Write batching vs durability
+- **Sparse indexing**: Memory efficiency vs lookup speed
 - FIFO ordering vs parallelism
 
 ## Benchmarking Architecture
@@ -144,5 +169,5 @@ sequenceDiagram
 | **Latency** | 180-820 µs | 168-990 ms |
 | **Memory Usage** | 726KB-3.3MB | 539KB-4.4MB |
 | **Persistence** | None | Full durability |
-| **Recovery** | No | Crash recovery from WAL |
+| **Recovery** | No | Crash recovery from segments |
 | **Concurrency** | Multi-thread only | Multi-process safe |
