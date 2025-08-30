@@ -5,15 +5,15 @@ Quick performance comparison between memory and file storage backends.
 ## At a Glance
 
 **Memory Storage** (Fast, Volatile)
-- **Throughput**: 133K - 2.77M records/sec
-- **Latency**: 180 µs - 820 µs 
+- **Throughput**: 1.4K - 6.2K records/sec
+- **Latency**: 164 µs - 714 µs 
 - **Memory**: 726 KB - 3.3 MB
 - **Best for**: Real-time processing, temporary queues
 
-**File Storage** (Persistent, Slower)
-- **Throughput**: 101 - 2,970 records/sec  
-- **Latency**: 168 ms - 990 ms
-- **Memory**: 539 KB - 4.4 MB
+**File Storage** (Persistent, Optimized)
+- **Throughput**: 49 - 250 records/sec  
+- **Latency**: 4.0 ms - 20 ms
+- **Memory**: 1.3 MB - 2.3 MB
 - **Best for**: Durable messaging, audit logs
 
 > ⚠️ **Note**: We're actively working on optimizing file storage performance in upcoming releases.
@@ -24,8 +24,8 @@ Quick performance comparison between memory and file storage backends.
 
 | Scenario | Memory Storage | File Storage |
 |----------|----------------|--------------|
-| High-frequency trading | ✅ Sub-ms latency | ❌ Too slow |
-| Real-time analytics | ✅ 2.7M records/sec | ❌ Only 3K records/sec |
+| High-frequency trading | ✅ Sub-ms latency | ❌ 4-20ms latency |
+| Real-time analytics | ✅ 6K records/sec | ❌ 250 records/sec |
 | Message queues | ⚠️ Data loss risk | ✅ Persistent |
 | Audit logs | ❌ No persistence | ✅ Durable |
 | Development/testing | ✅ Fast iterations | ✅ Production-like |
@@ -36,26 +36,30 @@ Quick performance comparison between memory and file storage backends.
 
 | Storage | Scenario | Throughput | Latency | Memory |
 |---------|----------|------------|---------|--------|
-| Memory | Small batch (500 records) | 2.77M/sec | 180 µs | 726 KB |
-| Memory | Large dataset (2K context) | 133K/sec | 752 µs | 3.3 MB |
-| File | Small batch (500 records) | 2.97K/sec | 168 ms | 539 KB |
-| File | Large dataset (2K context) | 101/sec | 990 ms | 4.4 MB |
+| Memory | Empty topic read | 1.86K/sec | 537 µs | 1.4 MB |
+| Memory | Empty topic write | 6.11K/sec | 164 µs | 726 KB |
+| Memory | Large dataset read | 1.35K/sec | 741 µs | 3.0 MB |
+| Memory | Large dataset write | 1.40K/sec | 714 µs | 3.3 MB |
+| File | Empty topic read | 226/sec | 4.4 ms | 1.3 MB |
+| File | Empty topic write | 249/sec | 4.0 ms | 4.9 KB |
+| File | Large file read | 51/sec | 19.6 ms | 2.3 MB |
+| File | Large file write | 49/sec | 20.3 ms | 1.1 MB |
 
 ## Quick Comparison
 
-**Memory is 930x faster** than file storage for most operations.
+**Memory is 8-27x faster** than file storage for most operations.
 
 | Metric | Memory Advantage | When to Choose File |
 |--------|------------------|-------------------|
-| Speed | 930-1300x faster | When you need persistence |
-| Latency | Sub-millisecond | Can tolerate 100ms+ |
+| Speed | 8-27x faster | When you need persistence |
+| Latency | Sub-millisecond | Can tolerate 4-20ms |
 | Memory | Similar usage | Need crash recovery |
 
 ## Production Guidance
 
 ### Choose Memory Storage For:
 - Real-time applications (trading, gaming)
-- High-throughput processing (>100K records/sec)
+- High-throughput processing (>1K records/sec)
 - Temporary data that doesn't need persistence
 - Development and testing environments
 
@@ -63,11 +67,11 @@ Quick performance comparison between memory and file storage backends.
 - Message queues that must survive restarts
 - Audit logs and compliance requirements
 - Long-term data storage
-- When you can accept ~100ms latencies
+- When you can accept 4-20ms latencies
 
 ### Capacity Planning
-- **Memory**: ~3-5 MB RAM per 1000 records
-- **File**: ~1-4 MB RAM + disk space for persistence
+- **Memory**: ~1-3 MB RAM per 1000 records
+- **File**: ~1-2 MB RAM + disk space for persistence
 - Both scale predictably with dataset size
 
 ---

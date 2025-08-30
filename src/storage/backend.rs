@@ -43,7 +43,7 @@ impl StorageBackend {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: P,
     ) -> Result<Self, StorageError> {
-        Self::new_file_with_config(sync_mode, data_dir, 10)
+        Self::new_file_with_config(sync_mode, data_dir, 1000)
     }
 
     pub fn new_file_with_config<P: AsRef<Path>>(

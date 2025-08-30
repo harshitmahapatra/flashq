@@ -369,23 +369,18 @@ impl FileTopicLog {
         write_buffer
     }
 
-    fn read_combined_data(&self) -> Result<Vec<u8>, StorageError> {
-        let mut combined_buffer = Vec::new();
-
-        if self.file_path.exists() {
-            let main_buffer = read_file_contents(&self.file_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read main file"))?;
-            combined_buffer.extend_from_slice(&main_buffer);
+    fn load_file_to_buffer(
+        &self,
+        file_path: PathBuf,
+        file_name: &str,
+    ) -> Result<Vec<u8>, StorageError> {
+        if file_path.exists() {
+            read_file_contents(&file_path).map_err(|e| {
+                StorageError::from_io_error(e, &format!("Failed to read {file_name} file"))
+            })
+        } else {
+            Ok(Vec::new())
         }
-
-        let wal_path = self.get_wal_path();
-        if wal_path.exists() {
-            let wal_buffer = read_file_contents(&wal_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read WAL file"))?;
-            combined_buffer.extend_from_slice(&wal_buffer);
-        }
-
-        Ok(combined_buffer)
     }
 
     fn extract_matching_records(
@@ -451,8 +446,16 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let combined_buffer = self.read_combined_data()?;
-        self.extract_matching_records(&combined_buffer, offset, count)
+        let wal_buffer = self.load_file_to_buffer(self.get_wal_path(), "WAL")?;
+
+        if offset >= self.next_offset - self.wal_record_count as u64 {
+            return Ok(self.extract_matching_records(&wal_buffer, offset, count)?);
+        }
+
+        let mut buffer = self.load_file_to_buffer(self.file_path.clone(), "main log")?;
+        buffer.extend_from_slice(&wal_buffer);
+
+        self.extract_matching_records(&buffer, offset, count)
     }
 
     fn len(&self) -> usize {
