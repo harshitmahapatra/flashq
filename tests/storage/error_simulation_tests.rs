@@ -259,20 +259,20 @@ fn test_json_corruption_detection() {
     let topic = &config.topic_name;
     let log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
 
-    let log_file_path = config.temp_dir_path().join(format!("{topic}.log"));
-    let mut file = OpenOptions::new()
+    let wal_file_path = config.temp_dir_path().join(format!("{topic}.wal"));
+    let mut wal_file = OpenOptions::new()
         .append(true)
-        .open(&log_file_path)
+        .open(&wal_file_path)
         .unwrap();
 
     let invalid_json = b"{ invalid json content }";
     let length = invalid_json.len() as u32;
     let offset = 0u64;
 
-    file.write_all(&length.to_le_bytes()).unwrap();
-    file.write_all(&offset.to_le_bytes()).unwrap();
-    file.write_all(invalid_json).unwrap();
-    file.sync_all().unwrap();
+    wal_file.write_all(&length.to_le_bytes()).unwrap();
+    wal_file.write_all(&offset.to_le_bytes()).unwrap();
+    wal_file.write_all(invalid_json).unwrap();
+    wal_file.sync_all().unwrap();
 
     let result = log.get_records_from_offset(0, None);
 
