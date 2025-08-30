@@ -3,24 +3,13 @@ use crate::storage::file::common::ensure_directory_exists;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// File-based topic log implementation using Kafka-aligned segment architecture
 pub struct FileTopicLog {
-    /// Directory containing all segment files for this topic
-    base_dir: PathBuf,
-    /// Segment manager for handling multiple log segments
     segment_manager: SegmentManager,
-    /// Next offset to assign to new records
     next_offset: u64,
-    /// Total number of records across all segments
     record_count: usize,
-    /// Sync mode for file operations
-    sync_mode: SyncMode,
-    /// Default segment size (1GB like Kafka)
-    segment_size_bytes: u64,
-    /// Indexing configuration
-    indexing_config: IndexingConfig,
 }
 
 impl FileTopicLog {
@@ -32,11 +21,9 @@ impl FileTopicLog {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
-        // Create topic-specific directory for segments
         let base_dir = data_dir.join(format!("{topic}"));
         ensure_directory_exists(&base_dir)?;
 
-        // Configure segment parameters (Kafka defaults)
         let segment_size_bytes = 1024 * 1024 * 1024; // 1GB
         let indexing_config = IndexingConfig::default();
 
@@ -48,16 +35,11 @@ impl FileTopicLog {
         );
 
         let mut log = FileTopicLog {
-            base_dir,
             segment_manager,
             next_offset: 0,
             record_count: 0,
-            sync_mode,
-            segment_size_bytes,
-            indexing_config,
         };
 
-        // Recover state from existing segment files
         log.recover_from_segments().map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::Other, format!("Recovery failed: {}", e))
         })?;
@@ -70,7 +52,6 @@ impl FileTopicLog {
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
-        // Sync the active segment if it exists
         if let Some(active_segment) = self.segment_manager.active_segment_mut() {
             active_segment.sync()?;
         }
@@ -78,46 +59,44 @@ impl FileTopicLog {
     }
 
     fn recover_from_segments(&mut self) -> Result<(), StorageError> {
-    // Recover segment manager state from existing files
-    self.segment_manager.recover_from_directory()?;
-    
-    // Calculate next_offset and record_count from all segments
-    let mut total_records = 0;
-    let mut highest_offset = 0;
-    
-    for segment in self.segment_manager.all_segments() {
-        let segment_record_count = segment.record_count();
-        total_records += segment_record_count;
-        
-        if segment_record_count > 0 {
-            // The highest offset in this segment is base_offset + record_count - 1
-            let segment_highest_offset = segment.base_offset() + segment_record_count as u64 - 1;
-            highest_offset = highest_offset.max(segment_highest_offset);
+        self.segment_manager.recover_from_directory()?;
+
+        let mut total_records = 0;
+        let mut highest_offset = 0;
+
+        for segment in self.segment_manager.all_segments() {
+            let segment_record_count = segment.record_count();
+            total_records += segment_record_count;
+
+            if segment_record_count > 0 {
+                let segment_highest_offset = segment.base_offset + segment_record_count as u64 - 1;
+                highest_offset = highest_offset.max(segment_highest_offset);
+            }
         }
+
+        self.record_count = total_records;
+        self.next_offset = if total_records > 0 {
+            highest_offset + 1
+        } else {
+            0
+        };
+
+        if self.segment_manager.active_segment_mut().is_none() {
+            self.segment_manager.roll_to_new_segment(self.next_offset)?;
+        }
+
+        Ok(())
     }
-    
-    self.record_count = total_records;
-    self.next_offset = if total_records > 0 { highest_offset + 1 } else { 0 };
-    
-    // Ensure we have an active segment for new writes
-    if self.segment_manager.active_segment_mut().is_none() {
-        self.segment_manager.roll_to_new_segment(self.next_offset)?;
-    }
-    
-    Ok(())
-}
 }
 
 impl TopicLog for FileTopicLog {
     fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let offset = self.next_offset;
 
-        // Check if we need to roll to a new segment
         if self.segment_manager.should_roll_segment() {
             self.segment_manager.roll_to_new_segment(offset)?;
         }
 
-        // Get active segment and append record
         let active_segment = self.segment_manager.active_segment_mut().ok_or_else(|| {
             StorageError::from_io_error(
                 std::io::Error::new(std::io::ErrorKind::Other, "No active segment"),
@@ -137,7 +116,6 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        // Use the SegmentManager's immutable read method
         self.segment_manager.read_records_from_offset(offset, count)
     }
 
