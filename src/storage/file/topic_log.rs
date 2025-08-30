@@ -68,8 +68,9 @@ impl FileTopicLog {
             total_records += segment_record_count;
 
             if segment_record_count > 0 {
-                let segment_highest_offset = segment.max_offset;
-                highest_offset = highest_offset.max(segment_highest_offset);
+                if let Some(segment_highest_offset) = segment.max_offset {
+                    highest_offset = highest_offset.max(segment_highest_offset);
+                }
             }
         }
 

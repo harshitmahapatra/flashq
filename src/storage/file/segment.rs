@@ -25,7 +25,7 @@ impl Default for IndexingConfig {
 
 pub struct LogSegment {
     pub base_offset: u64,
-    pub max_offset: u64,
+    pub max_offset: Option<u64>,
     pub log_path: PathBuf,
     pub index_path: PathBuf,
     log_file: File,
@@ -61,7 +61,7 @@ impl LogSegment {
 
         Ok(LogSegment {
             base_offset,
-            max_offset: base_offset.saturating_sub(1), // No records yet
+            max_offset: None, // No records yet
             log_path,
             index_path,
             log_file,
@@ -99,8 +99,7 @@ impl LogSegment {
                 .read_from_file(&mut index_reader, base_offset)?;
         }
 
-        segment.max_offset =
-            determine_max_offset(&segment.log_path, &segment.index, segment.base_offset)?;
+        segment.max_offset = determine_max_offset(&segment.log_path, &segment.index)?;
 
         Ok(segment)
     }
@@ -127,7 +126,7 @@ impl LogSegment {
     }
 
     fn update_metadata(&mut self, offset: u64, record_size: u32) {
-        self.max_offset = offset;
+        self.max_offset = Some(offset);
         self.bytes_since_last_index += record_size;
         self.records_since_last_index += 1;
     }
@@ -194,15 +193,19 @@ impl LogSegment {
     }
 
     pub fn record_count(&self) -> usize {
-        if self.max_offset >= self.base_offset {
-            (self.max_offset - self.base_offset + 1) as usize
+        if let Some(max_offset) = self.max_offset {
+            (max_offset - self.base_offset + 1) as usize
         } else {
             0
         }
     }
 
     pub fn contains_offset(&self, offset: u64) -> bool {
-        offset >= self.base_offset && offset <= self.max_offset
+        if let Some(max_offset) = self.max_offset {
+            offset >= self.base_offset && offset <= max_offset
+        } else {
+            false
+        }
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
@@ -219,13 +222,10 @@ impl LogSegment {
 fn determine_max_offset(
     log_path: &PathBuf,
     index: &SparseIndex,
-    base_offset: u64,
-) -> Result<u64, StorageError> {
+) -> Result<Option<u64>, StorageError> {
     let log_file = match File::open(log_path) {
         Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(base_offset.saturating_sub(1));
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(StorageError::from_io_error(e, "Failed to open log file")),
     };
 
@@ -235,7 +235,7 @@ fn determine_max_offset(
         .len()
         == 0
     {
-        return Ok(base_offset.saturating_sub(1));
+        return Ok(None);
     }
 
     let start_pos = index.last_entry().map_or(0, |entry| entry.position as u64);
@@ -244,16 +244,17 @@ fn determine_max_offset(
         .seek(SeekFrom::Start(start_pos))
         .map_err(|e| StorageError::from_io_error(e, "Failed to seek in log file"))?;
 
-    let last_known_offset = index
-        .last_entry()
-        .map_or(base_offset.saturating_sub(1), |e| e.offset);
+    let last_known_offset = index.last_entry().map(|e| e.offset);
 
     Ok(scan_for_max_offset(&mut reader, last_known_offset))
 }
 
-fn scan_for_max_offset(reader: &mut BufReader<File>, mut last_valid_offset: u64) -> u64 {
+fn scan_for_max_offset(
+    reader: &mut BufReader<File>,
+    mut last_valid_offset: Option<u64>,
+) -> Option<u64> {
     while let Ok(record_with_offset) = deserialize_record(reader) {
-        last_valid_offset = record_with_offset.offset;
+        last_valid_offset = Some(record_with_offset.offset);
     }
     last_valid_offset
 }
