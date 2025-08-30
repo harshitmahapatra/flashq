@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 // ================================================================================================
@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 const LENGTH_SIZE: usize = 4;
 const OFFSET_SIZE: usize = 8;
 const RECORD_HEADER_SIZE: usize = LENGTH_SIZE + OFFSET_SIZE;
+const STREAMING_READER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SyncMode {
@@ -178,8 +179,9 @@ impl FileTopicLog {
             return Ok(());
         }
 
-        let buffer = read_file_contents(&self.file_path)?;
-        let (offset_counter, record_count) = self.process_recovery_records(&buffer)?;
+        let file = File::open(&self.file_path)?;
+        let mut reader = BufReader::with_capacity(STREAMING_READER_BUFFER_SIZE, file);
+        let (offset_counter, record_count) = self.process_recovery_records(&mut reader)?;
 
         self.next_offset = offset_counter;
         self.record_count = record_count;
@@ -201,38 +203,66 @@ impl FileTopicLog {
         Ok(())
     }
 
-    fn process_recovery_records(&mut self, buffer: &[u8]) -> Result<(u64, usize), std::io::Error> {
-        let mut cursor = 0;
+    fn process_recovery_records(
+        &mut self,
+        reader: &mut BufReader<File>,
+    ) -> Result<(u64, usize), std::io::Error> {
         let mut offset_counter = 0;
         let mut record_count = 0;
+        let mut header_buf = [0u8; RECORD_HEADER_SIZE];
 
-        while cursor + RECORD_HEADER_SIZE <= buffer.len() {
-            let Some(header) = read_record_header(buffer, cursor) else {
+        loop {
+            // Try to read header
+            match reader.read_exact(&mut header_buf) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e),
+            }
+
+            // Parse header using existing function
+            let Some(header) = read_record_header(&header_buf, 0) else {
+                // Invalid header, truncate and break
+                let current_pos = self.get_current_file_position(reader)?;
+                self.truncate_at_position(current_pos - RECORD_HEADER_SIZE as u64)?;
                 break;
             };
 
-            cursor += RECORD_HEADER_SIZE;
+            // Read record data
             let length = header.length as usize;
-            let offset = header.offset;
+            let mut record_buf = vec![0u8; length];
 
-            if cursor + length > buffer.len() {
-                self.truncate_at_position((cursor - RECORD_HEADER_SIZE) as u64)?;
-                break;
+            match reader.read_exact(&mut record_buf) {
+                Ok(()) => {}
+                Err(_) => {
+                    // Incomplete record, truncate and break
+                    let current_pos = self.get_current_file_position(reader)?;
+                    self.truncate_at_position(current_pos - RECORD_HEADER_SIZE as u64)?;
+                    break;
+                }
             }
 
-            let json_bytes = &buffer[cursor..cursor + length];
-            cursor += length;
-
-            if self.validate_record_json(json_bytes) {
-                offset_counter = offset_counter.max(offset + 1);
+            // Validate using existing function
+            if self.validate_record_json(&record_buf) {
+                offset_counter = offset_counter.max(header.offset + 1);
                 record_count += 1;
             } else {
-                self.truncate_at_position((cursor - length - RECORD_HEADER_SIZE) as u64)?;
+                // Invalid JSON, truncate and break
+                let current_pos = self.get_current_file_position(reader)?;
+                self.truncate_at_position(current_pos - length as u64 - RECORD_HEADER_SIZE as u64)?;
                 break;
             }
         }
 
         Ok((offset_counter, record_count))
+    }
+
+    // Helper function to get current file position
+    fn get_current_file_position(
+        &self,
+        reader: &mut BufReader<File>,
+    ) -> Result<u64, std::io::Error> {
+        use std::io::Seek;
+        reader.stream_position()
     }
 
     fn validate_record_json(&self, json_bytes: &[u8]) -> bool {
@@ -271,56 +301,83 @@ impl FileTopicLog {
             return Ok(());
         }
 
-        self.wal_file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL before commit"))?;
-
-        let wal_path = self.get_wal_path();
-        let temp_path = self.get_temp_path();
-
-        self.create_merged_temp_file(&wal_path, &temp_path)?;
-        self.atomic_replace_main_file(&temp_path)?;
-        self.clear_wal_file()?;
-
-        Ok(())
-    }
-
-    fn create_merged_temp_file(
-        &mut self,
-        wal_path: &Path,
-        temp_path: &PathBuf,
-    ) -> Result<(), StorageError> {
-        let mut temp_file = File::create(temp_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to create temp file"))?;
-
-        if self.file_path.exists() {
-            let main_content = read_file_contents(&self.file_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read main file"))?;
-            temp_file.write_all(&main_content).map_err(|e| {
-                StorageError::from_io_error(e, "Failed to write main content to temp")
-            })?;
-        }
-
-        let wal_content = read_file_contents(wal_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read WAL file"))?;
-        temp_file
-            .write_all(&wal_content)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to write WAL content to temp"))?;
-
-        temp_file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync temp file"))?;
-
-        Ok(())
-    }
-
-    fn atomic_replace_main_file(&mut self, temp_path: &PathBuf) -> Result<(), StorageError> {
-        std::fs::rename(temp_path, &self.file_path).map_err(|e| {
-            StorageError::from_io_error(e, "Failed to atomically replace main file")
+        // Sync WAL before commit
+        self.wal_file.sync_all().map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                "Failed to sync WAL before 
+  commit",
+            )
         })?;
 
-        self.file = open_file_for_append(&self.file_path).map_err(|e| {
-            StorageError::from_io_error(e, "Failed to reopen main file after commit")
+        // Get current main file position for rollback
+        let original_size = self
+            .file
+            .metadata()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to get main file size"))?
+            .len();
+
+        // Attempt to append WAL to main file
+        match self.append_wal_to_main(original_size) {
+            Ok(()) => {
+                self.clear_wal_file()?;
+                Ok(())
+            }
+            Err(e) => {
+                // Rollback main file on failure
+                if let Err(rollback_err) = self.rollback_main_file(original_size) {
+                    warn!("Failed to rollback main file: {rollback_err}");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn append_wal_to_main(&mut self, _original_size: u64) -> Result<(), StorageError> {
+        let wal_path = self.get_wal_path();
+
+        let mut wal_reader = File::open(&wal_path).map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                "Failed to open WAL for 
+  reading",
+            )
+        })?;
+
+        // Use std::io::copy for efficient streaming
+        std::io::copy(&mut wal_reader, &mut self.file).map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                "Failed to copy WAL to main 
+  file",
+            )
+        })?;
+
+        // Ensure data is written to disk
+        self.file.sync_all().map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                "Failed to sync main file after WAL
+   append",
+            )
+        })?;
+
+        Ok(())
+    }
+
+    fn rollback_main_file(&mut self, original_size: u64) -> Result<(), StorageError> {
+        // Truncate main file back to original size
+        self.file
+            .set_len(original_size)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to truncate main file"))?;
+
+        // Sync the truncation
+        self.file.sync_all().map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                "Failed to sync main file after 
+  rollback",
+            )
         })?;
 
         Ok(())
@@ -346,10 +403,6 @@ impl FileTopicLog {
 
     fn get_wal_path(&self) -> PathBuf {
         self.file_path.with_extension("wal")
-    }
-
-    fn get_temp_path(&self) -> PathBuf {
-        self.file_path.with_extension("tmp")
     }
 }
 

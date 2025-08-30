@@ -349,3 +349,37 @@ fn test_serialization_error_conversion() {
         Ok(_) => panic!("Expected JSON parsing to fail"),
     }
 }
+
+#[test]
+fn test_wal_commit_rollback_on_main_file_write_failure() {
+    let config = TestConfig::new("wal_rollback");
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        3,
+    )
+    .unwrap();
+
+    log.append(test_record("key1", "value1")).unwrap();
+    log.append(test_record("key2", "value2")).unwrap();
+
+    let main_path = config
+        .temp_dir_path()
+        .join(format!("{}.log", config.topic_name));
+    let original_size = std::fs::metadata(&main_path).unwrap().len();
+
+    log.append(test_record("key3", "value3")).unwrap();
+    make_file_readonly(&main_path).unwrap();
+    let result = log.append(test_record("key4", "value4"));
+    make_file_writable(&main_path).unwrap();
+
+    match result {
+        Err(StorageError::WriteFailed { .. }) | Err(StorageError::PermissionDenied { .. }) => {
+            assert_eq!(std::fs::metadata(&main_path).unwrap().len(), original_size);
+            assert_eq!(log.get_records_from_offset(0, None).unwrap().len(), 2);
+        }
+        Ok(_) => assert!(log.append(test_record("test", "test")).unwrap() >= 2),
+        Err(other) => panic!("Expected write/permission error, got: {other:?}"),
+    }
+}
