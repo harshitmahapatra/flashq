@@ -260,10 +260,10 @@ async fn test_file_backend_creates_data_directory() {
         assert!(data_dir.exists());
         assert!(data_dir.is_dir());
 
-        // Check that topic log file was created
-        let topic_file = data_dir.join(format!("{topic}.log"));
-        assert!(topic_file.exists());
-        assert!(topic_file.is_file());
+        // Check that topic dir was created
+        let topic_dir = data_dir.join(format!("{topic}"));
+        assert!(topic_dir.exists());
+        assert!(topic_dir.is_dir());
     } else {
         panic!("Expected data directory to be set for file backend");
     }

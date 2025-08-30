@@ -61,23 +61,16 @@ impl StorageBackend {
         })
     }
 
-    pub fn create(
-        &self,
-        topic: &str,
-    ) -> Result<Box<dyn TopicLog + Send>, std::io::Error> {
+    pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog + Send>, std::io::Error> {
         match self {
             StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
             StorageBackend::File {
                 sync_mode,
                 data_dir,
-                
                 ..
             } => {
-                let file_log = crate::storage::file::FileTopicLog::new(
-                    topic,
-                    *sync_mode,
-                    data_dir,
-                )?;
+                let file_log =
+                    crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
                 Ok(Box::new(file_log))
             }
         }
@@ -99,6 +92,47 @@ impl StorageBackend {
                 let consumer_group =
                     crate::storage::file::FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
                 Ok(Box::new(consumer_group))
+            }
+        }
+    }
+
+    /// Discover all existing topics in the storage backend
+    pub fn discover_topics(&self) -> Result<Vec<String>, std::io::Error> {
+        match self {
+            StorageBackend::Memory => {
+                // Memory storage doesn't persist topics, so always empty
+                Ok(Vec::new())
+            }
+            StorageBackend::File { data_dir, .. } => {
+                let mut topics = Vec::new();
+                
+                // Check if data directory exists
+                if !data_dir.exists() {
+                    return Ok(topics);
+                }
+                
+                // Read all entries in the data directory
+                let entries = std::fs::read_dir(data_dir)?;
+                
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    
+                    // Only consider directories (topic directories)
+                    if path.is_dir() {
+                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                            // Skip special directories like lock files
+                            if !dir_name.starts_with('.') && dir_name != "lock" {
+                                // Verify it's a valid topic directory by checking for .log files
+                                if has_log_files(&path)? {
+                                    topics.push(dir_name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Ok(topics)
             }
         }
     }
@@ -204,6 +238,26 @@ fn is_process_alive(pid: u32) -> bool {
         .processes()
         .get(&sysinfo::Pid::from(pid as usize))
         .is_some()
+}
+
+/// Check if a directory contains .log files (indicating it's a topic directory)
+fn has_log_files(dir_path: &Path) -> Result<bool, std::io::Error> {
+    let entries = std::fs::read_dir(dir_path)?;
+    
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                if file_name.ends_with(".log") {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    
+    Ok(false)
 }
 
 #[cfg(test)]

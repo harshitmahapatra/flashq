@@ -270,37 +270,15 @@ impl FlashQ {
 
     /// Recover existing topics from disk for file storage backends
     fn recover_existing_topics(&self) -> Result<(), Box<dyn std::error::Error>> {
-        use std::fs;
+        // Discover existing topics using the storage backend
+        let topic_names = self.storage_backend.discover_topics()
+            .map_err(|e| format!("Failed to discover topics: {}", e))?;
 
-        // Only recover for file storage backends
-        let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File { data_dir, .. } => data_dir.clone(),
-            storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
-        };
-
-        // Check if data directory exists
-        if !data_dir.exists() {
-            return Ok(());
-        }
-
-        // Scan for .log files
-        let entries = fs::read_dir(&data_dir)?;
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-
-            if let Some(extension) = path.extension() {
-                if extension == "log" {
-                    if let Some(file_name) = path.file_stem() {
-                        if let Some(topic_name) = file_name.to_str() {
-                            // Create TopicLog for this topic
-                            if let Ok(topic_log) = self.storage_backend.create(topic_name) {
-                                let mut topics = self.topics.lock().unwrap();
-                                topics.insert(topic_name.to_string(), topic_log);
-                            }
-                        }
-                    }
-                }
+        // Create TopicLog instances for discovered topics
+        let mut topics = self.topics.lock().unwrap();
+        for topic_name in topic_names {
+            if let Ok(topic_log) = self.storage_backend.create(&topic_name) {
+                topics.insert(topic_name, topic_log);
             }
         }
 

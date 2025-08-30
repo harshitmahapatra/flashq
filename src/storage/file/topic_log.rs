@@ -1,74 +1,26 @@
 use crate::error::StorageError;
-use crate::storage::file::SyncMode;
-use crate::storage::file::common::{
-    ensure_directory_exists, open_file_for_append, read_file_contents, sync_file_if_needed,
-};
+use crate::storage::file::common::ensure_directory_exists;
+use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};
-use serde_json;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-// ================================================================================================
-// CONSTANTS & TYPES
-// ================================================================================================
-
-const LENGTH_SIZE: usize = 4;
-const OFFSET_SIZE: usize = 8;
-const RECORD_HEADER_SIZE: usize = LENGTH_SIZE + OFFSET_SIZE;
-const STREAMING_READER_BUFFER_SIZE: usize = 64 * 1024;
-
-#[derive(Debug, Clone)]
-struct RecordHeader {
-    length: u32,
-    offset: u64,
-}
-
-// ================================================================================================
-// BINARY FORMAT UTILITIES
-// ================================================================================================
-
-fn read_record_header(buffer: &[u8], cursor: usize) -> Option<RecordHeader> {
-    if cursor + RECORD_HEADER_SIZE > buffer.len() {
-        return None;
-    }
-
-    let length = u32::from_le_bytes(buffer[cursor..cursor + LENGTH_SIZE].try_into().ok()?);
-    let offset = u64::from_le_bytes(
-        buffer[cursor + LENGTH_SIZE..cursor + RECORD_HEADER_SIZE]
-            .try_into()
-            .ok()?,
-    );
-
-    Some(RecordHeader { length, offset })
-}
-
-fn write_record_header(buffer: &mut Vec<u8>, length: u32, offset: u64) {
-    buffer.extend_from_slice(&length.to_le_bytes());
-    buffer.extend_from_slice(&offset.to_le_bytes());
-}
-
-fn parse_record_from_bytes(
-    json_bytes: &[u8],
-    offset: u64,
-) -> Result<RecordWithOffset, StorageError> {
-    let record = serde_json::from_slice::<Record>(json_bytes).map_err(|e| {
-        StorageError::from_serialization_error(e, &format!("record parsing at offset {offset}"))
-    })?;
-    Ok(RecordWithOffset::from_record(record, offset))
-}
-
-// ================================================================================================
-// FILE TOPIC LOG IMPLEMENTATION
-// ================================================================================================
-
+/// File-based topic log implementation using Kafka-aligned segment architecture
 pub struct FileTopicLog {
-    file_path: PathBuf,
-    file: File,
+    /// Directory containing all segment files for this topic
+    base_dir: PathBuf,
+    /// Segment manager for handling multiple log segments
+    segment_manager: SegmentManager,
+    /// Next offset to assign to new records
     next_offset: u64,
+    /// Total number of records across all segments
     record_count: usize,
+    /// Sync mode for file operations
     sync_mode: SyncMode,
+    /// Default segment size (1GB like Kafka)
+    segment_size_bytes: u64,
+    /// Indexing configuration
+    indexing_config: IndexingConfig,
 }
 
 impl FileTopicLog {
@@ -80,19 +32,36 @@ impl FileTopicLog {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
-        let file_path = data_dir.join(format!("{topic}.log"));
+        // Create topic-specific directory for segments
+        let base_dir = data_dir.join(format!("{topic}"));
+        ensure_directory_exists(&base_dir)?;
 
-        let file = open_file_for_append(&file_path)?;
+        // Configure segment parameters (Kafka defaults)
+        let segment_size_bytes = 1024 * 1024 * 1024; // 1GB
+        let indexing_config = IndexingConfig::default();
+
+        let segment_manager = SegmentManager::new(
+            base_dir.clone(),
+            segment_size_bytes,
+            sync_mode,
+            indexing_config.clone(),
+        );
 
         let mut log = FileTopicLog {
-            file_path: file_path.clone(),
-            file,
+            base_dir,
+            segment_manager,
             next_offset: 0,
             record_count: 0,
             sync_mode,
+            segment_size_bytes,
+            indexing_config,
         };
 
-        log.recover_from_file()?;
+        // Recover state from existing segment files
+        log.recover_from_segments().map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::Other, format!("Recovery failed: {}", e))
+        })?;
+
         Ok(log)
     }
 
@@ -101,197 +70,62 @@ impl FileTopicLog {
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
-        self.file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync main file"))
-    }
-}
-
-// Recovery Implementation
-impl FileTopicLog {
-    fn recover_from_file(&mut self) -> Result<(), std::io::Error> {
-        if !self.file_path.exists() {
-            return Ok(());
+        // Sync the active segment if it exists
+        if let Some(active_segment) = self.segment_manager.active_segment_mut() {
+            active_segment.sync()?;
         }
-
-        let file = File::open(&self.file_path)?;
-        let mut reader = BufReader::with_capacity(STREAMING_READER_BUFFER_SIZE, file);
-        let (offset_counter, record_count) = self.process_recovery_records(&mut reader)?;
-
-        self.next_offset = offset_counter;
-        self.record_count = record_count;
         Ok(())
     }
 
-    fn process_recovery_records(
-        &mut self,
-        reader: &mut BufReader<File>,
-    ) -> Result<(u64, usize), std::io::Error> {
-        let mut offset_counter = 0;
-        let mut record_count = 0;
-        let mut header_buf = [0u8; RECORD_HEADER_SIZE];
-
-        loop {
-            // Try to read header
-            match reader.read_exact(&mut header_buf) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e),
-            }
-
-            // Parse header using existing function
-            let Some(header) = read_record_header(&header_buf, 0) else {
-                // Invalid header, truncate and break
-                let current_pos = self.get_current_file_position(reader)?;
-                self.truncate_at_position(current_pos - RECORD_HEADER_SIZE as u64)?;
-                break;
-            };
-
-            // Read record data
-            let length = header.length as usize;
-            let mut record_buf = vec![0u8; length];
-
-            match reader.read_exact(&mut record_buf) {
-                Ok(()) => {}
-                Err(_) => {
-                    // Incomplete record, truncate and break
-                    let current_pos = self.get_current_file_position(reader)?;
-                    self.truncate_at_position(current_pos - RECORD_HEADER_SIZE as u64)?;
-                    break;
-                }
-            }
-
-            // Validate using existing function
-            if self.validate_record_json(&record_buf) {
-                offset_counter = offset_counter.max(header.offset + 1);
-                record_count += 1;
-            } else {
-                // Invalid JSON, truncate and break
-                let current_pos = self.get_current_file_position(reader)?;
-                self.truncate_at_position(current_pos - length as u64 - RECORD_HEADER_SIZE as u64)?;
-                break;
-            }
+    fn recover_from_segments(&mut self) -> Result<(), StorageError> {
+    // Recover segment manager state from existing files
+    self.segment_manager.recover_from_directory()?;
+    
+    // Calculate next_offset and record_count from all segments
+    let mut total_records = 0;
+    let mut highest_offset = 0;
+    
+    for segment in self.segment_manager.all_segments() {
+        let segment_record_count = segment.record_count();
+        total_records += segment_record_count;
+        
+        if segment_record_count > 0 {
+            // The highest offset in this segment is base_offset + record_count - 1
+            let segment_highest_offset = segment.base_offset() + segment_record_count as u64 - 1;
+            highest_offset = highest_offset.max(segment_highest_offset);
         }
-
-        Ok((offset_counter, record_count))
     }
-
-    // Helper function to get current file position
-    fn get_current_file_position(
-        &self,
-        reader: &mut BufReader<File>,
-    ) -> Result<u64, std::io::Error> {
-        use std::io::Seek;
-        reader.stream_position()
+    
+    self.record_count = total_records;
+    self.next_offset = if total_records > 0 { highest_offset + 1 } else { 0 };
+    
+    // Ensure we have an active segment for new writes
+    if self.segment_manager.active_segment_mut().is_none() {
+        self.segment_manager.roll_to_new_segment(self.next_offset)?;
     }
-
-    fn validate_record_json(&self, json_bytes: &[u8]) -> bool {
-        serde_json::from_slice::<Record>(json_bytes).is_ok()
-    }
-
-    fn truncate_at_position(&mut self, position: u64) -> Result<(), std::io::Error> {
-        let file = OpenOptions::new().write(true).open(&self.file_path)?;
-        file.set_len(position)?;
-        self.file = open_file_for_append(&self.file_path)?;
-        Ok(())
-    }
+    
+    Ok(())
 }
-
-// Record Processing Implementation
-impl FileTopicLog {
-    fn serialize_record(&self, record: &Record) -> Result<Vec<u8>, StorageError> {
-        serde_json::to_vec(record)
-            .map_err(|e| StorageError::from_serialization_error(e, "record serialization"))
-    }
-
-    fn create_record_buffer(&self, json_payload: &[u8], offset: u64) -> Vec<u8> {
-        let length = json_payload.len() as u32;
-        let mut write_buffer = Vec::with_capacity(RECORD_HEADER_SIZE + json_payload.len());
-
-        write_record_header(&mut write_buffer, length, offset);
-        write_buffer.extend_from_slice(json_payload);
-        write_buffer
-    }
-
-    fn write_record(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
-        use std::io::Write;
-
-        self.file
-            .write_all(buffer)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to file"))?;
-
-        sync_file_if_needed(&self.file, self.sync_mode)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync file"))?;
-
-        Ok(())
-    }
-
-    fn load_file_to_buffer(
-        &self,
-        file_path: PathBuf,
-        file_name: &str,
-    ) -> Result<Vec<u8>, StorageError> {
-        if file_path.exists() {
-            read_file_contents(&file_path).map_err(|e| {
-                StorageError::from_io_error(e, &format!("Failed to read {file_name} file"))
-            })
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
-    fn extract_matching_records(
-        &self,
-        buffer: &[u8],
-        start_offset: u64,
-        count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let mut records = Vec::new();
-        let mut cursor = 0;
-        let target_count = count.unwrap_or(usize::MAX);
-        let mut found_count = 0;
-
-        while cursor + RECORD_HEADER_SIZE <= buffer.len() && found_count < target_count {
-            let Some(header) = read_record_header(buffer, cursor) else {
-                break;
-            };
-
-            cursor += RECORD_HEADER_SIZE;
-            let length = header.length as usize;
-            let record_offset = header.offset;
-
-            if cursor + length > buffer.len() {
-                return Err(StorageError::DataCorruption {
-                    context: "file read".to_string(),
-                    details: format!("Partial record detected at cursor {cursor}"),
-                });
-            }
-
-            if record_offset >= start_offset {
-                let json_bytes = &buffer[cursor..cursor + length];
-                let record_with_offset = parse_record_from_bytes(json_bytes, record_offset)?;
-                records.push(record_with_offset);
-                found_count += 1;
-            }
-
-            cursor += length;
-        }
-
-        Ok(records)
-    }
 }
-
-// ================================================================================================
-// TOPIC LOG TRAIT IMPLEMENTATION
-// ================================================================================================
 
 impl TopicLog for FileTopicLog {
     fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let offset = self.next_offset;
-        let json_payload = self.serialize_record(&record)?;
-        let write_buffer = self.create_record_buffer(&json_payload, offset);
 
-        self.write_record(&write_buffer)?;
+        // Check if we need to roll to a new segment
+        if self.segment_manager.should_roll_segment() {
+            self.segment_manager.roll_to_new_segment(offset)?;
+        }
+
+        // Get active segment and append record
+        let active_segment = self.segment_manager.active_segment_mut().ok_or_else(|| {
+            StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, "No active segment"),
+                "No active segment available for writing",
+            )
+        })?;
+
+        active_segment.append_record(&record, offset)?;
 
         self.next_offset += 1;
         self.record_count += 1;
@@ -303,9 +137,8 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let buffer = self.load_file_to_buffer(self.file_path.clone(), "main log")?;
-
-        self.extract_matching_records(&buffer, offset, count)
+        // Use the SegmentManager's immutable read method
+        self.segment_manager.read_records_from_offset(offset, count)
     }
 
     fn len(&self) -> usize {
@@ -318,11 +151,5 @@ impl TopicLog for FileTopicLog {
 
     fn next_offset(&self) -> u64 {
         self.next_offset
-    }
-}
-
-impl Drop for FileTopicLog {
-    fn drop(&mut self) {
-        let _ = self.sync();
     }
 }
