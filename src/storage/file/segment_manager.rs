@@ -1,11 +1,12 @@
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::{collections::BTreeMap, io::BufReader};
 
+use crate::RecordWithOffset;
 use crate::error::StorageError;
+use crate::storage::file::common::deserialize_record;
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
-use crate::{Record, RecordWithOffset};
 
 /// Manager for multiple log segments, implementing segment rolling
 pub struct SegmentManager {
@@ -196,7 +197,7 @@ fn collect_records(
     let mut records = Vec::new();
 
     while records.len() < max_records {
-        match deserialize_record_from_reader(reader) {
+        match deserialize_record(reader) {
             Ok(record_with_offset) => {
                 if record_with_offset.offset >= start_offset {
                     records.push(record_with_offset);
@@ -207,67 +208,4 @@ fn collect_records(
     }
 
     records
-}
-
-fn deserialize_record_from_reader(
-    reader: &mut BufReader<File>,
-) -> Result<RecordWithOffset, StorageError> {
-    let payload_size = read_u32(reader, "Failed to read payload size")?;
-    let offset = read_u64(reader, "Failed to read offset")?;
-
-    let (timestamp, timestamp_len) = read_timestamp(reader)?;
-
-    let record = read_json_payload(reader, payload_size, timestamp_len)?;
-
-    Ok(RecordWithOffset {
-        record,
-        offset,
-        timestamp,
-    })
-}
-
-fn read_bytes<const N: usize>(
-    reader: &mut impl Read,
-    error_context: &str,
-) -> Result<[u8; N], StorageError> {
-    let mut bytes = [0u8; N];
-    reader
-        .read_exact(&mut bytes)
-        .map_err(|e| StorageError::from_io_error(e, error_context))?;
-    Ok(bytes)
-}
-
-fn read_u32(reader: &mut impl Read, error_context: &str) -> Result<u32, StorageError> {
-    read_bytes::<4>(reader, error_context).map(u32::from_be_bytes)
-}
-
-fn read_u64(reader: &mut impl Read, error_context: &str) -> Result<u64, StorageError> {
-    read_bytes::<8>(reader, error_context).map(u64::from_be_bytes)
-}
-
-fn read_timestamp(reader: &mut impl Read) -> Result<(String, u32), StorageError> {
-    let timestamp_len = read_u32(reader, "Failed to read timestamp length")?;
-    let mut timestamp_bytes = vec![0u8; timestamp_len as usize];
-    reader
-        .read_exact(&mut timestamp_bytes)
-        .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp"))?;
-    let timestamp = String::from_utf8(timestamp_bytes).map_err(|e| {
-        StorageError::from_serialization_error(e, "Failed to parse timestamp as UTF-8")
-    })?;
-    Ok((timestamp, timestamp_len))
-}
-
-fn read_json_payload(
-    reader: &mut impl Read,
-    payload_size: u32,
-    timestamp_len: u32,
-) -> Result<Record, StorageError> {
-    let json_len = payload_size - 4 - timestamp_len; // subtract timestamp_len field + timestamp
-    let mut json_bytes = vec![0u8; json_len as usize];
-    reader
-        .read_exact(&mut json_bytes)
-        .map_err(|e| StorageError::from_io_error(e, "Failed to read JSON payload"))?;
-    serde_json::from_slice(&json_bytes).map_err(|e| {
-        StorageError::from_serialization_error(e, "Failed to deserialize record from JSON")
-    })
 }

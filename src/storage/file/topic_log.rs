@@ -40,9 +40,8 @@ impl FileTopicLog {
             record_count: 0,
         };
 
-        log.recover_from_segments().map_err(|e| {
-            std::io::Error::other(format!("Recovery failed: {e}"))
-        })?;
+        log.recover_from_segments()
+            .map_err(|e| std::io::Error::other(format!("Recovery failed: {e}")))?;
 
         Ok(log)
     }
@@ -69,7 +68,7 @@ impl FileTopicLog {
             total_records += segment_record_count;
 
             if segment_record_count > 0 {
-                let segment_highest_offset = segment.base_offset + segment_record_count as u64 - 1;
+                let segment_highest_offset = segment.max_offset;
                 highest_offset = highest_offset.max(segment_highest_offset);
             }
         }

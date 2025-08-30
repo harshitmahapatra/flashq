@@ -1,7 +1,7 @@
+use crate::Record;
 use crate::error::StorageError;
-use crate::storage::file::common::SyncMode;
+use crate::storage::file::common::{SyncMode, deserialize_record, serialize_record};
 use crate::storage::file::index::{IndexEntry, SparseIndex};
-use crate::{Record, RecordWithOffset};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -54,7 +54,7 @@ impl LogSegment {
 
         let index_file = OpenOptions::new()
             .create(true)
-            .write(true)
+            .append(true)
             .read(true)
             .open(&index_path)
             .map_err(|e| StorageError::from_io_error(e, "Failed to open index file"))?;
@@ -99,58 +99,72 @@ impl LogSegment {
                 .read_from_file(&mut index_reader, base_offset)?;
         }
 
-        // Determine max_offset by seeking to end and scanning backwards if needed
-        // For now, we'll use a simple approach - this could be optimized
-        segment.determine_max_offset()?;
+        segment.max_offset =
+            determine_max_offset(&segment.log_path, &segment.index, segment.base_offset)?;
 
         Ok(segment)
     }
 
     pub fn append_record(&mut self, record: &Record, offset: u64) -> Result<(), StorageError> {
-        // 1. Serialize and write record to log file
-        let serialized = self.serialize_record(record, offset)?;
+        let serialized = serialize_record(record, offset)?;
+        let start_position = self.write_record_to_log(&serialized)?;
+
+        self.update_metadata(offset, serialized.len() as u32);
+        self.update_index_if_needed(offset, start_position)?;
+        self.sync_files_if_needed()
+    }
+
+    fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {
         let start_position = self
             .log_file
             .seek(SeekFrom::End(0))
             .map_err(|e| StorageError::from_io_error(e, "Failed to seek to end of log file"))?
             as u32;
         self.log_file
-            .write_all(&serialized)
+            .write_all(serialized_record)
             .map_err(|e| StorageError::from_io_error(e, "Failed to write record to log file"))?;
+        Ok(start_position)
+    }
 
-        // 2. Update segment metadata
+    fn update_metadata(&mut self, offset: u64, record_size: u32) {
         self.max_offset = offset;
-        let record_size = serialized.len() as u32;
         self.bytes_since_last_index += record_size;
         self.records_since_last_index += 1;
+    }
 
-        // 3. Sparse index creation logic
+    fn update_index_if_needed(
+        &mut self,
+        offset: u64,
+        start_position: u32,
+    ) -> Result<(), StorageError> {
         if self.should_add_index_entry() {
-            let index_entry = IndexEntry::new(offset, start_position);
+            let index_entry = IndexEntry {
+                offset,
+                position: start_position,
+            };
 
-            // Add to in-memory index
             self.index.add_entry(index_entry.clone());
 
-            // Persist to .index file
-            let index_file_copy = std::fs::OpenOptions::new()
+            let index_file_for_append = OpenOptions::new()
                 .append(true)
                 .open(&self.index_path)
                 .map_err(|e| {
                     StorageError::from_io_error(e, "Failed to open index file for writing")
                 })?;
-            let mut index_writer = BufWriter::new(index_file_copy);
+            let mut index_writer = BufWriter::new(index_file_for_append);
             self.index
                 .write_entry_to_file(&mut index_writer, &index_entry, self.base_offset)?;
             index_writer
                 .flush()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
 
-            // Reset counters
             self.bytes_since_last_index = 0;
             self.records_since_last_index = 0;
         }
+        Ok(())
+    }
 
-        // 4. Sync based on sync_mode
+    fn sync_files_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
             self.log_file
                 .sync_all()
@@ -159,7 +173,6 @@ impl LogSegment {
                 .sync_all()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to sync index file"))?;
         }
-
         Ok(())
     }
 
@@ -172,38 +185,6 @@ impl LogSegment {
         self.index.find_position_for_offset(offset)
     }
 
-    pub fn read_records_from_position(
-        &mut self,
-        start_position: u32,
-        count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let mut log_file_copy = std::fs::File::open(&self.log_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to open log file for reading"))?;
-        log_file_copy
-            .seek(SeekFrom::Start(start_position as u64))
-            .map_err(|e| {
-                StorageError::from_io_error(e, "Failed to seek to position in log file")
-            })?;
-
-        let mut reader = BufReader::new(log_file_copy);
-        let mut records = Vec::new();
-        let max_records = count.unwrap_or(usize::MAX);
-
-        while records.len() < max_records {
-            match self.deserialize_record(&mut reader) {
-                Ok(record_with_offset) => {
-                    // Only include records within this segment's range
-                    if record_with_offset.offset >= self.base_offset {
-                        records.push(record_with_offset);
-                    }
-                }
-                Err(_) => break, // End of file or error
-            }
-        }
-
-        Ok(records)
-    }
-
     pub fn size_bytes(&self) -> Result<u64, StorageError> {
         Ok(self
             .log_file
@@ -213,7 +194,6 @@ impl LogSegment {
     }
 
     pub fn record_count(&self) -> usize {
-        // This could be tracked more efficiently, but for now we estimate
         if self.max_offset >= self.base_offset {
             (self.max_offset - self.base_offset + 1) as usize
         } else {
@@ -225,7 +205,6 @@ impl LogSegment {
         offset >= self.base_offset && offset <= self.max_offset
     }
 
-    /// Force sync all files
     pub fn sync(&mut self) -> Result<(), StorageError> {
         self.log_file
             .sync_all()
@@ -235,133 +214,46 @@ impl LogSegment {
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync index file"))?;
         Ok(())
     }
+}
 
-    fn serialize_record(&self, record: &Record, offset: u64) -> Result<Vec<u8>, StorageError> {
-        // Serialize the record to JSON
-        let json_payload = serde_json::to_vec(record).map_err(|e| {
-            StorageError::from_serialization_error(e, "Failed to serialize record to JSON")
-        })?;
-
-        // Generate ISO 8601 timestamp
-        let timestamp = chrono::Utc::now().to_rfc3339();
-        let timestamp_bytes = timestamp.as_bytes();
-
-        // Calculate total payload size (JSON + timestamp length + timestamp)
-        let timestamp_len = timestamp_bytes.len() as u32;
-        let payload_size = json_payload.len() as u32 + 4 + timestamp_len; // 4 bytes for timestamp length
-
-        // Create buffer: [payload_size(4)] [offset(8)] [timestamp_len(4)] [timestamp] [json_payload]
-        let mut buffer = Vec::with_capacity(4 + 8 + 4 + timestamp_bytes.len() + json_payload.len());
-
-        // Write payload size (4 bytes, big-endian)
-        buffer.extend_from_slice(&payload_size.to_be_bytes());
-
-        // Write offset (8 bytes, big-endian)
-        buffer.extend_from_slice(&offset.to_be_bytes());
-
-        // Write timestamp length (4 bytes, big-endian)
-        buffer.extend_from_slice(&timestamp_len.to_be_bytes());
-
-        // Write timestamp
-        buffer.extend_from_slice(timestamp_bytes);
-
-        // Write JSON payload
-        buffer.extend_from_slice(&json_payload);
-
-        Ok(buffer)
-    }
-
-    fn deserialize_record(
-        &self,
-        reader: &mut BufReader<File>,
-    ) -> Result<RecordWithOffset, StorageError> {
-        use std::io::Read;
-
-        // Read payload size (4 bytes, big-endian)
-        let mut payload_size_bytes = [0u8; 4];
-        reader
-            .read_exact(&mut payload_size_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read payload size"))?;
-        let payload_size = u32::from_be_bytes(payload_size_bytes);
-
-        // Read offset (8 bytes, big-endian)
-        let mut offset_bytes = [0u8; 8];
-        reader
-            .read_exact(&mut offset_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read offset"))?;
-        let offset = u64::from_be_bytes(offset_bytes);
-
-        // Read timestamp length (4 bytes, big-endian)
-        let mut timestamp_len_bytes = [0u8; 4];
-        reader
-            .read_exact(&mut timestamp_len_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp length"))?;
-        let timestamp_len = u32::from_be_bytes(timestamp_len_bytes);
-
-        // Read timestamp
-        let mut timestamp_bytes = vec![0u8; timestamp_len as usize];
-        reader
-            .read_exact(&mut timestamp_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp"))?;
-        let timestamp = String::from_utf8(timestamp_bytes).map_err(|e| {
-            StorageError::from_serialization_error(e, "Failed to parse timestamp as UTF-8")
-        })?;
-
-        // Calculate JSON payload size
-        let json_len = payload_size - 4 - timestamp_len; // subtract timestamp_len field + timestamp
-
-        // Read JSON payload
-        let mut json_bytes = vec![0u8; json_len as usize];
-        reader
-            .read_exact(&mut json_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read JSON payload"))?;
-
-        // Deserialize Record from JSON
-        let record: Record = serde_json::from_slice(&json_bytes).map_err(|e| {
-            StorageError::from_serialization_error(e, "Failed to deserialize record from JSON")
-        })?;
-
-        // Create RecordWithOffset
-        Ok(RecordWithOffset {
-            record,
-            offset,
-            timestamp,
-        })
-    }
-
-    // Determine the maximum offset in this segment by scanning
-    fn determine_max_offset(&mut self) -> Result<(), StorageError> {
-        // Start with assumption that no records exist
-        self.max_offset = self.base_offset.saturating_sub(1);
-
-        // Check if log file exists and has content
-        let log_file = match std::fs::File::open(&self.log_path) {
-            Ok(file) => file,
-            Err(_) => return Ok(()), // File doesn't exist, no records
-        };
-
-        let metadata = log_file
-            .metadata()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to get log file metadata"))?;
-
-        if metadata.len() == 0 {
-            return Ok(()); // Empty file, no records
+fn determine_max_offset(
+    log_path: &PathBuf,
+    index: &SparseIndex,
+    base_offset: u64,
+) -> Result<u64, StorageError> {
+    let log_file = match File::open(log_path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(base_offset.saturating_sub(1));
         }
+        Err(e) => return Err(StorageError::from_io_error(e, "Failed to open log file")),
+    };
 
-        // Scan through the file to find all records and determine max offset
-        let mut reader = BufReader::new(log_file);
-        let mut last_valid_offset = self.base_offset.saturating_sub(1);
-
-        loop {
-            match self.deserialize_record(&mut reader) {
-                Ok(record_with_offset) => {
-                    last_valid_offset = record_with_offset.offset;
-                }
-                Err(_) => break, // End of file or corrupted data
-            }
-        }
-
-        self.max_offset = last_valid_offset;
-        Ok(())
+    if log_file
+        .metadata()
+        .map_err(|e| StorageError::from_io_error(e, "Failed to get log file metadata"))?
+        .len()
+        == 0
+    {
+        return Ok(base_offset.saturating_sub(1));
     }
+
+    let start_pos = index.last_entry().map_or(0, |entry| entry.position as u64);
+    let mut reader = BufReader::new(log_file);
+    reader
+        .seek(SeekFrom::Start(start_pos))
+        .map_err(|e| StorageError::from_io_error(e, "Failed to seek in log file"))?;
+
+    let last_known_offset = index
+        .last_entry()
+        .map_or(base_offset.saturating_sub(1), |e| e.offset);
+
+    Ok(scan_for_max_offset(&mut reader, last_known_offset))
+}
+
+fn scan_for_max_offset(reader: &mut BufReader<File>, mut last_valid_offset: u64) -> u64 {
+    while let Ok(record_with_offset) = deserialize_record(reader) {
+        last_valid_offset = record_with_offset.offset;
+    }
+    last_valid_offset
 }
