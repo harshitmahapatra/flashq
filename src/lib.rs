@@ -271,8 +271,10 @@ impl FlashQ {
     /// Recover existing topics from disk for file storage backends
     fn recover_existing_topics(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Discover existing topics using the storage backend
-        let topic_names = self.storage_backend.discover_topics()
-            .map_err(|e| format!("Failed to discover topics: {}", e))?;
+        let topic_names = self
+            .storage_backend
+            .discover_topics()
+            .map_err(|e| format!("Failed to discover topics: {e}"))?;
 
         // Create TopicLog instances for discovered topics
         let mut topics = self.topics.lock().unwrap();

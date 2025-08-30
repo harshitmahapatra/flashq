@@ -12,6 +12,12 @@ pub struct IndexEntry {
     position: u32, // byte position in log file
 }
 
+impl Default for SparseIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SparseIndex {
     pub fn new() -> Self {
         Self {

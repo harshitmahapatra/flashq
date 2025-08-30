@@ -21,7 +21,7 @@ impl FileTopicLog {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
-        let base_dir = data_dir.join(format!("{topic}"));
+        let base_dir = data_dir.join(topic);
         ensure_directory_exists(&base_dir)?;
 
         let segment_size_bytes = 1024 * 1024 * 1024; // 1GB
@@ -41,7 +41,7 @@ impl FileTopicLog {
         };
 
         log.recover_from_segments().map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, format!("Recovery failed: {}", e))
+            std::io::Error::other(format!("Recovery failed: {e}"))
         })?;
 
         Ok(log)
@@ -99,7 +99,7 @@ impl TopicLog for FileTopicLog {
 
         let active_segment = self.segment_manager.active_segment_mut().ok_or_else(|| {
             StorageError::from_io_error(
-                std::io::Error::new(std::io::ErrorKind::Other, "No active segment"),
+                std::io::Error::other("No active segment"),
                 "No active segment available for writing",
             )
         })?;

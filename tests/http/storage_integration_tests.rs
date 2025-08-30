@@ -261,7 +261,7 @@ async fn test_file_backend_creates_data_directory() {
         assert!(data_dir.is_dir());
 
         // Check that topic dir was created
-        let topic_dir = data_dir.join(format!("{topic}"));
+        let topic_dir = data_dir.join(&topic);
         assert!(topic_dir.exists());
         assert!(topic_dir.is_dir());
     } else {

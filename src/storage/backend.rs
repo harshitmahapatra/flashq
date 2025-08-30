@@ -105,19 +105,19 @@ impl StorageBackend {
             }
             StorageBackend::File { data_dir, .. } => {
                 let mut topics = Vec::new();
-                
+
                 // Check if data directory exists
                 if !data_dir.exists() {
                     return Ok(topics);
                 }
-                
+
                 // Read all entries in the data directory
                 let entries = std::fs::read_dir(data_dir)?;
-                
+
                 for entry in entries {
                     let entry = entry?;
                     let path = entry.path();
-                    
+
                     // Only consider directories (topic directories)
                     if path.is_dir() {
                         if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
@@ -131,7 +131,7 @@ impl StorageBackend {
                         }
                     }
                 }
-                
+
                 Ok(topics)
             }
         }
@@ -243,11 +243,11 @@ fn is_process_alive(pid: u32) -> bool {
 /// Check if a directory contains .log files (indicating it's a topic directory)
 fn has_log_files(dir_path: &Path) -> Result<bool, std::io::Error> {
     let entries = std::fs::read_dir(dir_path)?;
-    
+
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_file() {
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                 if file_name.ends_with(".log") {
@@ -256,7 +256,7 @@ fn has_log_files(dir_path: &Path) -> Result<bool, std::io::Error> {
             }
         }
     }
-    
+
     Ok(false)
 }
 

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::{collections::BTreeMap, io::BufReader};
 
@@ -34,55 +34,6 @@ impl SegmentManager {
         }
     }
 
-    fn deserialize_record_from_reader(
-        reader: &mut BufReader<File>,
-    ) -> Result<RecordWithOffset, StorageError> {
-        use std::io::Read;
-
-        let mut payload_size_bytes = [0u8; 4];
-        reader
-            .read_exact(&mut payload_size_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read payload size"))?;
-        let payload_size = u32::from_be_bytes(payload_size_bytes);
-
-        let mut offset_bytes = [0u8; 8];
-        reader
-            .read_exact(&mut offset_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read offset"))?;
-        let offset = u64::from_be_bytes(offset_bytes);
-
-        let mut timestamp_len_bytes = [0u8; 4];
-        reader
-            .read_exact(&mut timestamp_len_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp length"))?;
-        let timestamp_len = u32::from_be_bytes(timestamp_len_bytes);
-
-        let mut timestamp_bytes = vec![0u8; timestamp_len as usize];
-        reader
-            .read_exact(&mut timestamp_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp"))?;
-        let timestamp = String::from_utf8(timestamp_bytes).map_err(|e| {
-            StorageError::from_serialization_error(e, "Failed to parse timestamp as UTF-8")
-        })?;
-
-        let json_len = payload_size - 4 - timestamp_len; // subtract timestamp_len field + timestamp
-
-        let mut json_bytes = vec![0u8; json_len as usize];
-        reader
-            .read_exact(&mut json_bytes)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read JSON payload"))?;
-
-        let record: Record = serde_json::from_slice(&json_bytes).map_err(|e| {
-            StorageError::from_serialization_error(e, "Failed to deserialize record from JSON")
-        })?;
-
-        Ok(RecordWithOffset {
-            record,
-            offset,
-            timestamp,
-        })
-    }
-
     pub fn find_segment_for_offset(&self, offset: u64) -> Option<&LogSegment> {
         if let Some(active) = &self.active_segment {
             if active.contains_offset(offset) {
@@ -105,38 +56,17 @@ impl SegmentManager {
         let segment = self.find_segment_for_offset(offset).ok_or_else(|| {
             StorageError::from_io_error(
                 std::io::Error::new(std::io::ErrorKind::NotFound, "Offset not found"),
-                &format!("No segment found containing offset {}", offset),
+                &format!("No segment found containing offset {offset}"),
             )
         })?;
 
         let start_position = segment.find_position_for_offset(offset).unwrap_or(0);
 
-        let log_file = std::fs::File::open(&segment.log_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to open log file for reading"))?;
+        let mut reader = open_log_reader_at_position(segment, start_position as u64)?;
 
-        let mut log_file = log_file;
-        log_file
-            .seek(SeekFrom::Start(start_position as u64))
-            .map_err(|e| StorageError::from_io_error(e, "Failed to seek to position"))?;
-
-        let mut reader = BufReader::new(log_file);
-        let mut records = Vec::new();
         let max_records = count.unwrap_or(usize::MAX);
 
-        // Deserialize records from the reader using the same format as LogSegment
-        while records.len() < max_records {
-            match Self::deserialize_record_from_reader(&mut reader) {
-                Ok(record_with_offset) => {
-                    // Only include records that match our target offset or higher
-                    if record_with_offset.offset >= offset {
-                        records.push(record_with_offset);
-                    }
-                }
-                Err(_) => break, // End of file or read error
-            }
-        }
-
-        Ok(records)
+        Ok(collect_records(&mut reader, offset, max_records))
     }
 
     pub fn should_roll_segment(&self) -> bool {
@@ -154,8 +84,8 @@ impl SegmentManager {
             self.segments.insert(base_offset, active);
         }
 
-        let log_path = self.base_dir.join(format!("{:020}.log", next_offset));
-        let index_path = self.base_dir.join(format!("{:020}.index", next_offset));
+        let log_path = self.base_dir.join(format!("{next_offset:020}.log"));
+        let index_path = self.base_dir.join(format!("{next_offset:020}.index"));
 
         let new_segment = LogSegment::new(
             next_offset,
@@ -181,38 +111,19 @@ impl SegmentManager {
         self.segments.clear();
         self.active_segment = None;
 
-        // Read all .log files in the directory
-        let entries = std::fs::read_dir(&self.base_dir)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to read segment directory"))?;
+        let segment_offsets = get_segment_offsets(&self.base_dir)?;
 
-        let mut segment_offsets = Vec::new();
+        self.recover_segments(&segment_offsets)?;
+        self.set_active_segment(&segment_offsets);
 
-        for entry in entries {
-            let entry = entry
-                .map_err(|e| StorageError::from_io_error(e, "Failed to read directory entry"))?;
-            let path = entry.path();
+        Ok(())
+    }
 
-            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                if file_name.ends_with(".log") {
-                    // Parse offset from filename (format: 00000000000000000000.log)
-                    if let Some(offset_str) = file_name.strip_suffix(".log") {
-                        if let Ok(offset) = offset_str.parse::<u64>() {
-                            segment_offsets.push(offset);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort offsets to process segments in order
-        segment_offsets.sort_unstable();
-
-        // Recover each segment
-        for &base_offset in &segment_offsets {
+    fn recover_segments(&mut self, segment_offsets: &[u64]) -> Result<(), StorageError> {
+        for &base_offset in segment_offsets {
             let log_path = self.base_dir.join(format!("{base_offset:020}.log"));
             let index_path = self.base_dir.join(format!("{base_offset:020}.index"));
 
-            // Only recover if both log and index files exist
             if log_path.exists() && index_path.exists() {
                 let segment = LogSegment::recover(
                     base_offset,
@@ -221,17 +132,142 @@ impl SegmentManager {
                     self.sync_mode,
                     self.indexing_config.clone(),
                 )?;
-
                 self.segments.insert(base_offset, segment);
             }
         }
+        Ok(())
+    }
 
+    fn set_active_segment(&mut self, segment_offsets: &[u64]) {
         if let Some(&latest_offset) = segment_offsets.last() {
             if let Some(latest_segment) = self.segments.remove(&latest_offset) {
                 self.active_segment = Some(latest_segment);
             }
         }
-
-        Ok(())
     }
+}
+
+fn get_segment_offsets(base_dir: &PathBuf) -> Result<Vec<u64>, StorageError> {
+    let entries = std::fs::read_dir(base_dir)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to read segment directory"))?;
+
+    let mut segment_offsets = Vec::new();
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| StorageError::from_io_error(e, "Failed to read directory entry"))?;
+        let path = entry.path();
+
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            if file_name.ends_with(".log") {
+                if let Some(offset_str) = file_name.strip_suffix(".log") {
+                    if let Ok(offset) = offset_str.parse::<u64>() {
+                        segment_offsets.push(offset);
+                    }
+                }
+            }
+        }
+    }
+
+    segment_offsets.sort_unstable();
+
+    Ok(segment_offsets)
+}
+
+fn open_log_reader_at_position(
+    segment: &LogSegment,
+    position: u64,
+) -> Result<BufReader<File>, StorageError> {
+    let mut log_file = std::fs::File::open(&segment.log_path)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to open log file for reading"))?;
+
+    log_file
+        .seek(SeekFrom::Start(position))
+        .map_err(|e| StorageError::from_io_error(e, "Failed to seek to position"))?;
+
+    Ok(BufReader::new(log_file))
+}
+
+fn collect_records(
+    reader: &mut BufReader<File>,
+    start_offset: u64,
+    max_records: usize,
+) -> Vec<RecordWithOffset> {
+    let mut records = Vec::new();
+
+    while records.len() < max_records {
+        match deserialize_record_from_reader(reader) {
+            Ok(record_with_offset) => {
+                if record_with_offset.offset >= start_offset {
+                    records.push(record_with_offset);
+                }
+            }
+            Err(_) => break, // End of file or read error
+        }
+    }
+
+    records
+}
+
+fn deserialize_record_from_reader(
+    reader: &mut BufReader<File>,
+) -> Result<RecordWithOffset, StorageError> {
+    let payload_size = read_u32(reader, "Failed to read payload size")?;
+    let offset = read_u64(reader, "Failed to read offset")?;
+
+    let (timestamp, timestamp_len) = read_timestamp(reader)?;
+
+    let record = read_json_payload(reader, payload_size, timestamp_len)?;
+
+    Ok(RecordWithOffset {
+        record,
+        offset,
+        timestamp,
+    })
+}
+
+fn read_bytes<const N: usize>(
+    reader: &mut impl Read,
+    error_context: &str,
+) -> Result<[u8; N], StorageError> {
+    let mut bytes = [0u8; N];
+    reader
+        .read_exact(&mut bytes)
+        .map_err(|e| StorageError::from_io_error(e, error_context))?;
+    Ok(bytes)
+}
+
+fn read_u32(reader: &mut impl Read, error_context: &str) -> Result<u32, StorageError> {
+    read_bytes::<4>(reader, error_context).map(u32::from_be_bytes)
+}
+
+fn read_u64(reader: &mut impl Read, error_context: &str) -> Result<u64, StorageError> {
+    read_bytes::<8>(reader, error_context).map(u64::from_be_bytes)
+}
+
+fn read_timestamp(reader: &mut impl Read) -> Result<(String, u32), StorageError> {
+    let timestamp_len = read_u32(reader, "Failed to read timestamp length")?;
+    let mut timestamp_bytes = vec![0u8; timestamp_len as usize];
+    reader
+        .read_exact(&mut timestamp_bytes)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to read timestamp"))?;
+    let timestamp = String::from_utf8(timestamp_bytes).map_err(|e| {
+        StorageError::from_serialization_error(e, "Failed to parse timestamp as UTF-8")
+    })?;
+    Ok((timestamp, timestamp_len))
+}
+
+fn read_json_payload(
+    reader: &mut impl Read,
+    payload_size: u32,
+    timestamp_len: u32,
+) -> Result<Record, StorageError> {
+    let json_len = payload_size - 4 - timestamp_len; // subtract timestamp_len field + timestamp
+    let mut json_bytes = vec![0u8; json_len as usize];
+    reader
+        .read_exact(&mut json_bytes)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to read JSON payload"))?;
+    serde_json::from_slice(&json_bytes).map_err(|e| {
+        StorageError::from_serialization_error(e, "Failed to deserialize record from JSON")
+    })
 }
