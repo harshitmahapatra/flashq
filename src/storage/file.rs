@@ -449,7 +449,7 @@ impl TopicLog for FileTopicLog {
         let wal_buffer = self.load_file_to_buffer(self.get_wal_path(), "WAL")?;
 
         if offset >= self.next_offset - self.wal_record_count as u64 {
-            return Ok(self.extract_matching_records(&wal_buffer, offset, count)?);
+            return self.extract_matching_records(&wal_buffer, offset, count);
         }
 
         let mut buffer = self.load_file_to_buffer(self.file_path.clone(), "main log")?;
