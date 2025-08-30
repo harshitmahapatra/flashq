@@ -1,5 +1,4 @@
-use flashq::{Record, storage::file::SyncMode};
-use std::os::unix::fs::PermissionsExt;
+use flashq::storage::file::SyncMode;
 use uuid::Uuid;
 
 /// Generate a unique test ID for isolating test data
@@ -25,24 +24,6 @@ pub fn create_test_topic(prefix: &str) -> String {
 pub fn create_test_consumer_group(prefix: &str) -> String {
     let test_id = generate_test_id();
     format!("{prefix}_group_{test_id}")
-}
-
-pub fn test_record(key: &str, value: &str) -> Record {
-    Record::new(Some(key.to_string()), value.to_string(), None)
-}
-
-pub fn make_file_readonly(file_path: &std::path::Path) -> std::io::Result<()> {
-    let metadata = std::fs::metadata(file_path)?;
-    let mut perms = metadata.permissions();
-    perms.set_mode(0o444); // Read-only for owner, group, and others
-    std::fs::set_permissions(file_path, perms)
-}
-
-pub fn make_file_writable(file_path: &std::path::Path) -> std::io::Result<()> {
-    let metadata = std::fs::metadata(file_path)?;
-    let mut perms = metadata.permissions();
-    perms.set_mode(0o644); // Read-write for owner, read-only for group and others
-    std::fs::set_permissions(file_path, perms)
 }
 
 /// Common test configuration

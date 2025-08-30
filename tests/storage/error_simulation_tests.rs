@@ -42,7 +42,7 @@ fn corrupt_log_file(file_path: &std::path::Path) -> Result<(), Box<dyn std::erro
 fn test_disk_full_during_append() {
     let config = TestConfig::new("disk_full");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
 
     create_disk_full_scenario(config.temp_dir_path()).ok();
 
@@ -64,7 +64,7 @@ fn test_disk_full_during_append() {
 fn test_insufficient_space_recovery() {
     let config = TestConfig::new("space_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
 
     let large_record = Record::new(
         Some("huge_key".to_string()),
@@ -95,7 +95,7 @@ fn test_insufficient_space_recovery() {
 fn test_permission_denied_directory_creation() {
     let config = TestConfig::new("permission_test");
     let readonly_dir = create_permission_denied_scenario(config.temp_dir_path()).unwrap();
-    let result = FileTopicLog::new("test_topic", SyncMode::Immediate, &readonly_dir, 1);
+    let result = FileTopicLog::new("test_topic", SyncMode::Immediate, &readonly_dir);
 
     match result {
         Err(e) => {
@@ -132,7 +132,6 @@ fn test_permission_denied_file_write() {
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
-        1,
     );
 
     match result {
@@ -169,7 +168,6 @@ fn test_file_read_failure() {
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
-        1,
     )
     .unwrap();
 
@@ -191,43 +189,12 @@ fn test_file_read_failure() {
     }
 }
 
-#[test]
-fn test_wal_corruption_recovery() {
-    let config = TestConfig::new("wal_corruption");
-    let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5).unwrap();
-
-    for i in 0..3 {
-        let record = Record::new(Some(format!("key{i}")), format!("value{i}"), None);
-        log.append(record).unwrap();
-    }
-
-    let wal_file_path = config.temp_dir_path().join(format!("{topic}.wal"));
-    corrupt_log_file(&wal_file_path).unwrap();
-
-    let recovery_result = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 5);
-
-    match recovery_result {
-        Ok(recovered_log) => {
-            assert!(recovered_log.len() < 1000);
-        }
-        Err(e) => {
-            let error_string = format!("{e}");
-            assert!(
-                error_string.contains("WAL recovery")
-                    || error_string.contains("corruption")
-                    || error_string.contains("failed"),
-                "Expected recovery or corruption error, got: {error_string}"
-            );
-        }
-    }
-}
 
 #[test]
 fn test_partial_record_corruption() {
     let config = TestConfig::new("partial_corruption");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
 
     let valid_record = Record::new(Some("key".to_string()), "valid_value".to_string(), None);
     log.append(valid_record).unwrap();
@@ -253,44 +220,12 @@ fn test_partial_record_corruption() {
     }
 }
 
-#[test]
-fn test_json_corruption_detection() {
-    let config = TestConfig::new("json_corruption");
-    let topic = &config.topic_name;
-    let log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
-
-    let wal_file_path = config.temp_dir_path().join(format!("{topic}.wal"));
-    let mut wal_file = OpenOptions::new()
-        .append(true)
-        .open(&wal_file_path)
-        .unwrap();
-
-    let invalid_json = b"{ invalid json content }";
-    let length = invalid_json.len() as u32;
-    let offset = 0u64;
-
-    wal_file.write_all(&length.to_le_bytes()).unwrap();
-    wal_file.write_all(&offset.to_le_bytes()).unwrap();
-    wal_file.write_all(invalid_json).unwrap();
-    wal_file.sync_all().unwrap();
-
-    let result = log.get_records_from_offset(0, None);
-
-    match result {
-        Err(StorageError::DataCorruption { context, details }) => {
-            assert!(context.contains("record parsing"));
-            assert!(!details.is_empty(), "Error details should not be empty");
-        }
-        Err(other) => panic!("Expected DataCorruption error, got: {other:?}"),
-        Ok(_) => panic!("Expected JSON corruption to be detected"),
-    }
-}
 
 #[test]
 fn test_error_state_recovery() {
     let config = TestConfig::new("error_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path(), 1).unwrap();
+    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
 
     let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
     let offset1 = log.append(record1).unwrap();
@@ -350,36 +285,3 @@ fn test_serialization_error_conversion() {
     }
 }
 
-#[test]
-fn test_wal_commit_rollback_on_main_file_write_failure() {
-    let config = TestConfig::new("wal_rollback");
-    let mut log = FileTopicLog::new(
-        &config.topic_name,
-        SyncMode::Immediate,
-        config.temp_dir_path(),
-        3,
-    )
-    .unwrap();
-
-    log.append(test_record("key1", "value1")).unwrap();
-    log.append(test_record("key2", "value2")).unwrap();
-
-    let main_path = config
-        .temp_dir_path()
-        .join(format!("{}.log", config.topic_name));
-    let original_size = std::fs::metadata(&main_path).unwrap().len();
-
-    log.append(test_record("key3", "value3")).unwrap();
-    make_file_readonly(&main_path).unwrap();
-    let result = log.append(test_record("key4", "value4"));
-    make_file_writable(&main_path).unwrap();
-
-    match result {
-        Err(StorageError::WriteFailed { .. }) | Err(StorageError::PermissionDenied { .. }) => {
-            assert_eq!(std::fs::metadata(&main_path).unwrap().len(), original_size);
-            assert_eq!(log.get_records_from_offset(0, None).unwrap().len(), 2);
-        }
-        Ok(_) => assert!(log.append(test_record("test", "test")).unwrap() >= 2),
-        Err(other) => panic!("Expected write/permission error, got: {other:?}"),
-    }
-}

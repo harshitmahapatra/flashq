@@ -61,20 +61,22 @@ impl StorageBackend {
         })
     }
 
-    pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog>, Box<dyn std::error::Error>> {
+    pub fn create(
+        &self,
+        topic: &str,
+    ) -> Result<Box<dyn TopicLog + Send>, std::io::Error> {
         match self {
             StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
             StorageBackend::File {
                 sync_mode,
                 data_dir,
-                wal_commit_threshold,
+                
                 ..
             } => {
                 let file_log = crate::storage::file::FileTopicLog::new(
                     topic,
                     *sync_mode,
                     data_dir,
-                    *wal_commit_threshold,
                 )?;
                 Ok(Box::new(file_log))
             }

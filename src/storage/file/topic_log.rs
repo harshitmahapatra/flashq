@@ -4,10 +4,10 @@ use crate::storage::file::common::{
     ensure_directory_exists, open_file_for_append, read_file_contents, sync_file_if_needed,
 };
 use crate::storage::r#trait::TopicLog;
-use crate::{Record, RecordWithOffset, warn};
+use crate::{Record, RecordWithOffset};
 use serde_json;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 // ================================================================================================
@@ -66,12 +66,9 @@ fn parse_record_from_bytes(
 pub struct FileTopicLog {
     file_path: PathBuf,
     file: File,
-    wal_file: File,
     next_offset: u64,
     record_count: usize,
-    wal_record_count: usize,
     sync_mode: SyncMode,
-    wal_commit_threshold: usize,
 }
 
 impl FileTopicLog {
@@ -79,45 +76,31 @@ impl FileTopicLog {
         topic: &str,
         sync_mode: SyncMode,
         data_dir: P,
-        wal_commit_threshold: usize,
     ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
         let file_path = data_dir.join(format!("{topic}.log"));
-        let wal_file_path = data_dir.join(format!("{topic}.wal"));
 
         let file = open_file_for_append(&file_path)?;
-        let wal_file = open_file_for_append(&wal_file_path)?;
 
         let mut log = FileTopicLog {
             file_path: file_path.clone(),
             file,
-            wal_file,
             next_offset: 0,
             record_count: 0,
-            wal_record_count: 0,
             sync_mode,
-            wal_commit_threshold,
         };
 
         log.recover_from_file()?;
         Ok(log)
     }
 
-    pub fn new_default(
-        topic: &str,
-        sync_mode: SyncMode,
-        wal_commit_threshold: usize,
-    ) -> Result<Self, std::io::Error> {
-        Self::new(topic, sync_mode, "./data", wal_commit_threshold)
+    pub fn new_default(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
+        Self::new(topic, sync_mode, "./data")
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
-        self.wal_file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL file"))?;
-
         self.file
             .sync_all()
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync main file"))
@@ -127,8 +110,6 @@ impl FileTopicLog {
 // Recovery Implementation
 impl FileTopicLog {
     fn recover_from_file(&mut self) -> Result<(), std::io::Error> {
-        self.recover_wal()?;
-
         if !self.file_path.exists() {
             return Ok(());
         }
@@ -139,21 +120,6 @@ impl FileTopicLog {
 
         self.next_offset = offset_counter;
         self.record_count = record_count;
-        Ok(())
-    }
-
-    fn recover_wal(&mut self) -> Result<(), std::io::Error> {
-        let wal_path = self.get_wal_path();
-        if !wal_path.exists() {
-            return Ok(());
-        }
-
-        let wal_metadata = std::fs::metadata(&wal_path)?;
-        if wal_metadata.len() > 0 {
-            self.wal_record_count = 1;
-            self.commit_wal_to_main()
-                .map_err(|_| std::io::Error::other("WAL recovery failed"))?;
-        }
         Ok(())
     }
 
@@ -231,135 +197,6 @@ impl FileTopicLog {
     }
 }
 
-// Write-Ahead Logging Implementation
-impl FileTopicLog {
-    fn write_record_atomically(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
-        self.wal_file
-            .write_all(buffer)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to WAL"))?;
-
-        sync_file_if_needed(&self.wal_file, self.sync_mode)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync WAL file"))?;
-
-        self.wal_record_count += 1;
-
-        if self.wal_record_count >= self.wal_commit_threshold {
-            self.commit_wal_to_main()?;
-        }
-
-        Ok(())
-    }
-
-    fn commit_wal_to_main(&mut self) -> Result<(), StorageError> {
-        if self.wal_record_count == 0 {
-            return Ok(());
-        }
-
-        // Sync WAL before commit
-        self.wal_file.sync_all().map_err(|e| {
-            StorageError::from_io_error(
-                e,
-                "Failed to sync WAL before 
-  commit",
-            )
-        })?;
-
-        // Get current main file position for rollback
-        let original_size = self
-            .file
-            .metadata()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to get main file size"))?
-            .len();
-
-        // Attempt to append WAL to main file
-        match self.append_wal_to_main(original_size) {
-            Ok(()) => {
-                self.clear_wal_file()?;
-                Ok(())
-            }
-            Err(e) => {
-                // Rollback main file on failure
-                if let Err(rollback_err) = self.rollback_main_file(original_size) {
-                    warn!("Failed to rollback main file: {rollback_err}");
-                }
-                Err(e)
-            }
-        }
-    }
-
-    fn append_wal_to_main(&mut self, _original_size: u64) -> Result<(), StorageError> {
-        let wal_path = self.get_wal_path();
-
-        let mut wal_reader = File::open(&wal_path).map_err(|e| {
-            StorageError::from_io_error(
-                e,
-                "Failed to open WAL for 
-  reading",
-            )
-        })?;
-
-        // Use std::io::copy for efficient streaming
-        std::io::copy(&mut wal_reader, &mut self.file).map_err(|e| {
-            StorageError::from_io_error(
-                e,
-                "Failed to copy WAL to main 
-  file",
-            )
-        })?;
-
-        // Ensure data is written to disk
-        self.file.sync_all().map_err(|e| {
-            StorageError::from_io_error(
-                e,
-                "Failed to sync main file after WAL
-   append",
-            )
-        })?;
-
-        Ok(())
-    }
-
-    fn rollback_main_file(&mut self, original_size: u64) -> Result<(), StorageError> {
-        // Truncate main file back to original size
-        self.file
-            .set_len(original_size)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to truncate main file"))?;
-
-        // Sync the truncation
-        self.file.sync_all().map_err(|e| {
-            StorageError::from_io_error(
-                e,
-                "Failed to sync main file after 
-  rollback",
-            )
-        })?;
-
-        Ok(())
-    }
-
-    fn clear_wal_file(&mut self) -> Result<(), StorageError> {
-        let wal_path = self.get_wal_path();
-
-        {
-            let _truncate_file = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&wal_path)
-                .map_err(|e| StorageError::from_io_error(e, "Failed to truncate WAL file"))?;
-        }
-
-        self.wal_file = open_file_for_append(&wal_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to reopen WAL file"))?;
-
-        self.wal_record_count = 0;
-        Ok(())
-    }
-
-    fn get_wal_path(&self) -> PathBuf {
-        self.file_path.with_extension("wal")
-    }
-}
-
 // Record Processing Implementation
 impl FileTopicLog {
     fn serialize_record(&self, record: &Record) -> Result<Vec<u8>, StorageError> {
@@ -374,6 +211,19 @@ impl FileTopicLog {
         write_record_header(&mut write_buffer, length, offset);
         write_buffer.extend_from_slice(json_payload);
         write_buffer
+    }
+
+    fn write_record(&mut self, buffer: &[u8]) -> Result<(), StorageError> {
+        use std::io::Write;
+
+        self.file
+            .write_all(buffer)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to file"))?;
+
+        sync_file_if_needed(&self.file, self.sync_mode)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync file"))?;
+
+        Ok(())
     }
 
     fn load_file_to_buffer(
@@ -441,7 +291,7 @@ impl TopicLog for FileTopicLog {
         let json_payload = self.serialize_record(&record)?;
         let write_buffer = self.create_record_buffer(&json_payload, offset);
 
-        self.write_record_atomically(&write_buffer)?;
+        self.write_record(&write_buffer)?;
 
         self.next_offset += 1;
         self.record_count += 1;
@@ -453,14 +303,7 @@ impl TopicLog for FileTopicLog {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let wal_buffer = self.load_file_to_buffer(self.get_wal_path(), "WAL")?;
-
-        if offset >= self.next_offset - self.wal_record_count as u64 {
-            return self.extract_matching_records(&wal_buffer, offset, count);
-        }
-
-        let mut buffer = self.load_file_to_buffer(self.file_path.clone(), "main log")?;
-        buffer.extend_from_slice(&wal_buffer);
+        let buffer = self.load_file_to_buffer(self.file_path.clone(), "main log")?;
 
         self.extract_matching_records(&buffer, offset, count)
     }
