@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, file storage backend, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, write-ahead logging, and full integration test coverage.
+FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
 
 ## Development Commands
 
@@ -71,7 +71,10 @@ Following Rust best practices with library and binary crates:
 ### Storage Module (`src/storage/`)
 - `StorageBackend` enum - Pluggable storage backend selection (memory/file)
 - `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer
-- `FileTopicLog` - File-based topic storage with write-ahead logging
+- `FileTopicLog` - Kafka-aligned segment-based file storage with crash recovery
+- `SegmentManager` - Manages log segment lifecycle and rolling
+- `LogSegment` - Individual segment files with sparse indexing
+- `SparseIndex` - Efficient offset-to-position mapping within segments
 - `FileConsumerGroup` - Persistent consumer group offset management
 - Directory locking mechanism to prevent concurrent access
 - Comprehensive error handling and recovery capabilities
@@ -121,11 +124,11 @@ This provides an excellent way to understand the library API and test functional
 - Health check and OpenAPI compliance testing
 
 **Storage Integration Tests (`tests/storage/`):**
-- File storage backend testing with crash recovery
+- Segment-based file storage testing with crash recovery
 - Directory locking and concurrent access prevention  
 - Error simulation (disk full, permission errors)
 - Consumer group persistence across restarts
-- Write-ahead logging validation
+- Segment architecture validation and sparse indexing
 
 ## Architecture Notes
 
@@ -133,10 +136,10 @@ Current implementation features:
 - **Kafka-style messaging**: Records with optional keys and headers for routing/metadata
 - **Topic-based organization**: Records organized by topic strings with separate offset counters
 - **Pluggable storage**: In-memory and file-based storage backends
-- **File storage**: Write-ahead logging with configurable sync modes and commit thresholds
+- **File storage**: Kafka-aligned segment-based architecture with rolling segments and sparse indexing
 - **Directory locking**: Prevents concurrent access to file storage directories
 - **Error handling**: Comprehensive error types with structured logging
-- **Crash recovery**: File storage recovers state from persisted logs
+- **Crash recovery**: File storage recovers state from segment files with automatic discovery
 - **Offset-based positioning**: Sequential offsets within topics starting from 0
 - **Non-destructive polling**: Records remain in queue after being read
 - **FIFO ordering**: Records returned in the order they were posted with offset guarantees
@@ -149,6 +152,21 @@ Current implementation features:
 - **JSON serialization**: All data structures support serde for API communication
 - **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API and storage
 
+## Performance Characteristics
+
+**Memory Storage (Fast, Volatile):**
+- Throughput: 10K-276K records/sec
+- Latency: 1.8-10ms
+- Best for: Real-time processing, temporary queues
+
+**File Storage (Persistent, Segment-Based):**
+- Throughput: 856-17.5K records/sec  
+- Latency: 28.6-116.8ms
+- Best for: Durable messaging, audit logs
+- Architecture: Kafka-aligned segments with sparse indexing
+
+Memory storage provides 12-310x performance advantage over file storage, while file storage offers full persistence and crash recovery capabilities.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
@@ -156,6 +174,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - **[API Reference](docs/api.md)** - Complete HTTP REST API documentation with examples
 - **[Architecture](docs/architecture.md)** - System design and data structure details  
 - **[Development Guide](docs/development.md)** - Development workflow and contribution guidelines
+- **[Performance](docs/performance.md)** - Benchmarking results and storage backend comparison
 
 ## Production Deployment
 
@@ -169,9 +188,9 @@ After building with `cargo build --release`:
 ./target/release/server                    # Port 8080
 ./target/release/server 9090              # Custom port
 
-# File storage backend
+# Segment-based file storage backend
 ./target/release/server -- --storage=file --data-dir=./data
-./target/release/server 9090 -- --storage=file --sync-mode=always
+./target/release/server 9090 -- --storage=file --data-dir=./data
 ```
 
 **Logging Behavior:**
