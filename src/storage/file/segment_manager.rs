@@ -8,6 +8,8 @@ use crate::error::StorageError;
 use crate::storage::file::common::deserialize_record;
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
+use log::warn;
+
 /// Manager for multiple log segments, implementing segment rolling
 pub struct SegmentManager {
     segments: BTreeMap<u64, LogSegment>,
@@ -203,9 +205,36 @@ fn collect_records(
                     records.push(record_with_offset);
                 }
             }
-            Err(_) => break, // End of file or read error
+            Err(error) => {
+                log_read_error(&error);
+                break;
+            }
         }
     }
 
     records
+}
+
+fn log_read_error(error: &StorageError) {
+    match error {
+        StorageError::ReadFailed { source, .. } => {
+            if !source.to_string().contains("UnexpectedEof")
+                && !source.to_string().contains("failed to fill whole buffer")
+            {
+                warn!(
+                    "IO error while reading records, continuing with partial data: {error}"
+                );
+            }
+        }
+        StorageError::DataCorruption { .. } => {
+            warn!(
+                "Data corruption detected while reading records, continuing with partial data: {error}"
+            );
+        }
+        _ => {
+            warn!(
+                "Error while reading records, continuing with partial data: {error}"
+            );
+        }
+    }
 }
