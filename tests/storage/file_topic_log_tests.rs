@@ -10,7 +10,7 @@ fn test_basic_append_and_retrieval() {
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
-        10,
+        config.segment_size,
     )
     .unwrap();
 
@@ -29,8 +29,13 @@ fn test_basic_append_and_retrieval() {
 #[test]
 fn test_empty_log_properties() {
     let config = TestConfig::new("empty_log");
-    let log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir, 10).unwrap();
+    let log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        &config.temp_dir,
+        config.segment_size,
+    )
+    .unwrap();
 
     assert_eq!(log.len(), 0);
     assert!(log.is_empty());
@@ -44,7 +49,7 @@ fn test_record_retrieval_from_offset() {
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
-        10,
+        config.segment_size,
     )
     .unwrap();
 
@@ -84,7 +89,7 @@ fn test_record_retrieval_with_count_limit() {
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
-        10,
+        config.segment_size,
     )
     .unwrap();
 
@@ -108,7 +113,7 @@ fn test_offset_consistency() {
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
-        10,
+        config.segment_size,
     )
     .unwrap();
 
@@ -125,162 +130,4 @@ fn test_offset_consistency() {
     for (i, record) in records.iter().enumerate() {
         assert_eq!(record.offset, i as u64);
     }
-}
-
-#[test]
-fn test_wal_file_creation() {
-    let config = TestConfig::new("wal_creation");
-    let _log = FileTopicLog::new(
-        &config.topic_name,
-        config.sync_mode,
-        config.temp_dir_path(),
-        10,
-    )
-    .unwrap();
-
-    let wal_path = config
-        .temp_dir_path()
-        .join(format!("{}.wal", config.topic_name));
-    assert!(wal_path.exists());
-}
-
-#[test]
-fn test_wal_basic_functionality() {
-    let config = TestConfig::new("wal_basic");
-    let mut log = FileTopicLog::new(
-        &config.topic_name,
-        config.sync_mode,
-        config.temp_dir_path(),
-        10,
-    )
-    .unwrap();
-
-    let record = Record::new(Some("key1".to_string()), "value1".to_string(), None);
-    log.append(record).unwrap();
-
-    let wal_path = config
-        .temp_dir_path()
-        .join(format!("{}.wal", config.topic_name));
-    let wal_content = std::fs::read(&wal_path).unwrap();
-    assert!(!wal_content.is_empty());
-}
-
-#[test]
-fn test_wal_recovery() {
-    let config = TestConfig::new("wal_recovery");
-
-    let wal_path = config
-        .temp_dir_path()
-        .join(format!("{}.wal", config.topic_name));
-
-    {
-        let mut log = FileTopicLog::new(
-            &config.topic_name,
-            config.sync_mode,
-            config.temp_dir_path(),
-            10,
-        )
-        .unwrap();
-        let test_record = Record::new(
-            Some("recovery_key".to_string()),
-            "recovery_value".to_string(),
-            None,
-        );
-        log.append(test_record).unwrap();
-        log.sync().unwrap();
-
-        let wal_content = std::fs::read(&wal_path).unwrap();
-        assert!(
-            !wal_content.is_empty(),
-            "WAL should contain data before recovery"
-        );
-    }
-
-    let wal_content_before = std::fs::read(&wal_path).unwrap();
-    assert!(
-        !wal_content_before.is_empty(),
-        "WAL should still have content after drop"
-    );
-
-    let recovered_log = FileTopicLog::new(
-        &config.topic_name,
-        config.sync_mode,
-        config.temp_dir_path(),
-        10,
-    )
-    .unwrap();
-
-    assert_eq!(recovered_log.len(), 1);
-    let wal_content_after = std::fs::read(&wal_path).unwrap();
-    assert!(
-        wal_content_after.is_empty(),
-        "WAL should be empty after recovery"
-    );
-}
-
-#[test]
-fn test_wal_commit_threshold_behavior() {
-    let config = TestConfig::new("wal_threshold");
-    let mut log = FileTopicLog::new(
-        &config.topic_name,
-        config.sync_mode,
-        config.temp_dir_path(),
-        2,
-    )
-    .unwrap();
-
-    let wal_path = config
-        .temp_dir_path()
-        .join(format!("{}.wal", config.topic_name));
-
-    log.append(Record::new(None, "value1".to_string(), None))
-        .unwrap();
-    let wal_content = std::fs::read(&wal_path).unwrap();
-    assert!(
-        !wal_content.is_empty(),
-        "WAL should contain uncommitted record"
-    );
-
-    log.append(Record::new(None, "value2".to_string(), None))
-        .unwrap();
-    let wal_content_after = std::fs::read(&wal_path).unwrap();
-    assert!(
-        wal_content_after.is_empty(),
-        "WAL should be empty after reaching threshold"
-    );
-}
-
-#[test]
-fn test_wal_recovery_with_uncommitted_records() {
-    let config = TestConfig::new("wal_uncommitted");
-    let wal_path = config
-        .temp_dir_path()
-        .join(format!("{}.wal", config.topic_name));
-
-    {
-        let mut log = FileTopicLog::new(
-            &config.topic_name,
-            config.sync_mode,
-            config.temp_dir_path(),
-            10,
-        )
-        .unwrap();
-        log.append(Record::new(None, "uncommitted_value".to_string(), None))
-            .unwrap();
-
-        let wal_content = std::fs::read(&wal_path).unwrap();
-        assert!(
-            !wal_content.is_empty(),
-            "WAL should have uncommitted record"
-        );
-    }
-
-    let recovered_log = FileTopicLog::new(
-        &config.topic_name,
-        config.sync_mode,
-        config.temp_dir_path(),
-        10,
-    )
-    .unwrap();
-    assert_eq!(recovered_log.len(), 1);
 }

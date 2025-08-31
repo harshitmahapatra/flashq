@@ -9,8 +9,13 @@ fn test_file_topic_log_recovery() {
     let topic_name = config.topic_name.clone();
 
     {
-        let mut log =
-            FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path(), 10).unwrap();
+        let mut log = FileTopicLog::new(
+            &topic_name,
+            config.sync_mode,
+            config.temp_dir_path(),
+            config.segment_size,
+        )
+        .unwrap();
         log.append(Record::new(None, "first".to_string(), None))
             .unwrap();
         log.append(Record::new(None, "second".to_string(), None))
@@ -18,8 +23,13 @@ fn test_file_topic_log_recovery() {
         log.sync().unwrap();
     }
 
-    let recovered_log =
-        FileTopicLog::new(&topic_name, config.sync_mode, config.temp_dir_path(), 10).unwrap();
+    let recovered_log = FileTopicLog::new(
+        &topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     assert_eq!(recovered_log.len(), 2);
     assert_eq!(recovered_log.next_offset(), 2);

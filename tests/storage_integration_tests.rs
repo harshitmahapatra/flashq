@@ -10,6 +10,8 @@ mod storage {
     pub mod error_simulation_tests;
     pub mod file_topic_log_tests;
     pub mod persistence_tests;
+    pub mod segment_manager_tests;
+    pub mod segment_tests;
     pub mod storage_backend_tests;
     pub mod test_utilities;
 }

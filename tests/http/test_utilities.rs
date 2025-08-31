@@ -1,6 +1,7 @@
 use flashq::http::*;
 use flashq::{Record, debug, error, info};
 use std::env;
+use std::io::Read;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -135,6 +136,11 @@ impl TestServer {
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
                 error!("Server process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Server stderr: {buf}");
+                }
                 return Err("Server process exited".into());
             }
 
@@ -204,6 +210,11 @@ impl TestServer {
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
                 error!("Server process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Server stderr: {buf}");
+                }
                 return Err("Server process exited".into());
             }
 
@@ -315,6 +326,11 @@ impl TestServer {
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
                 error!("Server process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Server stderr: {buf}");
+                }
                 return Err("Server process exited".into());
             }
 
