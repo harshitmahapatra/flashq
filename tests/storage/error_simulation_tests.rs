@@ -42,11 +42,17 @@ fn corrupt_log_file(file_path: &std::path::Path) -> Result<(), Box<dyn std::erro
 fn test_disk_full_during_append() {
     let config = TestConfig::new("disk_full");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     create_disk_full_scenario(config.temp_dir_path()).ok();
 
-    let large_record = Record::new(Some("key".to_string()), "x".repeat(1024 * 1024), None);
+    let large_record = Record::new(Some("key".to_string()), "x".repeat(900 * 1024), None); // 900KB - leaves room for segment overhead
 
     let result = log.append(large_record);
 
@@ -64,11 +70,17 @@ fn test_disk_full_during_append() {
 fn test_insufficient_space_recovery() {
     let config = TestConfig::new("space_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     let large_record = Record::new(
         Some("huge_key".to_string()),
-        "x".repeat(10 * 1024 * 1024),
+        "x".repeat(800 * 1024), // 800KB - less than segment size but large
         None,
     );
 
@@ -95,7 +107,12 @@ fn test_insufficient_space_recovery() {
 fn test_permission_denied_directory_creation() {
     let config = TestConfig::new("permission_test");
     let readonly_dir = create_permission_denied_scenario(config.temp_dir_path()).unwrap();
-    let result = FileTopicLog::new("test_topic", SyncMode::Immediate, &readonly_dir);
+    let result = FileTopicLog::new(
+        "test_topic",
+        SyncMode::Immediate,
+        &readonly_dir,
+        config.segment_size,
+    );
 
     match result {
         Err(e) => {
@@ -132,6 +149,7 @@ fn test_permission_denied_file_write() {
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
+        config.segment_size,
     );
 
     match result {
@@ -168,6 +186,7 @@ fn test_file_read_failure() {
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
+        config.segment_size,
     )
     .unwrap();
 
@@ -203,7 +222,13 @@ fn test_file_read_failure() {
 fn test_partial_record_corruption() {
     let config = TestConfig::new("partial_corruption");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     let valid_record = Record::new(Some("key".to_string()), "valid_value".to_string(), None);
     log.append(valid_record).unwrap();
@@ -237,14 +262,20 @@ fn test_partial_record_corruption() {
 fn test_error_state_recovery() {
     let config = TestConfig::new("error_recovery");
     let topic = &config.topic_name;
-    let mut log = FileTopicLog::new(topic, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
     let offset1 = log.append(record1).unwrap();
 
     let large_record = Record::new(
         Some("huge".to_string()),
-        "x".repeat(100 * 1024 * 1024),
+        "x".repeat(512 * 1024), // 512KB - half the segment size
         None,
     );
     let _large_result = log.append(large_record);

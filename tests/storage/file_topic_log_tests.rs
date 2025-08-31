@@ -6,8 +6,13 @@ use flashq::storage::file::FileTopicLog;
 #[test]
 fn test_basic_append_and_retrieval() {
     let config = TestConfig::new("basic_ops");
-    let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     let record1 = Record::new(Some("key1".to_string()), "value1".to_string(), None);
     let record2 = Record::new(Some("key2".to_string()), "value2".to_string(), None);
@@ -24,7 +29,13 @@ fn test_basic_append_and_retrieval() {
 #[test]
 fn test_empty_log_properties() {
     let config = TestConfig::new("empty_log");
-    let log = FileTopicLog::new(&config.topic_name, config.sync_mode, &config.temp_dir).unwrap();
+    let log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        &config.temp_dir,
+        config.segment_size,
+    )
+    .unwrap();
 
     assert_eq!(log.len(), 0);
     assert!(log.is_empty());
@@ -34,8 +45,13 @@ fn test_empty_log_properties() {
 #[test]
 fn test_record_retrieval_from_offset() {
     let config = TestConfig::new("retrieval");
-    let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     log.append(Record::new(
         Some("key1".to_string()),
@@ -69,8 +85,13 @@ fn test_record_retrieval_from_offset() {
 #[test]
 fn test_record_retrieval_with_count_limit() {
     let config = TestConfig::new("count_limit");
-    let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     log.append(Record::new(None, "value1".to_string(), None))
         .unwrap();
@@ -88,8 +109,13 @@ fn test_record_retrieval_with_count_limit() {
 #[test]
 fn test_offset_consistency() {
     let config = TestConfig::new("offset_consistency");
-    let mut log =
-        FileTopicLog::new(&config.topic_name, config.sync_mode, config.temp_dir_path()).unwrap();
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .unwrap();
 
     for i in 0..5 {
         let offset = log

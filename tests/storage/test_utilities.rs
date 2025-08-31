@@ -31,6 +31,7 @@ pub struct TestConfig {
     pub temp_dir: tempfile::TempDir,
     pub topic_name: String,
     pub sync_mode: SyncMode,
+    pub segment_size: u64,
 }
 
 impl TestConfig {
@@ -39,6 +40,7 @@ impl TestConfig {
             temp_dir: create_test_dir(prefix),
             topic_name: create_test_topic(prefix),
             sync_mode: SyncMode::Immediate,
+            segment_size: 1024 * 1024, // 1MB for tests
         }
     }
 

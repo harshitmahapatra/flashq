@@ -63,7 +63,7 @@ impl LogSegment {
             .append(true)
             .open(&index_path)
             .map_err(|e| StorageError::from_io_error(e, "Failed to open index file for writer"))?;
-        
+
         let index_writer = BufWriter::new(index_file_for_writer);
 
         Ok(LogSegment {
@@ -152,8 +152,11 @@ impl LogSegment {
 
             self.index.add_entry(index_entry.clone());
 
-            self.index
-                .write_entry_to_file(&mut self.index_writer, &index_entry, self.base_offset)?;
+            self.index.write_entry_to_file(
+                &mut self.index_writer,
+                &index_entry,
+                self.base_offset,
+            )?;
             self.index_writer
                 .flush()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
@@ -169,7 +172,7 @@ impl LogSegment {
             self.index_writer
                 .flush()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
-                
+
             self.log_file
                 .sync_all()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;
@@ -217,7 +220,7 @@ impl LogSegment {
         self.index_writer
             .flush()
             .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
-            
+
         self.log_file
             .sync_all()
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;

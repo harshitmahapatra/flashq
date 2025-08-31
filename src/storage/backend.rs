@@ -14,6 +14,7 @@ pub enum StorageBackend {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: std::path::PathBuf,
         wal_commit_threshold: usize,
+        segment_size_bytes: u64,
         _directory_lock: std::fs::File,
     },
 }
@@ -43,13 +44,15 @@ impl StorageBackend {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: P,
     ) -> Result<Self, StorageError> {
-        Self::new_file_with_config(sync_mode, data_dir, 1000)
+        const DEFAULT_SEGMENT_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+        Self::new_file_with_config(sync_mode, data_dir, 1000, DEFAULT_SEGMENT_SIZE)
     }
 
     pub fn new_file_with_config<P: AsRef<Path>>(
         sync_mode: crate::storage::file::SyncMode,
         data_dir: P,
         wal_commit_threshold: usize,
+        segment_size_bytes: u64,
     ) -> Result<Self, StorageError> {
         let data_dir = data_dir.as_ref().to_path_buf();
         let directory_lock = acquire_directory_lock(&data_dir)?;
@@ -57,6 +60,7 @@ impl StorageBackend {
             sync_mode,
             data_dir,
             wal_commit_threshold,
+            segment_size_bytes,
             _directory_lock: directory_lock,
         })
     }
@@ -67,10 +71,15 @@ impl StorageBackend {
             StorageBackend::File {
                 sync_mode,
                 data_dir,
+                segment_size_bytes,
                 ..
             } => {
-                let file_log =
-                    crate::storage::file::FileTopicLog::new(topic, *sync_mode, data_dir)?;
+                let file_log = crate::storage::file::FileTopicLog::new(
+                    topic,
+                    *sync_mode,
+                    data_dir,
+                    *segment_size_bytes,
+                )?;
                 Ok(Box::new(file_log))
             }
         }

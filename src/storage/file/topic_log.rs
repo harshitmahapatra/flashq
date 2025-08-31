@@ -17,14 +17,13 @@ impl FileTopicLog {
         topic: &str,
         sync_mode: SyncMode,
         data_dir: P,
+        segment_size_bytes: u64,
     ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
         let base_dir = data_dir.join(topic);
         ensure_directory_exists(&base_dir)?;
-
-        let segment_size_bytes = 1024 * 1024 * 1024; // 1GB
         let indexing_config = IndexingConfig::default();
 
         let segment_manager = SegmentManager::new(
@@ -44,10 +43,6 @@ impl FileTopicLog {
             .map_err(|e| std::io::Error::other(format!("Recovery failed: {e}")))?;
 
         Ok(log)
-    }
-
-    pub fn new_default(topic: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
-        Self::new(topic, sync_mode, "./data")
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
