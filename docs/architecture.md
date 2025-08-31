@@ -54,22 +54,12 @@ graph TD
 - `LogSegment`: Individual segment files with sparse indexing
 - `SparseIndex`: Efficient offset-to-position mapping within segments
 - `InMemoryTopicLog`: Fast in-memory storage implementation
-- Error handling: Comprehensive error types with structured logging
-- HTTP server: REST API with validation and consumer groups
-- CLI client: Structured command interface
-- Interactive demo: Educational exploration tool
-- Performance benchmarking: Divan benchmarks with memory profiling
 
 **Key Features:**
-- Thread-safe concurrent access (`Arc<Mutex<>>`)
-- Trait-based storage abstraction for pluggable backends
-- Kafka-aligned segment-based file storage with rolling segments
-- Directory locking prevents concurrent access to file storage
-- Crash recovery from segment files with sparse indexing
-- Comprehensive error handling with structured logging
-- Owned data returns for improved performance and safety
-- OpenAPI-compliant validation and error handling
-- Comprehensive integration test coverage for HTTP and storage layers
+- Thread-safe concurrent access with pluggable storage backends
+- Kafka-aligned segment architecture with rolling and sparse indexing
+- Directory locking and crash recovery for data durability
+- Append-only logs with FIFO ordering and non-destructive polling
 
 ## Data Flow
 
@@ -161,13 +151,6 @@ data/
 - Large dataset tests: 100 records with 2K record context
 - Memory profiling tracks allocations, deallocations, and peak usage
 
-## Storage Backend Comparison
+## Storage Backend Performance
 
-| Feature | Memory | File |
-|---------|--------|------|
-| **Speed** | 133K-2.77M records/sec | 101-2.97K records/sec |
-| **Latency** | 180-820 µs | 168-990 ms |
-| **Memory Usage** | 726KB-3.3MB | 539KB-4.4MB |
-| **Persistence** | None | Full durability |
-| **Recovery** | No | Crash recovery from segments |
-| **Concurrency** | Multi-thread only | Multi-process safe |
+Detailed performance benchmarks and capacity planning guidance are available in the [Performance Documentation](performance.md).
