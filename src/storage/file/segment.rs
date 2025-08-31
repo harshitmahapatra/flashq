@@ -8,17 +8,15 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct IndexingConfig {
-    /// Create index entry every N bytes (Kafka default: 4096)
     pub index_interval_bytes: u32,
-    /// Create index entry every N records (fallback)
     pub index_interval_records: u32,
 }
 
 impl Default for IndexingConfig {
     fn default() -> Self {
         Self {
-            index_interval_bytes: 4096,  // 4KB like Kafka
-            index_interval_records: 100, // Every 100 records as fallback
+            index_interval_bytes: 4096,
+            index_interval_records: 100,
         }
     }
 }
@@ -30,6 +28,7 @@ pub struct LogSegment {
     pub index_path: PathBuf,
     log_file: File,
     index_file: File,
+    index_writer: BufWriter<File>,
     index: SparseIndex,
     bytes_since_last_index: u32,
     records_since_last_index: u32,
@@ -59,13 +58,22 @@ impl LogSegment {
             .open(&index_path)
             .map_err(|e| StorageError::from_io_error(e, "Failed to open index file"))?;
 
+        let index_file_for_writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&index_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open index file for writer"))?;
+        
+        let index_writer = BufWriter::new(index_file_for_writer);
+
         Ok(LogSegment {
             base_offset,
-            max_offset: None, // No records yet
+            max_offset: None,
             log_path,
             index_path,
             log_file,
             index_file,
+            index_writer,
             index: SparseIndex::new(),
             bytes_since_last_index: 0,
             records_since_last_index: 0,
@@ -144,16 +152,9 @@ impl LogSegment {
 
             self.index.add_entry(index_entry.clone());
 
-            let index_file_for_append = OpenOptions::new()
-                .append(true)
-                .open(&self.index_path)
-                .map_err(|e| {
-                    StorageError::from_io_error(e, "Failed to open index file for writing")
-                })?;
-            let mut index_writer = BufWriter::new(index_file_for_append);
             self.index
-                .write_entry_to_file(&mut index_writer, &index_entry, self.base_offset)?;
-            index_writer
+                .write_entry_to_file(&mut self.index_writer, &index_entry, self.base_offset)?;
+            self.index_writer
                 .flush()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
 
@@ -165,6 +166,10 @@ impl LogSegment {
 
     fn sync_files_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
+            self.index_writer
+                .flush()
+                .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
+                
             self.log_file
                 .sync_all()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;
@@ -209,6 +214,10 @@ impl LogSegment {
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
+        self.index_writer
+            .flush()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
+            
         self.log_file
             .sync_all()
             .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;
