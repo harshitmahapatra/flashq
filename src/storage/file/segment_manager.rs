@@ -221,9 +221,7 @@ fn log_read_error(error: &StorageError) {
             if !source.to_string().contains("UnexpectedEof")
                 && !source.to_string().contains("failed to fill whole buffer")
             {
-                warn!(
-                    "IO error while reading records, continuing with partial data: {error}"
-                );
+                warn!("IO error while reading records, continuing with partial data: {error}");
             }
         }
         StorageError::DataCorruption { .. } => {
@@ -232,9 +230,7 @@ fn log_read_error(error: &StorageError) {
             );
         }
         _ => {
-            warn!(
-                "Error while reading records, continuing with partial data: {error}"
-            );
+            warn!("Error while reading records, continuing with partial data: {error}");
         }
     }
 }
