@@ -5,6 +5,7 @@ use crate::storage::file::index::{IndexEntry, SparseIndex};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use crate::storage::file::async_io::AsyncFileHandle;
 
 #[derive(Debug, Clone)]
 pub struct IndexingConfig {
@@ -26,9 +27,9 @@ pub struct LogSegment {
     pub max_offset: Option<u64>,
     pub log_path: PathBuf,
     pub index_path: PathBuf,
-    log_file: File,
-    index_file: File,
-    index_writer: BufWriter<File>,
+    log_file: AsyncFileHandle,
+    index_file: AsyncFileHandle,
+    index_writer: BufWriter<File>, // TODO: Replace with async index writing in future phase
     index: SparseIndex,
     bytes_since_last_index: u32,
     records_since_last_index: u32,
@@ -44,20 +45,21 @@ impl LogSegment {
         sync_mode: SyncMode,
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
-        let log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .read(true)
-            .open(&log_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to open log file"))?;
+        // Use AsyncFileHandle for log file with async operations
+        let log_file = AsyncFileHandle::create_append_read(&log_path)
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                "Failed to open log file"
+            ))?;
 
-        let index_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .read(true)
-            .open(&index_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to open index file"))?;
+        // Use AsyncFileHandle for index file with async operations  
+        let index_file = AsyncFileHandle::create_append_read(&index_path)
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                "Failed to open index file"
+            ))?;
 
+        // Keep traditional File for BufWriter (to be migrated in future phase)
         let index_file_for_writer = OpenOptions::new()
             .create(true)
             .append(true)
@@ -122,14 +124,13 @@ impl LogSegment {
     }
 
     fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {
-        let start_position = self
-            .log_file
-            .seek(SeekFrom::End(0))
-            .map_err(|e| StorageError::from_io_error(e, "Failed to seek to end of log file"))?
-            as u32;
-        self.log_file
-            .write_all(serialized_record)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to write record to log file"))?;
+        // Use AsyncFileHandle's append method which handles io_uring internally
+        let start_position = self.log_file.append(serialized_record)
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()), 
+                "Failed to append record to log file"
+            ))? as u32;
+        
         Ok(start_position)
     }
 
@@ -169,16 +170,23 @@ impl LogSegment {
 
     fn sync_files_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
+            // Flush the traditional BufWriter first (will be async in future phase)
             self.index_writer
                 .flush()
                 .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
 
-            self.log_file
-                .sync_all()
-                .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;
-            self.index_file
-                .sync_all()
-                .map_err(|e| StorageError::from_io_error(e, "Failed to sync index file"))?;
+            // Use AsyncFileHandle's sync method for both log and index files
+            self.log_file.sync()
+                .map_err(|e| StorageError::from_io_error(
+                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    "Failed to sync log file"
+                ))?;
+                
+            self.index_file.sync()
+                .map_err(|e| StorageError::from_io_error(
+                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    "Failed to sync index file"
+                ))?;
         }
         Ok(())
     }
@@ -192,12 +200,12 @@ impl LogSegment {
         self.index.find_position_for_offset(offset)
     }
 
-    pub fn size_bytes(&self) -> Result<u64, StorageError> {
-        Ok(self
-            .log_file
-            .metadata()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to get log file metadata"))?
-            .len())
+    pub fn size_bytes(&mut self) -> Result<u64, StorageError> {
+        self.log_file.file_size()
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                "Failed to get log file size"
+            ))
     }
 
     pub fn record_count(&self) -> usize {
@@ -221,12 +229,16 @@ impl LogSegment {
             .flush()
             .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
 
-        self.log_file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync log file"))?;
-        self.index_file
-            .sync_all()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to sync index file"))?;
+        self.log_file.sync()
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                "Failed to sync log file"
+            ))?;
+        self.index_file.sync()
+            .map_err(|e| StorageError::from_io_error(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                "Failed to sync index file"
+            ))?;
         Ok(())
     }
 }

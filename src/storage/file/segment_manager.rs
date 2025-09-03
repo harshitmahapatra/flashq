@@ -72,8 +72,8 @@ impl SegmentManager {
         Ok(collect_records(&mut reader, offset, max_records))
     }
 
-    pub fn should_roll_segment(&self) -> bool {
-        if let Some(active) = &self.active_segment {
+    pub fn should_roll_segment(&mut self) -> bool {
+        if let Some(active) = &mut self.active_segment {
             if let Ok(size) = active.size_bytes() {
                 return size >= self.segment_size_bytes;
             }
