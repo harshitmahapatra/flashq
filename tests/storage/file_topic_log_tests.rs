@@ -148,11 +148,7 @@ fn test_segment_rolling() {
     // Action - Write records across multiple segments
     for i in 0..50 {
         let payload = "x".repeat(1024); // 1KB payload
-        let record = Record::new(
-            Some(format!("key_{i}")), 
-            payload,
-            None
-        );
+        let record = Record::new(Some(format!("key_{i}")), payload, None);
         let offset = log.append(record).unwrap();
         assert_eq!(offset, i);
     }
@@ -170,7 +166,6 @@ fn test_segment_rolling() {
     assert_eq!(middle_records[19].offset, 44);
 }
 
-
 #[test]
 fn test_segment_boundary_crossing() {
     // Setup - Use very small segments to force frequent rolling
@@ -187,11 +182,7 @@ fn test_segment_boundary_crossing() {
     // Action - Write records that will span exactly across segment boundaries
     for i in 0..20 {
         let payload = "x".repeat(1024); // 1KB payload
-        let record = Record::new(
-            Some(format!("key_{i}")), 
-            payload,
-            None
-        );
+        let record = Record::new(Some(format!("key_{i}")), payload, None);
         let offset = log.append(record).unwrap();
         assert_eq!(offset, i);
     }
@@ -202,7 +193,7 @@ fn test_segment_boundary_crossing() {
 
     let all_records = log.get_records_from_offset(0, None).unwrap();
     assert_eq!(all_records.len(), 20);
-    
+
     // Verify records are in correct order
     for (i, record) in all_records.iter().enumerate() {
         assert_eq!(record.offset, i as u64);
