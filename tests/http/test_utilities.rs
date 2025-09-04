@@ -32,6 +32,7 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 
 pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     SERVER_INIT.call_once(|| {
+        let _ = env_logger::try_init();
         info!("Building server binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "--bin", "server"])

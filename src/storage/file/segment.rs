@@ -3,8 +3,8 @@ use crate::error::StorageError;
 use crate::storage::file::async_io::AsyncFileHandle;
 use crate::storage::file::common::{SyncMode, deserialize_record, serialize_record};
 use crate::storage::file::index::{IndexEntry, SparseIndex};
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ pub struct LogSegment {
     pub index_path: PathBuf,
     log_file: AsyncFileHandle,
     index_file: AsyncFileHandle,
-    index_writer: BufWriter<File>, // TODO: Replace with async index writing in future phase
+    index_buffer: Vec<u8>,
     index: SparseIndex,
     bytes_since_last_index: u32,
     records_since_last_index: u32,
@@ -63,15 +63,6 @@ impl LogSegment {
                 )
             })?;
 
-        // Keep traditional File for BufWriter (to be migrated in future phase)
-        let index_file_for_writer = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&index_path)
-            .map_err(|e| StorageError::from_io_error(e, "Failed to open index file for writer"))?;
-
-        let index_writer = BufWriter::new(index_file_for_writer);
-
         Ok(LogSegment {
             base_offset,
             max_offset: None,
@@ -79,7 +70,7 @@ impl LogSegment {
             index_path,
             log_file,
             index_file,
-            index_writer,
+            index_buffer: Vec::new(),
             index: SparseIndex::new(),
             bytes_since_last_index: 0,
             records_since_last_index: 0,
@@ -161,14 +152,12 @@ impl LogSegment {
 
             self.index.add_entry(index_entry.clone());
 
-            self.index.write_entry_to_file(
-                &mut self.index_writer,
-                &index_entry,
-                self.base_offset,
-            )?;
-            self.index_writer
-                .flush()
-                .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
+            let serialized_entry = self.index.serialize_entry(&index_entry, self.base_offset);
+            self.index_buffer.extend_from_slice(&serialized_entry);
+
+            if self.index_buffer.len() >= self.indexing_config.index_interval_bytes as usize {
+                self.flush_index_buffer()?;
+            }
 
             self.bytes_since_last_index = 0;
             self.records_since_last_index = 0;
@@ -178,12 +167,8 @@ impl LogSegment {
 
     fn sync_files_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
-            // Flush the traditional BufWriter first (will be async in future phase)
-            self.index_writer
-                .flush()
-                .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
+            self.flush_index_buffer()?;
 
-            // Use AsyncFileHandle's sync method for both log and index files
             self.log_file.synchronize_file_to_disk().map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
@@ -204,6 +189,24 @@ impl LogSegment {
     fn should_add_index_entry(&self) -> bool {
         self.bytes_since_last_index >= self.indexing_config.index_interval_bytes
             || self.records_since_last_index >= self.indexing_config.index_interval_records
+    }
+
+    fn flush_index_buffer(&mut self) -> Result<(), StorageError> {
+        if self.index_buffer.is_empty() {
+            return Ok(());
+        }
+
+        self.index_file
+            .append_data_to_end_of_file(&self.index_buffer)
+            .map_err(|e| {
+                StorageError::from_io_error(
+                    std::io::Error::other(e.to_string()),
+                    "Failed to write to index file",
+                )
+            })?;
+
+        self.index_buffer.clear();
+        Ok(())
     }
 
     pub fn find_position_for_offset(&self, offset: u64) -> Option<u32> {
@@ -236,9 +239,7 @@ impl LogSegment {
     }
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
-        self.index_writer
-            .flush()
-            .map_err(|e| StorageError::from_io_error(e, "Failed to flush index writer"))?;
+        self.flush_index_buffer()?;
 
         self.log_file.synchronize_file_to_disk().map_err(|e| {
             StorageError::from_io_error(
