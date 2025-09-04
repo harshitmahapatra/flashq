@@ -1,324 +1,566 @@
 use crate::error::{FlashQError, StorageError};
-use io_uring::{opcode, IoUring};
+use io_uring::{IoUring, opcode};
 use log::{debug, info, warn};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write, BufReader};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-/// Global io_uring availability detection result
-static IO_URING_AVAILABLE: OnceLock<bool> = OnceLock::new();
+static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
 
-/// IoRing executor with global singleton pattern and runtime detection
-pub struct IoRingExecutor {
-    ring: IoUring,
-    runtime: Runtime,
+const INITIAL_RING_ENTRIES: u32 = 32;
+const SINGLE_OPERATION_RING_ENTRIES: u32 = 1;
+const NOP_OPERATION_USER_DATA: u64 = 1;
+const WRITE_OPERATION_USER_DATA: u64 = 0x01;
+const READ_OPERATION_USER_DATA: u64 = 0x02;
+const APPEND_OPERATION_USER_DATA: u64 = 0x03;
+const SYNC_OPERATION_USER_DATA: u64 = 0x04;
+
+pub struct IoRingExecutorWithRuntime {
+    tokio_runtime: Runtime,
 }
 
-impl IoRingExecutor {
-    /// Check if io_uring is available on this system
-    pub fn is_available() -> bool {
-        *IO_URING_AVAILABLE.get_or_init(|| Self::detect_io_uring())
+impl IoRingExecutorWithRuntime {
+    pub fn is_available_on_current_system() -> bool {
+        *GLOBAL_IO_URING_AVAILABILITY_STATUS.get_or_init(Self::detect_io_uring_functionality)
     }
 
-    /// Detect if io_uring is available on this system
-    fn detect_io_uring() -> bool {
-        match IoUring::new(32) {
-            Ok(mut ring) => {
-                // Test with a no-op operation
-                match Self::test_nop_operation(&mut ring) {
-                    Ok(_) => {
-                        info!("io_uring detected and functional");
-                        true
-                    }
-                    Err(e) => {
-                        warn!("io_uring detected but not functional: {}", e);
-                        false
-                    }
+    fn detect_io_uring_functionality() -> bool {
+        match IoUring::new(INITIAL_RING_ENTRIES) {
+            Ok(mut new_ring) => match Self::validate_io_uring_with_nop_operation(&mut new_ring) {
+                Ok(_) => {
+                    info!("io_uring detected and functional");
+                    true
                 }
-            }
-            Err(e) => {
-                info!("io_uring not available: {}", e);
+                Err(validation_error) => {
+                    warn!("io_uring detected but not functional: {validation_error}");
+                    false
+                }
+            },
+            Err(creation_error) => {
+                info!("io_uring not available: {creation_error}");
                 false
             }
         }
     }
 
-    /// Test io_uring functionality with a no-op operation
-    fn test_nop_operation(ring: &mut IoUring) -> Result<(), Box<dyn std::error::Error>> {
-        let nop_e = opcode::Nop::new().build().user_data(1);
-        
+    fn validate_io_uring_with_nop_operation(
+        ring: &mut IoUring,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let nop_operation_entry = opcode::Nop::new()
+            .build()
+            .user_data(NOP_OPERATION_USER_DATA);
+
         unsafe {
-            ring.submission().push(&nop_e)?;
+            ring.submission().push(&nop_operation_entry)?;
         }
-        
+
         ring.submit()?;
-        
-        let cq = ring.completion();
-        for cqe in cq {
-            if cqe.user_data() == 1 {
+
+        let completion_queue = ring.completion();
+        for completion_queue_entry in completion_queue {
+            if completion_queue_entry.user_data() == NOP_OPERATION_USER_DATA {
                 return Ok(());
             }
         }
-        
+
         Err("No-op operation failed".into())
     }
 
-    /// Try to create an IoRing executor
-    fn try_create() -> Result<IoRingExecutor, FlashQError> {
-        let ring = IoUring::new(256)
-            .map_err(|e| FlashQError::Storage(StorageError::WriteFailed {
-                context: "io_uring creation".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
-            }))?;
 
-        let runtime = Runtime::new()
-            .map_err(|e| FlashQError::Storage(StorageError::WriteFailed {
-                context: "tokio runtime creation".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
-            }))?;
-
-        Ok(IoRingExecutor { ring, runtime })
-    }
-
-    /// Execute an async operation synchronously
-    pub fn execute_sync<F, R>(&mut self, future: F) -> R
+    pub fn execute_future_synchronously<F, R>(&mut self, future: F) -> R
     where
         F: std::future::Future<Output = R> + Send + 'static,
         R: Send + 'static,
     {
-        self.runtime.block_on(future)
+        self.tokio_runtime.block_on(future)
     }
 }
 
-/// Unified file handle abstraction supporting both io_uring and standard I/O
-pub struct AsyncFileHandle {
-    file: File,
-    path: std::path::PathBuf,
-    use_io_uring: bool,
+pub struct UnifiedAsyncFileHandle {
+    underlying_file: File,
+    should_prefer_io_uring: bool,
 }
 
-impl AsyncFileHandle {
-    /// Create a file handle with create/append/read permissions
-    pub fn create_append_read<P: AsRef<Path>>(path: P) -> Result<Self, FlashQError> {
-        let path = path.as_ref().to_path_buf();
-        let file = OpenOptions::new()
+impl UnifiedAsyncFileHandle {
+    pub fn create_with_append_and_read_permissions<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<Self, FlashQError> {
+        let canonical_file_path = path.as_ref().to_path_buf();
+        let opened_file = OpenOptions::new()
             .create(true)
             .append(true)
             .read(true)
-            .open(&path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, &format!("opening file {:?}", path))))?;
+            .open(&canonical_file_path)
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("opening file {canonical_file_path:?}"),
+                ))
+            })?;
 
-        let use_io_uring = IoRingExecutor::is_available();
+        let io_uring_availability = IoRingExecutorWithRuntime::is_available_on_current_system();
 
-        debug!("Created AsyncFileHandle for {:?}, io_uring: {}", path, use_io_uring);
+        debug!(
+            "Created AsyncFileHandle for {canonical_file_path:?}, io_uring: {io_uring_availability}"
+        );
 
-        Ok(AsyncFileHandle {
-            file,
-            path,
-            use_io_uring,
+        Ok(UnifiedAsyncFileHandle {
+            underlying_file: opened_file,
+            should_prefer_io_uring: io_uring_availability,
         })
     }
 
-    /// Create a file handle with create/write/truncate permissions (for consumer groups)
-    pub fn create_write_truncate<P: AsRef<Path>>(path: P) -> Result<Self, FlashQError> {
-        let path = path.as_ref().to_path_buf();
-        let file = OpenOptions::new()
+    pub fn create_with_write_truncate_permissions<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<Self, FlashQError> {
+        let canonical_file_path = path.as_ref().to_path_buf();
+        let opened_file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(&path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, &format!("opening file {:?}", path))))?;
+            .open(&canonical_file_path)
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("opening file {canonical_file_path:?}"),
+                ))
+            })?;
 
-        let use_io_uring = IoRingExecutor::is_available();
+        let io_uring_availability = IoRingExecutorWithRuntime::is_available_on_current_system();
 
-        Ok(AsyncFileHandle {
-            file,
-            path,
-            use_io_uring,
+        Ok(UnifiedAsyncFileHandle {
+            underlying_file: opened_file,
+            should_prefer_io_uring: io_uring_availability,
         })
     }
 
-    /// Create a file handle with read-only permissions
-    pub fn open_read<P: AsRef<Path>>(path: P) -> Result<Self, FlashQError> {
-        let path = path.as_ref().to_path_buf();
-        let file = File::open(&path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, &format!("opening file {:?}", path))))?;
+    pub fn open_with_read_only_permissions<P: AsRef<Path>>(path: P) -> Result<Self, FlashQError> {
+        let canonical_file_path = path.as_ref().to_path_buf();
+        let opened_file = File::open(&canonical_file_path).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                &format!("opening file {canonical_file_path:?}"),
+            ))
+        })?;
 
-        let use_io_uring = IoRingExecutor::is_available();
+        let io_uring_availability = IoRingExecutorWithRuntime::is_available_on_current_system();
 
-        Ok(AsyncFileHandle {
-            file,
-            path,
-            use_io_uring,
+        Ok(UnifiedAsyncFileHandle {
+            underlying_file: opened_file,
+            should_prefer_io_uring: io_uring_availability,
         })
     }
 
-    /// Write data at a specific offset (positional write)
-    pub fn write_at(&mut self, data: &[u8], offset: u64) -> Result<usize, FlashQError> {
-        if self.use_io_uring {
-            self.write_at_io_uring(data, offset)
+    pub fn write_data_at_specific_offset(
+        &mut self,
+        data: &[u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        if self.should_prefer_io_uring {
+            self.write_at_offset_using_io_uring(data, offset)
         } else {
-            self.write_at_std(data, offset)
+            self.write_at_offset_using_standard_io(data, offset)
         }
     }
 
-    /// Read data at a specific offset (positional read)
-    pub fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, FlashQError> {
-        if self.use_io_uring {
-            self.read_at_io_uring(buf, offset)
+    pub fn read_data_at_specific_offset(
+        &mut self,
+        buf: &mut [u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        if self.should_prefer_io_uring {
+            self.read_at_offset_using_io_uring(buf, offset)
         } else {
-            self.read_at_std(buf, offset)
+            self.read_at_offset_using_standard_io(buf, offset)
         }
     }
 
-    /// Append data to the end of the file
-    pub fn append(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        if self.use_io_uring {
-            self.append_io_uring(data)
+    pub fn append_data_to_end_of_file(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
+        if self.should_prefer_io_uring {
+            self.append_data_using_io_uring(data)
         } else {
-            self.append_std(data)
+            self.append_data_using_standard_io(data)
         }
     }
 
-    /// Synchronize file to disk (fsync)
-    pub fn sync(&mut self) -> Result<(), FlashQError> {
-        if self.use_io_uring {
-            self.sync_io_uring()
+    pub fn synchronize_file_to_disk(&mut self) -> Result<(), FlashQError> {
+        if self.should_prefer_io_uring {
+            self.sync_file_using_io_uring()
         } else {
-            self.sync_std()
+            self.sync_file_using_standard_io()
         }
     }
 
-    /// Get current file position (for append operations)
-    pub fn seek_end(&mut self) -> Result<u64, FlashQError> {
-        self.file
+    pub fn seek_to_end_and_get_position(&mut self) -> Result<u64, FlashQError> {
+        self.underlying_file
             .seek(SeekFrom::End(0))
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "seeking to end")))
     }
 
-    /// Get file size
-    pub fn file_size(&mut self) -> Result<u64, FlashQError> {
-        let metadata = self.file
-            .metadata()
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "getting file metadata")))?;
-        Ok(metadata.len())
+    pub fn get_current_file_size_in_bytes(&mut self) -> Result<u64, FlashQError> {
+        let file_metadata = self.underlying_file.metadata().map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(e, "getting file metadata"))
+        })?;
+        Ok(file_metadata.len())
     }
 
-    /// Create a buffered reader for sequential reading
-    pub fn buffered_reader(&mut self) -> BufReader<&mut File> {
-        BufReader::new(&mut self.file)
+    pub fn create_buffered_reader_for_sequential_access(&mut self) -> BufReader<&mut File> {
+        BufReader::new(&mut self.underlying_file)
     }
 
-    // Standard I/O implementations
-    fn write_at_std(&mut self, data: &[u8], offset: u64) -> Result<usize, FlashQError> {
-        self.file.seek(SeekFrom::Start(offset))
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, &format!("seeking to offset {}", offset))))?;
-        
-        self.file.write_all(data)
+    fn write_at_offset_using_standard_io(
+        &mut self,
+        data: &[u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        self.underlying_file
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("seeking to offset {offset}"),
+                ))
+            })?;
+
+        self.underlying_file
+            .write_all(data)
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "writing data")))?;
-        
+
         Ok(data.len())
     }
 
-    fn read_at_std(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, FlashQError> {
-        self.file.seek(SeekFrom::Start(offset))
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, &format!("seeking to offset {}", offset))))?;
-        
-        self.file.read(buf)
+    fn read_at_offset_using_standard_io(
+        &mut self,
+        buf: &mut [u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        self.underlying_file
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("seeking to offset {offset}"),
+                ))
+            })?;
+
+        self.underlying_file
+            .read(buf)
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "reading data")))
     }
 
-    fn append_std(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        self.file.seek(SeekFrom::End(0))
+    fn append_data_using_standard_io(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
+        self.underlying_file
+            .seek(SeekFrom::End(0))
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "seeking to end")))?;
-        
-        self.file.write_all(data)
+
+        self.underlying_file
+            .write_all(data)
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "appending data")))?;
-        
+
         Ok(data.len())
     }
 
-    fn sync_std(&mut self) -> Result<(), FlashQError> {
-        self.file.sync_all()
+    fn sync_file_using_standard_io(&mut self) -> Result<(), FlashQError> {
+        self.underlying_file
+            .sync_all()
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "syncing file")))
     }
 
-    // io_uring implementations (placeholder - will be implemented)
-    fn write_at_io_uring(&mut self, data: &[u8], offset: u64) -> Result<usize, FlashQError> {
-        // TODO: Implement io_uring write
-        // For now, fallback to standard I/O
-        warn!("io_uring write not yet implemented, falling back to standard I/O");
-        self.write_at_std(data, offset)
+    fn write_at_offset_using_io_uring(
+        &mut self,
+        data: &[u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        let mut single_operation_ring =
+            IoUring::new(SINGLE_OPERATION_RING_ENTRIES).map_err(|e| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring creation for write".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                })
+            })?;
+
+        let file_descriptor = self.underlying_file.as_raw_fd();
+
+        let positional_write_operation = opcode::Write::new(
+            io_uring::types::Fd(file_descriptor),
+            data.as_ptr(),
+            data.len() as u32,
+        )
+        .offset(offset)
+        .build()
+        .user_data(WRITE_OPERATION_USER_DATA);
+
+        unsafe {
+            single_operation_ring
+                .submission()
+                .push(&positional_write_operation)
+                .map_err(|e| {
+                    FlashQError::Storage(StorageError::WriteFailed {
+                        context: "io_uring submission push".to_string(),
+                        source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                    })
+                })?;
+        }
+
+        single_operation_ring.submit_and_wait(1).map_err(|e| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "io_uring submit_and_wait".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+            })
+        })?;
+
+        let completion_queue_entry =
+            single_operation_ring.completion().next().ok_or_else(|| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring completion queue empty".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(
+                        "No completion entry".to_string(),
+                    )),
+                })
+            })?;
+
+        let operation_result = completion_queue_entry.result();
+        if operation_result < 0 {
+            return Err(FlashQError::Storage(StorageError::WriteFailed {
+                context: format!("io_uring write failed with code: {operation_result}"),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "io_uring error code: {operation_result}"
+                ))),
+            }));
+        }
+
+        debug!(
+            "io_uring write completed: {operation_result} bytes at offset {offset}"
+        );
+        Ok(operation_result as usize)
     }
 
-    fn read_at_io_uring(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, FlashQError> {
-        // TODO: Implement io_uring read
-        // For now, fallback to standard I/O
-        warn!("io_uring read not yet implemented, falling back to standard I/O");
-        self.read_at_std(buf, offset)
+    fn read_at_offset_using_io_uring(
+        &mut self,
+        buf: &mut [u8],
+        offset: u64,
+    ) -> Result<usize, FlashQError> {
+        let mut single_operation_ring =
+            IoUring::new(SINGLE_OPERATION_RING_ENTRIES).map_err(|e| {
+                FlashQError::Storage(StorageError::ReadFailed {
+                    context: "io_uring creation for read".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                })
+            })?;
+
+        let file_descriptor = self.underlying_file.as_raw_fd();
+
+        let positional_read_operation = opcode::Read::new(
+            io_uring::types::Fd(file_descriptor),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+        )
+        .offset(offset)
+        .build()
+        .user_data(READ_OPERATION_USER_DATA);
+
+        unsafe {
+            single_operation_ring
+                .submission()
+                .push(&positional_read_operation)
+                .map_err(|e| {
+                    FlashQError::Storage(StorageError::ReadFailed {
+                        context: "io_uring submission push".to_string(),
+                        source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                    })
+                })?;
+        }
+
+        single_operation_ring.submit_and_wait(1).map_err(|e| {
+            FlashQError::Storage(StorageError::ReadFailed {
+                context: "io_uring submit_and_wait".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+            })
+        })?;
+
+        let completion_queue_entry =
+            single_operation_ring.completion().next().ok_or_else(|| {
+                FlashQError::Storage(StorageError::ReadFailed {
+                    context: "io_uring completion queue empty".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(
+                        "No completion entry".to_string(),
+                    )),
+                })
+            })?;
+
+        let operation_result = completion_queue_entry.result();
+        if operation_result < 0 {
+            return Err(FlashQError::Storage(StorageError::ReadFailed {
+                context: format!("io_uring read failed with code: {operation_result}"),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "io_uring error code: {operation_result}"
+                ))),
+            }));
+        }
+
+        debug!(
+            "io_uring read completed: {operation_result} bytes at offset {offset}"
+        );
+        Ok(operation_result as usize)
     }
 
-    fn append_io_uring(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        // TODO: Implement io_uring append
-        // For now, fallback to standard I/O
-        warn!("io_uring append not yet implemented, falling back to standard I/O");
-        self.append_std(data)
+    fn append_data_using_io_uring(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
+        let mut single_operation_ring =
+            IoUring::new(SINGLE_OPERATION_RING_ENTRIES).map_err(|e| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring creation for append".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                })
+            })?;
+
+        let file_descriptor = self.underlying_file.as_raw_fd();
+
+        let current_file_size_for_append_offset = self.get_current_file_size_in_bytes()?;
+
+        let append_write_operation = opcode::Write::new(
+            io_uring::types::Fd(file_descriptor),
+            data.as_ptr(),
+            data.len() as u32,
+        )
+        .offset(current_file_size_for_append_offset)
+        .build()
+        .user_data(APPEND_OPERATION_USER_DATA);
+
+        unsafe {
+            single_operation_ring
+                .submission()
+                .push(&append_write_operation)
+                .map_err(|e| {
+                    FlashQError::Storage(StorageError::WriteFailed {
+                        context: "io_uring submission push".to_string(),
+                        source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                    })
+                })?;
+        }
+
+        single_operation_ring.submit_and_wait(1).map_err(|e| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "io_uring submit_and_wait".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+            })
+        })?;
+
+        let completion_queue_entry =
+            single_operation_ring.completion().next().ok_or_else(|| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring completion queue empty".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(
+                        "No completion entry".to_string(),
+                    )),
+                })
+            })?;
+
+        let operation_result = completion_queue_entry.result();
+        if operation_result < 0 {
+            return Err(FlashQError::Storage(StorageError::WriteFailed {
+                context: format!("io_uring append failed with code: {operation_result}"),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "io_uring error code: {operation_result}"
+                ))),
+            }));
+        }
+
+        debug!(
+            "io_uring append completed: {operation_result} bytes at end of file"
+        );
+        Ok(operation_result as usize)
     }
 
-    fn sync_io_uring(&mut self) -> Result<(), FlashQError> {
-        // TODO: Implement io_uring fsync
-        // For now, fallback to standard I/O
-        warn!("io_uring sync not yet implemented, falling back to standard I/O");
-        self.sync_std()
+    fn sync_file_using_io_uring(&mut self) -> Result<(), FlashQError> {
+        let mut single_operation_ring =
+            IoUring::new(SINGLE_OPERATION_RING_ENTRIES).map_err(|e| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring creation for sync".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                })
+            })?;
+
+        let file_descriptor = self.underlying_file.as_raw_fd();
+
+        let file_sync_operation = opcode::Fsync::new(io_uring::types::Fd(file_descriptor))
+            .build()
+            .user_data(SYNC_OPERATION_USER_DATA);
+
+        unsafe {
+            single_operation_ring
+                .submission()
+                .push(&file_sync_operation)
+                .map_err(|e| {
+                    FlashQError::Storage(StorageError::WriteFailed {
+                        context: "io_uring submission push".to_string(),
+                        source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                    })
+                })?;
+        }
+
+        single_operation_ring.submit_and_wait(1).map_err(|e| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "io_uring submit_and_wait".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+            })
+        })?;
+
+        let completion_queue_entry =
+            single_operation_ring.completion().next().ok_or_else(|| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring completion queue empty".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(
+                        "No completion entry".to_string(),
+                    )),
+                })
+            })?;
+
+        let operation_result = completion_queue_entry.result();
+        if operation_result < 0 {
+            return Err(FlashQError::Storage(StorageError::WriteFailed {
+                context: format!("io_uring fsync failed with code: {operation_result}"),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "io_uring error code: {operation_result}"
+                ))),
+            }));
+        }
+
+        debug!("io_uring fsync completed successfully");
+        Ok(())
     }
 }
 
-impl AsRawFd for AsyncFileHandle {
+impl AsRawFd for UnifiedAsyncFileHandle {
     fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+        self.underlying_file.as_raw_fd()
     }
 }
+
+pub type AsyncFileHandle = UnifiedAsyncFileHandle;
+pub type IoRingExecutor = IoRingExecutorWithRuntime;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::tempdir;
 
     #[test]
-    fn test_io_uring_detection() {
-        // Test that detection doesn't panic
-        let available = IoRingExecutor::detect_io_uring();
-        println!("io_uring available: {}", available);
+    fn test_io_uring_availability_detection_unit() {
+        let availability_status = IoRingExecutor::is_available_on_current_system();
+        println!("io_uring available: {availability_status}");
     }
 
     #[test]
-    fn test_async_file_handle_basic_operations() {
-        let temp_dir = tempdir().unwrap();
-        let test_file = temp_dir.path().join("test.log");
-
-        // Test create_append_read
-        let mut handle = AsyncFileHandle::create_append_read(&test_file).unwrap();
-
-        // Test append
-        let data = b"Hello, World!";
-        let written = handle.append(data).unwrap();
-        assert_eq!(written, data.len());
-
-        // Test sync
-        handle.sync().unwrap();
-
-        // Test file size
-        let size = handle.file_size().unwrap();
-        assert_eq!(size, data.len() as u64);
-
-        // Test read_at
-        let mut buf = vec![0u8; data.len()];
-        let read_count = handle.read_at(&mut buf, 0).unwrap();
-        assert_eq!(read_count, data.len());
-        assert_eq!(&buf[..read_count], data);
+    fn test_type_aliases_work() {
+        assert_eq!(
+            std::any::type_name::<AsyncFileHandle>(),
+            std::any::type_name::<UnifiedAsyncFileHandle>()
+        );
+        assert_eq!(
+            std::any::type_name::<IoRingExecutor>(),
+            std::any::type_name::<IoRingExecutorWithRuntime>()
+        );
     }
 }

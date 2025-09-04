@@ -1,7 +1,5 @@
 use std::{
     collections::HashMap,
-    fs::OpenOptions,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -10,10 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{
-        SyncMode,
-        common::{ensure_directory_exists, sync_file_if_needed},
-    },
+    file::{SyncMode, async_io::AsyncFileHandle, common::ensure_directory_exists},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +63,24 @@ impl FileConsumerGroup {
             return Ok(HashMap::new());
         }
 
-        let contents = std::fs::read_to_string(file_path)?;
+        let mut file_handle = AsyncFileHandle::open_with_read_only_permissions(file_path)
+            .map_err(std::io::Error::other)?;
+        let file_size = file_handle
+            .get_current_file_size_in_bytes()
+            .map_err(std::io::Error::other)?;
+
+        if file_size == 0 {
+            return Ok(HashMap::new());
+        }
+
+        let mut buffer = vec![0u8; file_size as usize];
+        file_handle
+            .read_data_at_specific_offset(&mut buffer, 0)
+            .map_err(std::io::Error::other)?;
+
+        let contents = String::from_utf8(buffer)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
         if contents.trim().is_empty() {
             return Ok(HashMap::new());
         }
@@ -95,14 +107,18 @@ impl FileConsumerGroup {
         let json_data = serde_json::to_string_pretty(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.file_path)?;
+        let mut file_handle =
+            AsyncFileHandle::create_with_write_truncate_permissions(&self.file_path)
+                .map_err(std::io::Error::other)?;
+        file_handle
+            .write_data_at_specific_offset(json_data.as_bytes(), 0)
+            .map_err(std::io::Error::other)?;
 
-        file.write_all(json_data.as_bytes())?;
-        sync_file_if_needed(&file, self.sync_mode)?;
+        if self.sync_mode == SyncMode::Immediate {
+            file_handle
+                .synchronize_file_to_disk()
+                .map_err(std::io::Error::other)?;
+        }
 
         Ok(())
     }

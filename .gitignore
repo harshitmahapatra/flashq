@@ -28,9 +28,10 @@ CLAUDE.local.md
 .serena
 
 # Added by cargo
-
 /target
 
 # Data dir for integration tests
-
 /data
+
+# Logs
+/logs
