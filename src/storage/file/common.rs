@@ -13,6 +13,18 @@ pub enum SyncMode {
     Periodic,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileIoMode {
+    IoUring,
+    Std,
+}
+
+impl Default for FileIoMode {
+    fn default() -> Self {
+        FileIoMode::Std
+    }
+}
+
 // ================================================================================================
 // FILE I/O UTILITIES
 // ================================================================================================

@@ -45,6 +45,7 @@ fn test_disk_full_during_append() {
     let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )
@@ -73,6 +74,7 @@ fn test_insufficient_space_recovery() {
     let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )
@@ -110,6 +112,7 @@ fn test_permission_denied_directory_creation() {
     let result = FileTopicLog::new(
         "test_topic",
         SyncMode::Immediate,
+        Default::default(),
         &readonly_dir,
         config.segment_size,
     );
@@ -148,6 +151,7 @@ fn test_permission_denied_file_write() {
     let result = FileTopicLog::new(
         &config.topic_name,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     );
@@ -185,6 +189,7 @@ fn test_file_read_failure() {
     let mut log = FileTopicLog::new(
         &config.topic_name,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )
@@ -225,6 +230,7 @@ fn test_partial_record_corruption() {
     let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )
@@ -265,6 +271,7 @@ fn test_error_state_recovery() {
     let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )

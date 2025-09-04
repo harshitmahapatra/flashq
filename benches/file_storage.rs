@@ -28,6 +28,7 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let storage_backend = StorageBackend::new_file_with_path(
         SyncMode::None, // Use None for best benchmark performance
+        Default::default(),
         temp_dir.path(),
     )
     .expect("Failed to create file storage backend");

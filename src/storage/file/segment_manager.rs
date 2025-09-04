@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, io::BufReader};
 
 use crate::RecordWithOffset;
 use crate::error::StorageError;
-use crate::storage::file::common::deserialize_record;
+use crate::storage::file::common::{deserialize_record, FileIoMode};
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
 use log::warn;
@@ -17,6 +17,7 @@ pub struct SegmentManager {
     base_dir: PathBuf,
     segment_size_bytes: u64,
     sync_mode: SyncMode,
+    io_mode: FileIoMode,
     indexing_config: IndexingConfig,
 }
 
@@ -25,6 +26,7 @@ impl SegmentManager {
         base_dir: PathBuf,
         segment_size_bytes: u64,
         sync_mode: SyncMode,
+        io_mode: FileIoMode,
         indexing_config: IndexingConfig,
     ) -> Self {
         Self {
@@ -33,6 +35,7 @@ impl SegmentManager {
             base_dir,
             segment_size_bytes,
             sync_mode,
+            io_mode,
             indexing_config,
         }
     }
@@ -154,6 +157,7 @@ impl SegmentManager {
             log_path,
             index_path,
             self.sync_mode,
+            self.io_mode,
             self.indexing_config.clone(),
         )?;
 
@@ -192,6 +196,7 @@ impl SegmentManager {
                     log_path,
                     index_path,
                     self.sync_mode,
+                    self.io_mode,
                     self.indexing_config.clone(),
                 )?;
                 self.segments.insert(base_offset, segment);

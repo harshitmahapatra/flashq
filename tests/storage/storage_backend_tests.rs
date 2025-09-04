@@ -10,7 +10,12 @@ fn test_memory_vs_file_basic_operations() {
 
     let memory_queue = FlashQ::with_storage_backend(StorageBackend::new_memory());
     let file_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
+        StorageBackend::new_file_with_path(
+            config.sync_mode,
+            Default::default(),
+            config.temp_dir_path(),
+        )
+        .unwrap(),
     );
     let test_record = Record::new(Some("test_key".to_string()), "test_value".to_string(), None);
 
@@ -39,7 +44,12 @@ fn test_consumer_group_compatibility() {
 
     let memory_queue = FlashQ::with_storage_backend(StorageBackend::new_memory());
     let file_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
+        StorageBackend::new_file_with_path(
+            config.sync_mode,
+            Default::default(),
+            config.temp_dir_path(),
+        )
+        .unwrap(),
     );
 
     for i in 0..3 {
@@ -81,7 +91,12 @@ fn test_sync_mode_behavior() {
 
     for (i, sync_mode) in sync_modes.iter().enumerate() {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(*sync_mode, config.temp_dir_path()).unwrap(),
+            StorageBackend::new_file_with_path(
+                *sync_mode,
+                Default::default(),
+                config.temp_dir_path(),
+            )
+            .unwrap(),
         );
         let mode_topic = format!("{topic_name}_{i}");
         let record = Record::new(None, format!("sync_test_{sync_mode:?}"), None);
@@ -101,8 +116,12 @@ fn test_file_storage_vs_memory_storage_interface() {
     let group_id = create_test_consumer_group("interface");
 
     let memory_backend = StorageBackend::new_memory();
-    let file_backend =
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap();
+    let file_backend = StorageBackend::new_file_with_path(
+        config.sync_mode,
+        Default::default(),
+        config.temp_dir_path(),
+    )
+    .unwrap();
 
     let memory_group = memory_backend.create_consumer_group(&group_id).unwrap();
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();

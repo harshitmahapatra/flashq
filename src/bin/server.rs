@@ -58,6 +58,7 @@ async fn main() {
                 let data_dir = std::path::PathBuf::from(&args[i]);
                 storage_backend = match flashq::storage::StorageBackend::new_file_with_path(
                     flashq::storage::file::SyncMode::Immediate,
+                    flashq::storage::file::common::FileIoMode::default(),
                     data_dir,
                 ) {
                     Ok(backend) => backend,

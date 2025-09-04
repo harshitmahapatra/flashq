@@ -1,5 +1,6 @@
 use crate::error::{FlashQError, StorageError};
-use io_uring::{IoUring, opcode};
+use crate::storage::file::common::FileIoMode;
+use io_uring::{opcode, IoUring};
 use log::{debug, info, warn};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
@@ -114,6 +115,7 @@ pub struct UnifiedAsyncFileHandle {
 impl UnifiedAsyncFileHandle {
     pub fn create_with_append_and_read_permissions<P: AsRef<Path>>(
         path: P,
+        io_mode: FileIoMode,
     ) -> Result<Self, FlashQError> {
         let opened_file = OpenOptions::new()
             .create(true)
@@ -122,11 +124,12 @@ impl UnifiedAsyncFileHandle {
             .open(&path)
             .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref())
+        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
     }
 
     pub fn create_with_write_truncate_permissions<P: AsRef<Path>>(
         path: P,
+        io_mode: FileIoMode,
     ) -> Result<Self, FlashQError> {
         let opened_file = OpenOptions::new()
             .create(true)
@@ -135,14 +138,17 @@ impl UnifiedAsyncFileHandle {
             .open(&path)
             .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref())
+        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
     }
 
-    pub fn open_with_read_only_permissions<P: AsRef<Path>>(path: P) -> Result<Self, FlashQError> {
-        let opened_file = File::open(&path)
-            .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
+    pub fn open_with_read_only_permissions<P: AsRef<Path>>(
+        path: P,
+        io_mode: FileIoMode,
+    ) -> Result<Self, FlashQError> {
+        let opened_file =
+            File::open(&path).map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref())
+        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
     }
 
     fn create_file_error(error: std::io::Error, path: &Path, context: &str) -> FlashQError {
@@ -152,11 +158,19 @@ impl UnifiedAsyncFileHandle {
         ))
     }
 
-    fn create_handle_with_debug_logging(file: File, path: &Path) -> Result<Self, FlashQError> {
-        let io_uring_availability = IoRingExecutorWithRuntime::is_available_on_current_system();
+    fn create_handle_with_debug_logging(
+        file: File,
+        path: &Path,
+        io_mode: FileIoMode,
+    ) -> Result<Self, FlashQError> {
+        let use_uring = if io_mode == FileIoMode::IoUring {
+            IoRingExecutorWithRuntime::is_available_on_current_system()
+        } else {
+            false
+        };
 
         // Create shared IoUring instance if io_uring is available
-        let shared_io_ring = if io_uring_availability {
+        let shared_io_ring = if use_uring {
             match IoUring::new(INITIAL_RING_ENTRIES) {
                 Ok(ring) => {
                     debug!(
@@ -176,13 +190,13 @@ impl UnifiedAsyncFileHandle {
         };
 
         debug!(
-            "Created AsyncFileHandle for {path:?}, io_uring: {io_uring_availability}, shared_ring: {}",
+            "Created AsyncFileHandle for {path:?}, io_uring: {use_uring}, shared_ring: {}",
             shared_io_ring.is_some()
         );
 
         Ok(UnifiedAsyncFileHandle {
             underlying_file: file,
-            should_prefer_io_uring: io_uring_availability && shared_io_ring.is_some(),
+            should_prefer_io_uring: use_uring && shared_io_ring.is_some(),
             shared_io_ring,
         })
     }

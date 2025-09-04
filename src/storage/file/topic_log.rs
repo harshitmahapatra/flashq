@@ -1,5 +1,5 @@
 use crate::error::StorageError;
-use crate::storage::file::common::ensure_directory_exists;
+use crate::storage::file::common::{ensure_directory_exists, FileIoMode};
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};
@@ -16,6 +16,7 @@ impl FileTopicLog {
     pub fn new<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
+        io_mode: FileIoMode,
         data_dir: P,
         segment_size_bytes: u64,
     ) -> Result<Self, std::io::Error> {
@@ -30,6 +31,7 @@ impl FileTopicLog {
             base_dir.clone(),
             segment_size_bytes,
             sync_mode,
+            io_mode,
             indexing_config.clone(),
         );
 

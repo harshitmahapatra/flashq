@@ -12,6 +12,7 @@ fn test_file_topic_log_recovery() {
         let mut log = FileTopicLog::new(
             &topic_name,
             config.sync_mode,
+            Default::default(),
             config.temp_dir_path(),
             config.segment_size,
         )
@@ -26,6 +27,7 @@ fn test_file_topic_log_recovery() {
     let recovered_log = FileTopicLog::new(
         &topic_name,
         config.sync_mode,
+        Default::default(),
         config.temp_dir_path(),
         config.segment_size,
     )
@@ -49,7 +51,12 @@ fn test_flashq_persistence_across_instances() {
 
     {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+            StorageBackend::new_file_with_path(
+                config.sync_mode,
+                Default::default(),
+                temp_dir.clone(),
+            )
+            .unwrap(),
         );
 
         queue
@@ -66,7 +73,8 @@ fn test_flashq_persistence_across_instances() {
             .unwrap();
     }
     let new_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
+            .unwrap(),
     );
 
     let records = new_queue.poll_records(&topic_name, None).unwrap();
@@ -86,7 +94,12 @@ fn test_offset_continuation_after_recovery() {
 
     {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+            StorageBackend::new_file_with_path(
+                config.sync_mode,
+                Default::default(),
+                temp_dir.clone(),
+            )
+            .unwrap(),
         );
         queue
             .post_record(
@@ -97,7 +110,8 @@ fn test_offset_continuation_after_recovery() {
     }
 
     let new_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
+            .unwrap(),
     );
 
     let new_offset = new_queue
@@ -121,7 +135,12 @@ fn test_empty_data_directory_recovery() {
     let config = TestConfig::new("empty_recovery");
 
     let queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
+        StorageBackend::new_file_with_path(
+            config.sync_mode,
+            Default::default(),
+            config.temp_dir_path(),
+        )
+        .unwrap(),
     );
 
     let poll_result = queue.poll_records(&config.topic_name, None);

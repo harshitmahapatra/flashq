@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{SyncMode, async_io::AsyncFileHandle, common::ensure_directory_exists},
+    file::{SyncMode, async_io::AsyncFileHandle, common::{ensure_directory_exists, FileIoMode}},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,30 +22,33 @@ pub struct FileConsumerGroup {
     topic_offsets: HashMap<String, u64>,
     file_path: PathBuf,
     sync_mode: SyncMode,
+    io_mode: FileIoMode,
 }
 
 impl FileConsumerGroup {
     pub fn new<P: AsRef<Path>>(
         group_id: &str,
         sync_mode: SyncMode,
+        io_mode: FileIoMode,
         data_dir: P,
     ) -> Result<Self, std::io::Error> {
         let file_path = Self::setup_consumer_group_file(data_dir, group_id)?;
-        let topic_offsets = Self::load_existing_offsets(&file_path)?;
+        let topic_offsets = Self::load_existing_offsets(&file_path, io_mode)?;
 
         let consumer_group = FileConsumerGroup {
             group_id: group_id.to_string(),
             topic_offsets,
             file_path,
             sync_mode,
+            io_mode,
         };
 
         consumer_group.persist_to_disk()?;
         Ok(consumer_group)
     }
 
-    pub fn new_default(group_id: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
-        Self::new(group_id, sync_mode, "./data")
+    pub fn new_default(group_id: &str, sync_mode: SyncMode, io_mode: FileIoMode) -> Result<Self, std::io::Error> {
+        Self::new(group_id, sync_mode, io_mode, "./data")
     }
 
     fn setup_consumer_group_file<P: AsRef<Path>>(
@@ -58,13 +61,17 @@ impl FileConsumerGroup {
         Ok(consumer_groups_dir.join(format!("{group_id}.json")))
     }
 
-    fn load_existing_offsets(file_path: &PathBuf) -> Result<HashMap<String, u64>, std::io::Error> {
+    fn load_existing_offsets(
+        file_path: &PathBuf,
+        io_mode: FileIoMode,
+    ) -> Result<HashMap<String, u64>, std::io::Error> {
         if !file_path.exists() {
             return Ok(HashMap::new());
         }
 
-        let mut file_handle = AsyncFileHandle::open_with_read_only_permissions(file_path)
-            .map_err(std::io::Error::other)?;
+        let mut file_handle =
+            AsyncFileHandle::open_with_read_only_permissions(file_path, io_mode)
+                .map_err(std::io::Error::other)?;
         let file_size = file_handle
             .get_current_file_size_in_bytes()
             .map_err(std::io::Error::other)?;
@@ -107,9 +114,11 @@ impl FileConsumerGroup {
         let json_data = serde_json::to_string_pretty(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut file_handle =
-            AsyncFileHandle::create_with_write_truncate_permissions(&self.file_path)
-                .map_err(std::io::Error::other)?;
+        let mut file_handle = AsyncFileHandle::create_with_write_truncate_permissions(
+            &self.file_path,
+            self.io_mode,
+        )
+        .map_err(std::io::Error::other)?;
         file_handle
             .write_data_at_specific_offset(json_data.as_bytes(), 0)
             .map_err(std::io::Error::other)?;

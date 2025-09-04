@@ -16,6 +16,7 @@ fn test_segment_creation() {
         log_path,
         index_path,
         SyncMode::Immediate,
+        Default::default(),
         indexing_config,
     )
     .unwrap();
@@ -38,6 +39,7 @@ fn test_append_and_recover() {
         log_path.clone(),
         index_path.clone(),
         SyncMode::Immediate,
+        Default::default(),
         indexing_config.clone(),
     )
     .unwrap();
@@ -63,6 +65,7 @@ fn test_append_and_recover() {
         log_path,
         index_path,
         SyncMode::Immediate,
+        Default::default(),
         indexing_config,
     )
     .unwrap();

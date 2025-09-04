@@ -12,6 +12,7 @@ fn test_segment_manager_creation() {
         config.temp_dir_path().to_path_buf(),
         segment_size_bytes,
         SyncMode::Immediate,
+        Default::default(),
         indexing_config,
     );
     sm.roll_to_new_segment(0).unwrap();
@@ -29,6 +30,7 @@ fn test_segment_rolling() {
         config.temp_dir_path().to_path_buf(),
         segment_size_bytes,
         SyncMode::Immediate,
+        Default::default(),
         indexing_config,
     );
     sm.roll_to_new_segment(0).unwrap();

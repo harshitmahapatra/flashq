@@ -1,7 +1,7 @@
 use crate::Record;
 use crate::error::StorageError;
 use crate::storage::file::async_io::AsyncFileHandle;
-use crate::storage::file::common::{SyncMode, deserialize_record, serialize_record};
+use crate::storage::file::common::{FileIoMode, SyncMode, deserialize_record, serialize_record};
 use crate::storage::file::index::{IndexEntry, SparseIndex};
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
@@ -43,10 +43,11 @@ impl LogSegment {
         log_path: PathBuf,
         index_path: PathBuf,
         sync_mode: SyncMode,
+        io_mode: FileIoMode,
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
         // Use AsyncFileHandle for log file with async operations
-        let log_file = AsyncFileHandle::create_with_append_and_read_permissions(&log_path)
+        let log_file = AsyncFileHandle::create_with_append_and_read_permissions(&log_path, io_mode)
             .map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
@@ -55,7 +56,7 @@ impl LogSegment {
             })?;
 
         // Use AsyncFileHandle for index file with async operations
-        let index_file = AsyncFileHandle::create_with_append_and_read_permissions(&index_path)
+        let index_file = AsyncFileHandle::create_with_append_and_read_permissions(&index_path, io_mode)
             .map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
@@ -84,6 +85,7 @@ impl LogSegment {
         log_path: PathBuf,
         index_path: PathBuf,
         sync_mode: SyncMode,
+        io_mode: FileIoMode,
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
         let mut segment = Self::new(
@@ -91,6 +93,7 @@ impl LogSegment {
             log_path,
             index_path,
             sync_mode,
+            io_mode,
             indexing_config,
         )?;
 
