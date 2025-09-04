@@ -34,5 +34,9 @@ name = "memory_storage"
 harness = false
 
 [[bench]]
-name = "file_storage"
+name = "file_storage_std"
+harness = false
+
+[[bench]]
+name = "file_storage_io_uring"
 harness = false
