@@ -56,20 +56,69 @@ impl SegmentManager {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let segment = self.find_segment_for_offset(offset).ok_or_else(|| {
-            StorageError::from_io_error(
-                std::io::Error::new(std::io::ErrorKind::NotFound, "Offset not found"),
-                &format!("No segment found containing offset {offset}"),
-            )
-        })?;
+        let max_records_to_read = count.unwrap_or(usize::MAX);
+        let mut collected_records = Vec::new();
 
-        let start_position = segment.find_position_for_offset(offset).unwrap_or(0);
+        let segments_sorted_by_offset = self.get_segments_sorted_by_offset();
+        let starting_segment_index = self.find_starting_segment_index(&segments_sorted_by_offset, offset)?;
 
-        let mut reader = open_log_reader_at_position(segment, start_position as u64)?;
+        for segment in &segments_sorted_by_offset[starting_segment_index..] {
+            if collected_records.len() >= max_records_to_read {
+                break;
+            }
 
-        let max_records = count.unwrap_or(usize::MAX);
+            let records_from_segment = self.read_records_from_single_segment(
+                segment, 
+                offset, 
+                max_records_to_read - collected_records.len()
+            );
+            
+            collected_records.extend(records_from_segment);
 
-        Ok(collect_records(&mut reader, offset, max_records))
+            if collected_records.len() >= max_records_to_read {
+                break;
+            }
+        }
+
+        Ok(collected_records)
+    }
+
+    fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
+        let mut segments: Vec<&LogSegment> = self.all_segments().collect();
+        segments.sort_by_key(|s| s.base_offset);
+        segments
+    }
+
+    fn find_starting_segment_index(&self, segments: &[&LogSegment], offset: u64) -> Result<usize, StorageError> {
+        segments
+            .iter()
+            .position(|segment| segment.contains_offset(offset) || segment.base_offset > offset)
+            .ok_or_else(|| {
+                StorageError::from_io_error(
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "Offset not found"),
+                    &format!("No segment found containing offset {offset}"),
+                )
+            })
+    }
+
+    fn read_records_from_single_segment(&self, segment: &LogSegment, start_offset: u64, max_records: usize) -> Vec<RecordWithOffset> {
+        let file_position = self.calculate_file_position_for_segment(segment, start_offset);
+        
+        match create_segment_reader(segment, file_position) {
+            Ok(mut reader) => collect_records(&mut reader, start_offset, max_records),
+            Err(error) => {
+                log_read_error(&error);
+                Vec::new()
+            }
+        }
+    }
+
+    fn calculate_file_position_for_segment(&self, segment: &LogSegment, start_offset: u64) -> u64 {
+        if segment.contains_offset(start_offset) {
+            segment.find_position_for_offset(start_offset).unwrap_or(0) as u64
+        } else {
+            0
+        }
     }
 
     pub fn should_roll_segment(&mut self) -> bool {
@@ -150,87 +199,91 @@ impl SegmentManager {
     }
 }
 
-fn get_segment_offsets(base_dir: &PathBuf) -> Result<Vec<u64>, StorageError> {
-    let entries = std::fs::read_dir(base_dir)
+fn get_segment_offsets(segment_directory: &PathBuf) -> Result<Vec<u64>, StorageError> {
+    let directory_entries = std::fs::read_dir(segment_directory)
         .map_err(|e| StorageError::from_io_error(e, "Failed to read segment directory"))?;
 
-    let mut segment_offsets = Vec::new();
+    let mut discovered_offsets = Vec::new();
 
-    for entry in entries {
-        let entry =
-            entry.map_err(|e| StorageError::from_io_error(e, "Failed to read directory entry"))?;
-        let path = entry.path();
-
-        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            if file_name.ends_with(".log") {
-                if let Some(offset_str) = file_name.strip_suffix(".log") {
-                    if let Ok(offset) = offset_str.parse::<u64>() {
-                        segment_offsets.push(offset);
-                    }
-                }
-            }
+    for directory_entry in directory_entries {
+        let entry = directory_entry
+            .map_err(|e| StorageError::from_io_error(e, "Failed to read directory entry"))?;
+        
+        if let Some(offset) = extract_offset_from_log_file(&entry.path()) {
+            discovered_offsets.push(offset);
         }
     }
 
-    segment_offsets.sort_unstable();
-
-    Ok(segment_offsets)
+    discovered_offsets.sort_unstable();
+    Ok(discovered_offsets)
 }
 
-fn open_log_reader_at_position(
+fn extract_offset_from_log_file(file_path: &std::path::Path) -> Option<u64> {
+    let file_name = file_path.file_name()?.to_str()?;
+    
+    if !file_name.ends_with(".log") {
+        return None;
+    }
+    
+    let offset_string = file_name.strip_suffix(".log")?;
+    offset_string.parse::<u64>().ok()
+}
+
+fn create_segment_reader(
     segment: &LogSegment,
-    position: u64,
+    file_position: u64,
 ) -> Result<BufReader<File>, StorageError> {
-    let mut log_file = std::fs::File::open(&segment.log_path)
-        .map_err(|e| StorageError::from_io_error(e, "Failed to open log file for reading"))?;
+    let mut segment_file = std::fs::File::open(&segment.log_path)
+        .map_err(|e| StorageError::from_io_error(e, "Failed to open segment file"))?;
 
-    log_file
-        .seek(SeekFrom::Start(position))
-        .map_err(|e| StorageError::from_io_error(e, "Failed to seek to position"))?;
+    segment_file
+        .seek(SeekFrom::Start(file_position))
+        .map_err(|e| StorageError::from_io_error(e, "Failed to seek to file position"))?;
 
-    Ok(BufReader::new(log_file))
+    Ok(BufReader::new(segment_file))
 }
 
 fn collect_records(
-    reader: &mut BufReader<File>,
-    start_offset: u64,
-    max_records: usize,
+    segment_reader: &mut BufReader<File>,
+    minimum_offset: u64,
+    maximum_records: usize,
 ) -> Vec<RecordWithOffset> {
-    let mut records = Vec::new();
+    let mut collected_records = Vec::new();
 
-    while records.len() < max_records {
-        match deserialize_record(reader) {
+    while collected_records.len() < maximum_records {
+        match deserialize_record(segment_reader) {
             Ok(record_with_offset) => {
-                if record_with_offset.offset >= start_offset {
-                    records.push(record_with_offset);
+                if record_with_offset.offset >= minimum_offset {
+                    collected_records.push(record_with_offset);
                 }
             }
-            Err(error) => {
-                log_read_error(&error);
+            Err(deserialization_error) => {
+                log_read_error(&deserialization_error);
                 break;
             }
         }
     }
 
-    records
+    collected_records
 }
 
-fn log_read_error(error: &StorageError) {
-    match error {
+fn log_read_error(storage_error: &StorageError) {
+    match storage_error {
         StorageError::ReadFailed { source, .. } => {
-            if !source.to_string().contains("UnexpectedEof")
-                && !source.to_string().contains("failed to fill whole buffer")
-            {
-                warn!("IO error while reading records, continuing with partial data: {error}");
+            if !is_expected_end_of_file_error(source) {
+                warn!("IO error while reading records, continuing with partial data: {storage_error}");
             }
         }
         StorageError::DataCorruption { .. } => {
-            warn!(
-                "Data corruption detected while reading records, continuing with partial data: {error}"
-            );
+            warn!("Data corruption detected while reading records, continuing with partial data: {storage_error}");
         }
         _ => {
-            warn!("Error while reading records, continuing with partial data: {error}");
+            warn!("Error while reading records, continuing with partial data: {storage_error}");
         }
     }
+}
+
+fn is_expected_end_of_file_error(error_source: &Box<crate::error::StorageErrorSource>) -> bool {
+    let error_message = error_source.to_string();
+    error_message.contains("UnexpectedEof") || error_message.contains("failed to fill whole buffer")
 }

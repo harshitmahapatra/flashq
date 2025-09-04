@@ -131,3 +131,81 @@ fn test_offset_consistency() {
         assert_eq!(record.offset, i as u64);
     }
 }
+
+#[test]
+fn test_segment_rolling() {
+    // Setup
+    let config = TestConfig::new("segment_rolling");
+    let small_segment_size = 10 * 1024; // 10KB - forces rolling after ~10 records
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        small_segment_size,
+    )
+    .unwrap();
+
+    // Action - Write records across multiple segments
+    for i in 0..50 {
+        let payload = "x".repeat(1024); // 1KB payload
+        let record = Record::new(
+            Some(format!("key_{i}")), 
+            payload,
+            None
+        );
+        let offset = log.append(record).unwrap();
+        assert_eq!(offset, i);
+    }
+
+    // Expectation - All records should be readable across segment boundaries
+    let all_records = log.get_records_from_offset(0, None).unwrap();
+    assert_eq!(all_records.len(), 50);
+    assert_eq!(log.len(), 50);
+    assert_eq!(log.next_offset(), 50);
+
+    // Expectation - Reading from middle offset with limit should work across segments
+    let middle_records = log.get_records_from_offset(25, Some(20)).unwrap();
+    assert_eq!(middle_records.len(), 20);
+    assert_eq!(middle_records[0].offset, 25);
+    assert_eq!(middle_records[19].offset, 44);
+}
+
+
+#[test]
+fn test_segment_boundary_crossing() {
+    // Setup - Use very small segments to force frequent rolling
+    let config = TestConfig::new("segment_boundary_crossing");
+    let small_segment_size = 5 * 1024; // 5KB - forces rolling after ~5 records
+    let mut log = FileTopicLog::new(
+        &config.topic_name,
+        config.sync_mode,
+        config.temp_dir_path(),
+        small_segment_size,
+    )
+    .unwrap();
+
+    // Action - Write records that will span exactly across segment boundaries
+    for i in 0..20 {
+        let payload = "x".repeat(1024); // 1KB payload
+        let record = Record::new(
+            Some(format!("key_{i}")), 
+            payload,
+            None
+        );
+        let offset = log.append(record).unwrap();
+        assert_eq!(offset, i);
+    }
+
+    // Expectations - All records should be readable despite crossing boundaries
+    assert_eq!(log.len(), 20);
+    assert_eq!(log.next_offset(), 20);
+
+    let all_records = log.get_records_from_offset(0, None).unwrap();
+    assert_eq!(all_records.len(), 20);
+    
+    // Verify records are in correct order
+    for (i, record) in all_records.iter().enumerate() {
+        assert_eq!(record.offset, i as u64);
+        assert_eq!(record.record.key, Some(format!("key_{i}")));
+    }
+}
