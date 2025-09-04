@@ -5,13 +5,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
 static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
 
 const INITIAL_RING_ENTRIES: u32 = 32;
-const SINGLE_OPERATION_RING_ENTRIES: u32 = 1;
 const NOP_OPERATION_USER_DATA: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +96,6 @@ impl IoRingExecutorWithRuntime {
         Err("No-op operation failed".into())
     }
 
-
     pub fn execute_future_synchronously<F, R>(&mut self, future: F) -> R
     where
         F: std::future::Future<Output = R> + Send + 'static,
@@ -110,6 +108,7 @@ impl IoRingExecutorWithRuntime {
 pub struct UnifiedAsyncFileHandle {
     underlying_file: File,
     should_prefer_io_uring: bool,
+    shared_io_ring: Option<Arc<Mutex<IoUring>>>,
 }
 
 impl UnifiedAsyncFileHandle {
@@ -155,14 +154,36 @@ impl UnifiedAsyncFileHandle {
 
     fn create_handle_with_debug_logging(file: File, path: &Path) -> Result<Self, FlashQError> {
         let io_uring_availability = IoRingExecutorWithRuntime::is_available_on_current_system();
-        
+
+        // Create shared IoUring instance if io_uring is available
+        let shared_io_ring = if io_uring_availability {
+            match IoUring::new(INITIAL_RING_ENTRIES) {
+                Ok(ring) => {
+                    debug!(
+                        "Created shared IoUring instance with {INITIAL_RING_ENTRIES} entries for {path:?}"
+                    );
+                    Some(Arc::new(Mutex::new(ring)))
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to create IoUring instance for {path:?}: {e}, falling back to standard I/O"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         debug!(
-            "Created AsyncFileHandle for {path:?}, io_uring: {io_uring_availability}"
+            "Created AsyncFileHandle for {path:?}, io_uring: {io_uring_availability}, shared_ring: {}",
+            shared_io_ring.is_some()
         );
 
         Ok(UnifiedAsyncFileHandle {
             underlying_file: file,
-            should_prefer_io_uring: io_uring_availability,
+            should_prefer_io_uring: io_uring_availability && shared_io_ring.is_some(),
+            shared_io_ring,
         })
     }
 
@@ -264,7 +285,7 @@ impl UnifiedAsyncFileHandle {
     }
 
     fn append_data_using_standard_io(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        self.underlying_file
+        let start_position = self.underlying_file
             .seek(SeekFrom::End(0))
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "seeking to end")))?;
 
@@ -272,7 +293,7 @@ impl UnifiedAsyncFileHandle {
             .write_all(data)
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "appending data")))?;
 
-        Ok(data.len())
+        Ok(start_position as usize)
     }
 
     fn sync_file_using_standard_io(&mut self) -> Result<(), FlashQError> {
@@ -282,43 +303,51 @@ impl UnifiedAsyncFileHandle {
     }
 
     fn execute_io_uring_operation(
-        &mut self, 
-        operation: io_uring::squeue::Entry, 
-        operation_type: IoRingOperationType
+        &mut self,
+        operation: io_uring::squeue::Entry,
+        operation_type: IoRingOperationType,
     ) -> Result<i32, FlashQError> {
-        let mut ring = self.create_io_uring_for_operation(operation_type)?;
-        
+        let ring_ref = self.shared_io_ring.as_ref().ok_or_else(|| {
+            self.create_io_uring_error(
+                operation_type,
+                "shared ring unavailable",
+                std::io::Error::other("No shared IoUring instance available"),
+            )
+        })?;
+
+        let mut ring = ring_ref.lock().unwrap();
+
+        // Submit operation without waiting
         unsafe {
             ring.submission()
                 .push(&operation)
                 .map_err(|e| self.create_io_uring_error(operation_type, "submission push", e))?;
         }
 
-        ring.submit_and_wait(1)
-            .map_err(|e| self.create_io_uring_error(operation_type, "submit_and_wait", e))?;
+        // Submit to kernel without blocking
+        ring.submit()
+            .map_err(|e| self.create_io_uring_error(operation_type, "submit", e))?;
 
-        let completion_entry = ring.completion()
-            .next()
-            .ok_or_else(|| self.create_completion_queue_empty_error(operation_type))?;
+        // Poll for completion (non-blocking loop with yield)
+        loop {
+            if let Some(completion_entry) = ring.completion().next() {
+                let result = completion_entry.result();
+                if result < 0 {
+                    return Err(self.create_operation_failed_error(operation_type, result));
+                }
+                return Ok(result);
+            }
 
-        let result = completion_entry.result();
-        if result < 0 {
-            return Err(self.create_operation_failed_error(operation_type, result));
+            // Yield CPU to avoid busy waiting
+            std::thread::yield_now();
         }
-
-        Ok(result)
-    }
-
-    fn create_io_uring_for_operation(&self, operation_type: IoRingOperationType) -> Result<IoUring, FlashQError> {
-        IoUring::new(SINGLE_OPERATION_RING_ENTRIES)
-            .map_err(|e| self.create_io_uring_error(operation_type, "creation", e))
     }
 
     fn create_io_uring_error(
-        &self, 
-        operation_type: IoRingOperationType, 
-        context: &str, 
-        error: impl std::fmt::Display
+        &self,
+        operation_type: IoRingOperationType,
+        context: &str,
+        error: impl std::fmt::Display,
     ) -> FlashQError {
         let storage_error = if operation_type.is_read_operation() {
             StorageError::ReadFailed {
@@ -334,36 +363,27 @@ impl UnifiedAsyncFileHandle {
         FlashQError::Storage(storage_error)
     }
 
-    fn create_completion_queue_empty_error(&self, operation_type: IoRingOperationType) -> FlashQError {
+    fn create_operation_failed_error(
+        &self,
+        operation_type: IoRingOperationType,
+        result: i32,
+    ) -> FlashQError {
         let storage_error = if operation_type.is_read_operation() {
             StorageError::ReadFailed {
-                context: "io_uring completion queue empty".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(
-                    "No completion entry".to_string(),
-                )),
-            }
-        } else {
-            StorageError::WriteFailed {
-                context: "io_uring completion queue empty".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(
-                    "No completion entry".to_string(),
-                )),
-            }
-        };
-        FlashQError::Storage(storage_error)
-    }
-
-    fn create_operation_failed_error(&self, operation_type: IoRingOperationType, result: i32) -> FlashQError {
-        let storage_error = if operation_type.is_read_operation() {
-            StorageError::ReadFailed {
-                context: format!("io_uring {} failed with code: {result}", operation_type.as_str()),
+                context: format!(
+                    "io_uring {} failed with code: {result}",
+                    operation_type.as_str()
+                ),
                 source: Box::new(crate::error::StorageErrorSource::Custom(format!(
                     "io_uring error code: {result}"
                 ))),
             }
         } else {
             StorageError::WriteFailed {
-                context: format!("io_uring {} failed with code: {result}", operation_type.as_str()),
+                context: format!(
+                    "io_uring {} failed with code: {result}",
+                    operation_type.as_str()
+                ),
                 source: Box::new(crate::error::StorageErrorSource::Custom(format!(
                     "io_uring error code: {result}"
                 ))),
@@ -413,9 +433,32 @@ impl UnifiedAsyncFileHandle {
     }
 
     fn append_data_using_io_uring(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        let current_file_size_for_append_offset = self.get_current_file_size_in_bytes()?;
-        let op_type = IoRingOperationType::Append;
+        // Get the shared ring and ensure atomic append operation
+        let ring_ref = self.shared_io_ring.as_ref().ok_or_else(|| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "No shared IoUring instance available".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(
+                    "io_uring not initialized".to_string(),
+                )),
+            })
+        })?;
 
+        // Lock the ring for the entire append operation to prevent race conditions
+        let mut ring = ring_ref.lock().unwrap();
+
+        // Get current file size atomically under lock
+        let current_file_size_for_append_offset = self
+            .underlying_file
+            .metadata()
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    "getting file size for append",
+                ))
+            })?
+            .len();
+
+        let op_type = IoRingOperationType::Append;
         let operation = opcode::Write::new(
             io_uring::types::Fd(self.underlying_file.as_raw_fd()),
             data.as_ptr(),
@@ -425,9 +468,44 @@ impl UnifiedAsyncFileHandle {
         .build()
         .user_data(op_type.user_data());
 
-        let result = self.execute_io_uring_operation(operation, op_type)?;
-        debug!("io_uring append completed: {result} bytes at end of file");
-        Ok(result as usize)
+        // Submit and wait while holding the lock
+        unsafe {
+            ring.submission().push(&operation).map_err(|e| {
+                FlashQError::Storage(StorageError::WriteFailed {
+                    context: "io_uring submission push failed".to_string(),
+                    source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+                })
+            })?;
+        }
+
+        ring.submit().map_err(|e| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "io_uring submit failed".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(e.to_string())),
+            })
+        })?;
+
+        // Poll for completion while holding the lock
+        loop {
+            if let Some(completion_entry) = ring.completion().next() {
+                let result = completion_entry.result();
+                if result < 0 {
+                    return Err(FlashQError::Storage(StorageError::WriteFailed {
+                        context: format!("io_uring append failed with code: {result}"),
+                        source: Box::new(crate::error::StorageErrorSource::Custom(
+                            "io_uring operation failed".to_string(),
+                        )),
+                    }));
+                }
+                debug!(
+                    "io_uring append completed: {result} bytes at offset {current_file_size_for_append_offset}"
+                );
+                return Ok(current_file_size_for_append_offset as usize);
+            }
+
+            // Yield CPU to avoid busy waiting
+            std::thread::yield_now();
+        }
     }
 
     fn sync_file_using_io_uring(&mut self) -> Result<(), FlashQError> {

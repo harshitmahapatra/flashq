@@ -200,3 +200,44 @@ fn test_segment_boundary_crossing() {
         assert_eq!(record.record.key, Some(format!("key_{i}")));
     }
 }
+
+#[test]
+fn test_flashq_large_file_benchmark_scenario() {
+    use flashq::storage::{StorageBackend, file::SyncMode};
+    use flashq::FlashQ;
+    use std::collections::HashMap;
+    
+    let _ = env_logger::try_init();
+    
+    // Setup: Create FlashQ with file storage and helper function
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let storage_backend = StorageBackend::new_file_with_path(SyncMode::None, temp_dir.path())
+        .expect("Failed to create file storage backend");
+    let queue = FlashQ::with_storage_backend(storage_backend);
+    let topic = "benchmark".to_string();
+    
+    let create_1kb_record = |index: usize| {
+        let payload = "x".repeat(1024);
+        let mut headers = HashMap::new();
+        headers.insert("index".to_string(), index.to_string());
+        flashq::Record::new(Some(format!("key_{index}")), payload, Some(headers))
+    };
+
+    // Action: Write 1000 records (~1MB total, simulates benchmark scenario)
+    for i in 0..1000 {
+        queue.post_record(topic.clone(), create_1kb_record(i)).unwrap();
+    }
+    
+    // Expectation: Should be able to read records from various offsets
+    // This tests the sparse index functionality under single-segment conditions
+    let all_records = queue.poll_records(&topic, None).unwrap();
+    assert_eq!(all_records.len(), 1000, "Should retrieve all 1000 records");
+    
+    let mid_records = queue.poll_records_from_offset(&topic, 500, Some(100)).unwrap();
+    assert_eq!(mid_records.len(), 100, "Should retrieve 100 records from middle");
+    assert_eq!(mid_records[0].offset, 500, "First record should be at offset 500");
+    
+    let end_records = queue.poll_records_from_offset(&topic, 900, Some(100)).unwrap();
+    assert_eq!(end_records.len(), 100, "Should retrieve 100 records from end");
+    assert_eq!(end_records[0].offset, 900, "First record should be at offset 900");
+}
