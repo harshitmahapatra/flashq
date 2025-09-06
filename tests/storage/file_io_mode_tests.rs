@@ -12,15 +12,19 @@ fn test_storage_backend_with_standard_io() {
     )
     .unwrap();
 
-    let mut topic_log = backend.create("test_topic").unwrap();
+    let topic_log = backend.create("test_topic").unwrap();
 
     let record = flashq::Record::new(Some("key1".to_string()), "test_value".to_string(), None);
-    let offset = topic_log.append(record).unwrap();
+    let offset = topic_log.lock().unwrap().append(record).unwrap();
 
     assert_eq!(offset, 0);
-    assert_eq!(topic_log.len(), 1);
+    assert_eq!(topic_log.lock().unwrap().len(), 1);
 
-    let records = topic_log.get_records_from_offset(0, Some(1)).unwrap();
+    let records = topic_log
+        .lock()
+        .unwrap()
+        .get_records_from_offset(0, Some(1))
+        .unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].record.value, "test_value");
 }
@@ -43,19 +47,23 @@ fn test_storage_backend_with_io_uring() {
     )
     .unwrap();
 
-    let mut topic_log = backend.create("io_uring_topic").unwrap();
+    let topic_log = backend.create("io_uring_topic").unwrap();
 
     let record = flashq::Record::new(
         Some("io_uring_key".to_string()),
         "io_uring_value".to_string(),
         None,
     );
-    let offset = topic_log.append(record).unwrap();
+    let offset = topic_log.lock().unwrap().append(record).unwrap();
 
     assert_eq!(offset, 0);
-    assert_eq!(topic_log.len(), 1);
+    assert_eq!(topic_log.lock().unwrap().len(), 1);
 
-    let records = topic_log.get_records_from_offset(0, Some(1)).unwrap();
+    let records = topic_log
+        .lock()
+        .unwrap()
+        .get_records_from_offset(0, Some(1))
+        .unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].record.value, "io_uring_value");
 }
@@ -86,17 +94,20 @@ fn test_consumer_group_with_standard_io() {
     )
     .unwrap();
 
-    let mut consumer_group = backend.create_consumer_group("test_group").unwrap();
+    let consumer_group = backend.create_consumer_group("test_group").unwrap();
 
     // Test initial state
-    assert_eq!(consumer_group.get_offset("test_topic"), 0);
+    assert_eq!(consumer_group.lock().unwrap().get_offset("test_topic"), 0);
 
     // Test setting offset
-    consumer_group.set_offset("test_topic".to_string(), 42);
-    assert_eq!(consumer_group.get_offset("test_topic"), 42);
+    consumer_group
+        .lock()
+        .unwrap()
+        .set_offset("test_topic".to_string(), 42);
+    assert_eq!(consumer_group.lock().unwrap().get_offset("test_topic"), 42);
 
     // Test group ID
-    assert_eq!(consumer_group.group_id(), "test_group");
+    assert_eq!(consumer_group.lock().unwrap().group_id(), "test_group");
 }
 
 #[cfg(target_os = "linux")]
@@ -117,17 +128,26 @@ fn test_consumer_group_with_io_uring() {
     )
     .unwrap();
 
-    let mut consumer_group = backend.create_consumer_group("io_uring_group").unwrap();
+    let consumer_group = backend.create_consumer_group("io_uring_group").unwrap();
 
     // Test initial state
-    assert_eq!(consumer_group.get_offset("io_uring_topic"), 0);
+    assert_eq!(
+        consumer_group.lock().unwrap().get_offset("io_uring_topic"),
+        0
+    );
 
     // Test setting offset
-    consumer_group.set_offset("io_uring_topic".to_string(), 99);
-    assert_eq!(consumer_group.get_offset("io_uring_topic"), 99);
+    consumer_group
+        .lock()
+        .unwrap()
+        .set_offset("io_uring_topic".to_string(), 99);
+    assert_eq!(
+        consumer_group.lock().unwrap().get_offset("io_uring_topic"),
+        99
+    );
 
     // Test group ID
-    assert_eq!(consumer_group.group_id(), "io_uring_group");
+    assert_eq!(consumer_group.lock().unwrap().group_id(), "io_uring_group");
 }
 
 /// Integration test comparing behavior between I/O modes
@@ -143,12 +163,20 @@ fn test_io_mode_behavior_compatibility() {
     )
     .unwrap();
 
-    let mut std_topic_log = std_backend.create("compat_topic").unwrap();
+    let std_topic_log = std_backend.create("compat_topic").unwrap();
     let record1 = flashq::Record::new(Some("key1".to_string()), "value1".to_string(), None);
     let record2 = flashq::Record::new(Some("key2".to_string()), "value2".to_string(), None);
 
-    let offset1_std = std_topic_log.append(record1.clone()).unwrap();
-    let offset2_std = std_topic_log.append(record2.clone()).unwrap();
+    let offset1_std = std_topic_log
+        .lock()
+        .unwrap()
+        .append(record1.clone())
+        .unwrap();
+    let offset2_std = std_topic_log
+        .lock()
+        .unwrap()
+        .append(record2.clone())
+        .unwrap();
 
     #[cfg(target_os = "linux")]
     {
@@ -163,22 +191,41 @@ fn test_io_mode_behavior_compatibility() {
             )
             .unwrap();
 
-            let mut io_uring_topic_log = io_uring_backend.create("compat_topic").unwrap();
-            let offset1_io_uring = io_uring_topic_log.append(record1.clone()).unwrap();
-            let offset2_io_uring = io_uring_topic_log.append(record2.clone()).unwrap();
+            let io_uring_topic_log = io_uring_backend.create("compat_topic").unwrap();
+            let offset1_io_uring = io_uring_topic_log
+                .lock()
+                .unwrap()
+                .append(record1.clone())
+                .unwrap();
+            let offset2_io_uring = io_uring_topic_log
+                .lock()
+                .unwrap()
+                .append(record2.clone())
+                .unwrap();
 
             // Both implementations should behave identically
             assert_eq!(offset1_std, offset1_io_uring);
             assert_eq!(offset2_std, offset2_io_uring);
-            assert_eq!(std_topic_log.len(), io_uring_topic_log.len());
             assert_eq!(
-                std_topic_log.next_offset(),
-                io_uring_topic_log.next_offset()
+                std_topic_log.lock().unwrap().len(),
+                io_uring_topic_log.lock().unwrap().len()
+            );
+            assert_eq!(
+                std_topic_log.lock().unwrap().next_offset(),
+                io_uring_topic_log.lock().unwrap().next_offset()
             );
 
             // Records should be identical
-            let std_records = std_topic_log.get_records_from_offset(0, None).unwrap();
-            let io_uring_records = io_uring_topic_log.get_records_from_offset(0, None).unwrap();
+            let std_records = std_topic_log
+                .lock()
+                .unwrap()
+                .get_records_from_offset(0, None)
+                .unwrap();
+            let io_uring_records = io_uring_topic_log
+                .lock()
+                .unwrap()
+                .get_records_from_offset(0, None)
+                .unwrap();
 
             assert_eq!(std_records.len(), io_uring_records.len());
             for (std_rec, io_uring_rec) in std_records.iter().zip(io_uring_records.iter()) {

@@ -1,5 +1,6 @@
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::sync::{Arc, Mutex};
 use storage::{ConsumerGroup, TopicLog};
 
@@ -63,8 +64,8 @@ impl RecordWithOffset {
 // =============================================================================
 
 pub struct FlashQ {
-    topics: Arc<Mutex<HashMap<String, Box<dyn TopicLog>>>>,
-    consumer_groups: Arc<Mutex<HashMap<String, Box<dyn ConsumerGroup>>>>,
+    topics: Arc<DashMap<String, Arc<Mutex<dyn TopicLog>>>>,
+    consumer_groups: Arc<DashMap<String, Arc<Mutex<dyn ConsumerGroup>>>>,
     storage_backend: storage::StorageBackend,
 }
 
@@ -81,8 +82,8 @@ impl FlashQ {
 
     pub fn with_storage_backend(storage_backend: storage::StorageBackend) -> Self {
         let queue = FlashQ {
-            topics: Arc::new(Mutex::new(HashMap::new())),
-            consumer_groups: Arc::new(Mutex::new(HashMap::new())),
+            topics: Arc::new(DashMap::new()),
+            consumer_groups: Arc::new(DashMap::new()),
             storage_backend,
         };
 
@@ -101,13 +102,17 @@ impl FlashQ {
     }
 
     pub fn post_record(&self, topic: String, record: Record) -> Result<u64, FlashQError> {
-        let mut topic_log_map = self.topics.lock().unwrap();
-        let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
+        let topic_log = self.topics.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
                 .create(&topic)
                 .expect("Failed to create storage backend")
         });
-        topic_log.append(record).map_err(FlashQError::from)
+        topic_log
+            .value()
+            .lock()
+            .unwrap()
+            .append(record)
+            .map_err(FlashQError::from)
     }
 
     pub fn post_records(
@@ -115,16 +120,16 @@ impl FlashQ {
         topic: String,
         records: Vec<Record>,
     ) -> Result<Vec<u64>, FlashQError> {
-        let mut topic_log_map = self.topics.lock().unwrap();
-        let topic_log = topic_log_map.entry(topic.clone()).or_insert_with(|| {
+        let topic_log = self.topics.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
                 .create(&topic)
                 .expect("Failed to create storage backend")
         });
 
         let mut offsets = Vec::new();
+        let mut topic_log_locked = topic_log.value().lock().unwrap();
         for record in records {
-            offsets.push(topic_log.append(record).map_err(FlashQError::from)?);
+            offsets.push(topic_log_locked.append(record).map_err(FlashQError::from)?);
         }
         Ok(offsets)
     }
@@ -143,9 +148,11 @@ impl FlashQ {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
-        let topic_log_map = self.topics.lock().unwrap();
-        match topic_log_map.get(topic) {
+        match self.topics.get(topic) {
             Some(topic_log) => topic_log
+                .value()
+                .lock()
+                .unwrap()
                 .get_records_from_offset(offset, count)
                 .map_err(FlashQError::from),
             None => Err(FlashQError::TopicNotFound {
@@ -155,8 +162,8 @@ impl FlashQ {
     }
 
     pub fn create_consumer_group(&self, group_id: String) -> Result<(), FlashQError> {
-        let mut consumer_group_map = self.consumer_groups.lock().unwrap();
-        match consumer_group_map.entry(group_id.clone()) {
+        match self.consumer_groups.entry(group_id.clone()) {
+            Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
             Vacant(entry) => {
                 let consumer_group = self
                     .storage_backend
@@ -167,7 +174,6 @@ impl FlashQ {
                 entry.insert(consumer_group);
                 Ok(())
             }
-            Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
         }
     }
 
@@ -176,9 +182,8 @@ impl FlashQ {
         group_id: &str,
         topic: &str,
     ) -> Result<u64, FlashQError> {
-        let consumer_group_map = self.consumer_groups.lock().unwrap();
-        match consumer_group_map.get(group_id) {
-            Some(consumer_group) => Ok(consumer_group.get_offset(topic)),
+        match self.consumer_groups.get(group_id) {
+            Some(consumer_group) => Ok(consumer_group.value().lock().unwrap().get_offset(topic)),
             None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
@@ -191,9 +196,8 @@ impl FlashQ {
         topic: String,
         offset: u64,
     ) -> Result<(), FlashQError> {
-        let topic_log_map = self.topics.lock().unwrap();
-        let topic_next_offset = match topic_log_map.get(&topic) {
-            Some(topic_log) => topic_log.next_offset(),
+        let topic_next_offset = match self.topics.get(&topic) {
+            Some(topic_log) => topic_log.value().lock().unwrap().next_offset(),
             None => {
                 return Err(FlashQError::TopicNotFound {
                     topic: topic.clone(),
@@ -209,10 +213,13 @@ impl FlashQ {
             });
         }
 
-        let mut consumer_group_map = self.consumer_groups.lock().unwrap();
-        match consumer_group_map.get_mut(group_id) {
+        match self.consumer_groups.get_mut(group_id) {
             Some(consumer_group) => {
-                consumer_group.set_offset(topic, offset);
+                consumer_group
+                    .value()
+                    .lock()
+                    .unwrap()
+                    .set_offset(topic, offset);
                 Ok(())
             }
             None => Err(FlashQError::ConsumerGroupNotFound {
@@ -222,8 +229,7 @@ impl FlashQ {
     }
 
     pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), FlashQError> {
-        let mut consumer_group_map = self.consumer_groups.lock().unwrap();
-        match consumer_group_map.remove(group_id) {
+        match self.consumer_groups.remove(group_id) {
             Some(_) => Ok(()),
             None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
@@ -261,9 +267,8 @@ impl FlashQ {
     }
 
     pub fn get_high_water_mark(&self, topic: &str) -> u64 {
-        let topics = self.topics.lock().unwrap();
-        match topics.get(topic) {
-            Some(topic_log) => topic_log.next_offset(),
+        match self.topics.get(topic) {
+            Some(topic_log) => topic_log.value().lock().unwrap().next_offset(),
             None => 0,
         }
     }
@@ -277,10 +282,9 @@ impl FlashQ {
             .map_err(|e| format!("Failed to discover topics: {e}"))?;
 
         // Create TopicLog instances for discovered topics
-        let mut topics = self.topics.lock().unwrap();
         for topic_name in topic_names {
             if let Ok(topic_log) = self.storage_backend.create(&topic_name) {
-                topics.insert(topic_name, topic_log);
+                self.topics.insert(topic_name, topic_log);
             }
         }
 
@@ -318,8 +322,8 @@ impl FlashQ {
                             if let Ok(consumer_group) =
                                 self.storage_backend.create_consumer_group(group_id)
                             {
-                                let mut consumer_groups = self.consumer_groups.lock().unwrap();
-                                consumer_groups.insert(group_id.to_string(), consumer_group);
+                                self.consumer_groups
+                                    .insert(group_id.to_string(), consumer_group);
                             }
                         }
                     }
