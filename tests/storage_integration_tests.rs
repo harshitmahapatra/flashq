@@ -5,10 +5,11 @@
 // setup-action-expectation test structure.
 
 mod storage {
-    pub mod async_io_integration_tests;
     pub mod consumer_group_tests;
     pub mod directory_locking_tests;
     pub mod error_simulation_tests;
+    pub mod file_io_integration_tests;
+    pub mod file_io_mode_tests;
     pub mod file_topic_log_tests;
     pub mod persistence_tests;
     pub mod segment_manager_tests;

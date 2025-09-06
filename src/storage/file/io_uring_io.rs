@@ -17,7 +17,6 @@ const NOP_OPERATION_USER_DATA: u64 = 1;
 enum IoRingOperationType {
     Read,
     Write,
-    Append,
     Sync,
 }
 
@@ -26,7 +25,6 @@ impl IoRingOperationType {
         match self {
             IoRingOperationType::Read => "read",
             IoRingOperationType::Write => "write",
-            IoRingOperationType::Append => "append",
             IoRingOperationType::Sync => "sync",
         }
     }
@@ -35,7 +33,6 @@ impl IoRingOperationType {
         match self {
             IoRingOperationType::Read => 0x02,
             IoRingOperationType::Write => 0x01,
-            IoRingOperationType::Append => 0x03,
             IoRingOperationType::Sync => 0x04,
         }
     }

@@ -1,6 +1,6 @@
 use super::test_utilities::*;
 use flashq::Record;
-use flashq::storage::file::{IndexingConfig, SegmentManager, SyncMode};
+use flashq::storage::file::{IndexingConfig, SegmentManager, SyncMode, StdFileIO};
 
 #[test]
 fn test_segment_manager_creation() {
@@ -8,11 +8,10 @@ fn test_segment_manager_creation() {
     let segment_size_bytes = 1024; // 1KB for testing
     let indexing_config = IndexingConfig::default();
 
-    let mut sm = SegmentManager::new(
+    let mut sm: SegmentManager<StdFileIO> = SegmentManager::new(
         config.temp_dir_path().to_path_buf(),
         segment_size_bytes,
         SyncMode::Immediate,
-        Default::default(),
         indexing_config,
     );
     sm.roll_to_new_segment(0).unwrap();
@@ -26,11 +25,10 @@ fn test_segment_rolling() {
     let config = TestConfig::new("sm_rolling");
     let segment_size_bytes = 256; // small size for testing
     let indexing_config = IndexingConfig::default();
-    let mut sm = SegmentManager::new(
+    let mut sm: SegmentManager<StdFileIO> = SegmentManager::new(
         config.temp_dir_path().to_path_buf(),
         segment_size_bytes,
         SyncMode::Immediate,
-        Default::default(),
         indexing_config,
     );
     sm.roll_to_new_segment(0).unwrap();

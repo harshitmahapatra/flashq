@@ -13,12 +13,6 @@ pub enum SyncMode {
     Periodic,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FileIoMode {
-    IoUring,
-    #[default]
-    Std,
-}
 
 // ================================================================================================
 // FILE I/O UTILITIES

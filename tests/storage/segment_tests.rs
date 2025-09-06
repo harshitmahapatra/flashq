@@ -1,6 +1,6 @@
 use super::test_utilities::*;
 use flashq::Record;
-use flashq::storage::file::{IndexingConfig, LogSegment, SyncMode};
+use flashq::storage::file::{IndexingConfig, LogSegment, SyncMode, StdFileIO};
 use serde_json::json;
 
 #[test]
@@ -11,12 +11,11 @@ fn test_segment_creation() {
     let index_path = config.temp_dir_path().join("0000.index");
     let indexing_config = IndexingConfig::default();
 
-    let segment = LogSegment::new(
+    let segment: LogSegment<StdFileIO> = LogSegment::new(
         base_offset,
         log_path,
         index_path,
         SyncMode::Immediate,
-        Default::default(),
         indexing_config,
     )
     .unwrap();
@@ -34,12 +33,11 @@ fn test_append_and_recover() {
     let index_path = config.temp_dir_path().join("0100.index");
     let indexing_config = IndexingConfig::default();
 
-    let mut segment = LogSegment::new(
+    let mut segment: LogSegment<StdFileIO> = LogSegment::new(
         base_offset,
         log_path.clone(),
         index_path.clone(),
         SyncMode::Immediate,
-        Default::default(),
         indexing_config.clone(),
     )
     .unwrap();
@@ -60,12 +58,11 @@ fn test_append_and_recover() {
 
     drop(segment);
 
-    let recovered_segment = LogSegment::recover(
+    let recovered_segment: LogSegment<StdFileIO> = LogSegment::recover(
         base_offset,
         log_path,
         index_path,
         SyncMode::Immediate,
-        Default::default(),
         indexing_config,
     )
     .unwrap();
