@@ -1,7 +1,10 @@
+use dashmap::DashMap;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
 
 use super::file_io::FileIO;
 use crate::error::{FlashQError, StorageError};
@@ -14,6 +17,141 @@ static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
 const DEFAULT_RING_ENTRIES: u32 = 256;
 const NOP_OPERATION_USER_DATA: u64 = 1;
 
+static NEXT_OPERATION_ID: AtomicUsize = AtomicUsize::new(2);
+
+/// Shared io_uring instance with completion dispatcher
+struct SharedRingManager {
+    ring: Arc<Mutex<IoUring>>,
+    pending_operations: Arc<DashMap<u64, mpsc::Sender<Result<i32, FlashQError>>>>,
+    _completion_thread: thread::JoinHandle<()>,
+}
+
+struct OperationHandle {
+    receiver: mpsc::Receiver<Result<i32, FlashQError>>,
+}
+
+impl OperationHandle {
+    fn wait(self) -> Result<i32, FlashQError> {
+        self.receiver.recv().map_err(|_| {
+            FlashQError::Storage(StorageError::WriteFailed {
+                context: "Operation channel closed unexpectedly".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(
+                    "Completion dispatcher thread terminated".to_string(),
+                )),
+            })
+        })?
+    }
+}
+
+impl SharedRingManager {
+    fn new() -> Result<Arc<Self>, FlashQError> {
+        let ring = IoUringFileIO::create_io_uring(IoUringFileIO::ring_entries()).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                "Failed to create shared io_uring instance",
+            ))
+        })?;
+
+        let ring = Arc::new(Mutex::new(ring));
+        let pending_operations = Arc::new(DashMap::new());
+
+        let completion_thread =
+            Self::spawn_completion_thread(Arc::clone(&ring), Arc::clone(&pending_operations));
+
+        let manager = Arc::new(SharedRingManager {
+            ring,
+            pending_operations,
+            _completion_thread: completion_thread,
+        });
+
+        Ok(manager)
+    }
+
+    fn spawn_completion_thread(
+        ring: Arc<Mutex<IoUring>>,
+        pending_operations: Arc<DashMap<u64, mpsc::Sender<Result<i32, FlashQError>>>>,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            loop {
+                let completions = {
+                    let mut ring = ring.lock().unwrap();
+                    let mut completions = Vec::new();
+                    while let Some(cqe) = ring.completion().next() {
+                        completions.push((cqe.user_data(), cqe.result()));
+                    }
+
+                    completions
+                };
+
+                if !completions.is_empty() {
+                    for (user_data, result) in completions {
+                        if let Some((_, sender)) = pending_operations.remove(&user_data) {
+                            let completion_result = if result < 0 {
+                                Err(FlashQError::Storage(StorageError::WriteFailed {
+                                    context: format!(
+                                        "io_uring operation failed with code: {result}"
+                                    ),
+                                    source: Box::new(crate::error::StorageErrorSource::Custom(
+                                        format!("io_uring error code: {result}"),
+                                    )),
+                                }))
+                            } else {
+                                Ok(result)
+                            };
+
+                            let _ = sender.send(completion_result);
+                        }
+                    }
+                }
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+        })
+    }
+
+    fn submit_operation(
+        &self,
+        operation: io_uring::squeue::Entry,
+    ) -> Result<OperationHandle, FlashQError> {
+        let operation_id = NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed) as u64;
+        let (sender, receiver) = mpsc::channel();
+
+        // Register without external locking (DashMap is concurrent)
+        self.pending_operations.insert(operation_id, sender);
+        let operation_with_id = operation.user_data(operation_id);
+
+        {
+            let mut ring = self.ring.lock().unwrap();
+            unsafe {
+                ring.submission().push(&operation_with_id).map_err(|e| {
+                    self.pending_operations.remove(&operation_id);
+                    FlashQError::Storage(StorageError::from_io_error(
+                        std::io::Error::other(e.to_string()),
+                        "Failed to submit operation to shared ring",
+                    ))
+                })?;
+            }
+
+            // Submit without waiting; completion thread will handle results
+            ring.submit().map_err(|e| {
+                self.pending_operations.remove(&operation_id);
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    "Failed to submit operations to kernel",
+                ))
+            })?;
+        }
+
+        Ok(OperationHandle { receiver })
+    }
+}
+
+fn get_shared_ring() -> Result<Arc<SharedRingManager>, FlashQError> {
+    static INIT_RESULT: OnceLock<Result<Arc<SharedRingManager>, FlashQError>> = OnceLock::new();
+
+    let result = INIT_RESULT.get_or_init(SharedRingManager::new);
+    result.clone()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IoRingOperationType {
     Read,
@@ -21,34 +159,10 @@ enum IoRingOperationType {
     Sync,
 }
 
-impl IoRingOperationType {
-    fn as_str(self) -> &'static str {
-        match self {
-            IoRingOperationType::Read => "read",
-            IoRingOperationType::Write => "write",
-            IoRingOperationType::Sync => "sync",
-        }
-    }
-
-    fn user_data(self) -> u64 {
-        match self {
-            IoRingOperationType::Read => 0x02,
-            IoRingOperationType::Write => 0x01,
-            IoRingOperationType::Sync => 0x04,
-        }
-    }
-
-    fn is_read_operation(self) -> bool {
-        matches!(self, IoRingOperationType::Read)
-    }
-}
-
-/// io_uring file handle that wraps a standard File with io_uring functionality
 pub struct IoUringFileHandle {
     file: std::fs::File,
-    ring: Arc<Mutex<IoUring>>,
-    /// Cached file size for append operations (optimization for single-writer segments)
     cached_size: AtomicU64,
+    _shared_ring: Arc<SharedRingManager>,
 }
 
 impl AsRawFd for IoUringFileHandle {
@@ -69,28 +183,25 @@ impl IoUringFileIO {
             .unwrap_or(DEFAULT_RING_ENTRIES)
     }
 
-    /// Create IoUring with optimized builder flags, fallback to basic creation if needed
     fn create_io_uring(entries: u32) -> Result<IoUring, std::io::Error> {
-        // Try with cooperation flags for better performance (best-effort)
+        // Try with cooperative task run for better performance (best-effort).
+        // Avoid setup_single_issuer to allow submissions from multiple threads
+        // when tests run in parallel.
         match io_uring::IoUring::builder()
             .setup_coop_taskrun()
-            .setup_single_issuer()
             .build(entries)
         {
             Ok(ring) => {
                 info!("io_uring created with cooperation flags enabled");
                 Ok(ring)
             }
-            Err(_) => {
-                // Fallback to basic IoUring creation without advanced flags
-                match IoUring::new(entries) {
-                    Ok(ring) => {
-                        info!("io_uring created with basic configuration");
-                        Ok(ring)
-                    }
-                    Err(e) => Err(e),
+            Err(_) => match IoUring::new(entries) {
+                Ok(ring) => {
+                    info!("io_uring created with basic configuration");
+                    Ok(ring)
                 }
-            }
+                Err(e) => Err(e),
+            },
         }
     }
 
@@ -142,20 +253,14 @@ impl IoUringFileIO {
     }
 
     fn create_handle(file: std::fs::File) -> Result<IoUringFileHandle, FlashQError> {
-        let ring = Self::create_io_uring(Self::ring_entries()).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                std::io::Error::other(e.to_string()),
-                "Failed to create IoUring instance",
-            ))
-        })?;
-
-        // Initialize cached size with current file size
         let initial_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+        let shared_ring = get_shared_ring()?;
 
         Ok(IoUringFileHandle {
             file,
-            ring: Arc::new(Mutex::new(ring)),
             cached_size: AtomicU64::new(initial_size),
+            _shared_ring: shared_ring,
         })
     }
 }
@@ -215,10 +320,9 @@ impl FileIO for IoUringFileIO {
         let operation =
             opcode::Write::new(Fd(handle.as_raw_fd()), data.as_ptr(), data.len() as u32)
                 .offset(offset)
-                .build()
-                .user_data(op_type.user_data());
+                .build();
 
-        let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
+        let result = Self::execute_shared_operation(handle, operation, op_type)?;
         trace!("io_uring write completed: {result} bytes at offset {offset}");
         Ok(())
     }
@@ -235,10 +339,9 @@ impl FileIO for IoUringFileIO {
             buffer.len() as u32,
         )
         .offset(offset)
-        .build()
-        .user_data(op_type.user_data());
+        .build();
 
-        let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
+        let result = Self::execute_shared_operation(handle, operation, op_type)?;
         trace!("io_uring read completed: {result} bytes from offset {offset}");
 
         if result < buffer.len() as i32 {
@@ -256,10 +359,8 @@ impl FileIO for IoUringFileIO {
     }
 
     fn append_data_to_end(handle: &mut Self::Handle, data: &[u8]) -> Result<u64, FlashQError> {
-        // Use cached size for append operations (optimization for single-writer segments)
         let current_size = handle.cached_size.load(Ordering::Relaxed);
         Self::write_data_at_offset(handle, data, current_size)?;
-        // Update cached size to include the appended data
         handle
             .cached_size
             .store(current_size + data.len() as u64, Ordering::Relaxed);
@@ -268,11 +369,9 @@ impl FileIO for IoUringFileIO {
 
     fn synchronize_to_disk(handle: &mut Self::Handle) -> Result<(), FlashQError> {
         let op_type = IoRingOperationType::Sync;
-        let operation = opcode::Fsync::new(Fd(handle.as_raw_fd()))
-            .build()
-            .user_data(op_type.user_data());
+        let operation = opcode::Fsync::new(Fd(handle.as_raw_fd())).build();
 
-        let _result = Self::execute_io_uring_operation(handle, operation, op_type)?;
+        let _result = Self::execute_shared_operation(handle, operation, op_type)?;
         trace!("io_uring fsync completed");
         Ok(())
     }
@@ -287,7 +386,6 @@ impl FileIO for IoUringFileIO {
 
         let actual_size = file_metadata.len();
 
-        // Sync cached size with actual size when explicitly queried
         handle.cached_size.store(actual_size, Ordering::Relaxed);
 
         Ok(actual_size)
@@ -295,160 +393,13 @@ impl FileIO for IoUringFileIO {
 }
 
 impl IoUringFileIO {
-    fn execute_io_uring_operation(
-        handle: &mut IoUringFileHandle,
+    fn execute_shared_operation(
+        _handle: &mut IoUringFileHandle,
         operation: io_uring::squeue::Entry,
-        operation_type: IoRingOperationType,
+        _operation_type: IoRingOperationType,
     ) -> Result<i32, FlashQError> {
-        let mut ring = handle.ring.lock().unwrap();
-
-        // Submit operation
-        unsafe {
-            ring.submission()
-                .push(&operation)
-                .map_err(|e| Self::create_io_uring_error(operation_type, "submission push", e))?;
-        }
-
-        // Submit-first optimization: submit and try to get completion without waiting
-        ring.submit()
-            .map_err(|e| Self::create_io_uring_error(operation_type, "submit", e))?;
-
-        // Check if completion is already available (reduces syscalls)
-        if let Some(completion_entry) = ring.completion().next() {
-            return Self::process_completion_entry(completion_entry, operation_type);
-        }
-
-        // Fallback: wait for completion if not immediately available
-        ring.submit_and_wait(1)
-            .map_err(|e| Self::create_io_uring_error(operation_type, "submit_and_wait", e))?;
-
-        if let Some(completion_entry) = ring.completion().next() {
-            return Self::process_completion_entry(completion_entry, operation_type);
-        }
-
-        Err(Self::create_io_uring_error(
-            operation_type,
-            "completion queue",
-            "No completion received after submit_and_wait",
-        ))
-    }
-
-    fn create_io_uring_error(
-        operation_type: IoRingOperationType,
-        context: &str,
-        error: impl std::fmt::Display,
-    ) -> FlashQError {
-        let storage_error = if operation_type.is_read_operation() {
-            StorageError::ReadFailed {
-                context: format!("io_uring {context} for {}", operation_type.as_str()),
-                source: Box::new(crate::error::StorageErrorSource::Custom(error.to_string())),
-            }
-        } else {
-            StorageError::WriteFailed {
-                context: format!("io_uring {context} for {}", operation_type.as_str()),
-                source: Box::new(crate::error::StorageErrorSource::Custom(error.to_string())),
-            }
-        };
-        FlashQError::Storage(storage_error)
-    }
-
-    fn create_operation_failed_error(
-        operation_type: IoRingOperationType,
-        result: i32,
-    ) -> FlashQError {
-        let storage_error = if operation_type.is_read_operation() {
-            StorageError::ReadFailed {
-                context: format!(
-                    "io_uring {} failed with code: {result}",
-                    operation_type.as_str()
-                ),
-                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
-                    "io_uring error code: {result}"
-                ))),
-            }
-        } else {
-            StorageError::WriteFailed {
-                context: format!(
-                    "io_uring {} failed with code: {result}",
-                    operation_type.as_str()
-                ),
-                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
-                    "io_uring error code: {result}"
-                ))),
-            }
-        };
-        FlashQError::Storage(storage_error)
-    }
-
-    fn process_completion_entry(
-        completion_entry: io_uring::cqueue::Entry,
-        operation_type: IoRingOperationType,
-    ) -> Result<i32, FlashQError> {
-        let result = completion_entry.result();
-        if result < 0 {
-            Err(Self::create_operation_failed_error(operation_type, result))
-        } else {
-            Ok(result)
-        }
-    }
-
-    /// Batch execution of multiple io_uring operations for improved performance
-    /// Internal helper that submits multiple operations and waits for all completions
-    fn execute_batch(
-        handle: &mut IoUringFileHandle,
-        operations: &[io_uring::squeue::Entry],
-        operation_types: &[IoRingOperationType],
-    ) -> Result<Vec<i32>, FlashQError> {
-        if operations.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let op_count = operations.len();
-        if op_count != operation_types.len() {
-            return Err(FlashQError::Storage(StorageError::WriteFailed {
-                context: "Batch operation count mismatch".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(
-                    "Operations and types arrays must have same length".to_string(),
-                )),
-            }));
-        }
-
-        let mut ring = handle.ring.lock().unwrap();
-        let mut results = Vec::with_capacity(op_count);
-
-        // Submit all operations to the submission queue
-        for (i, operation) in operations.iter().enumerate() {
-            unsafe {
-                ring.submission().push(operation).map_err(|e| {
-                    Self::create_io_uring_error(operation_types[i], "batch submission push", e)
-                })?;
-            }
-        }
-
-        // Submit all operations and wait for all completions
-        ring.submit_and_wait(op_count)
-            .map_err(|e| Self::create_io_uring_error(operation_types[0], "batch submit_and_wait", e))?;
-
-        // Collect all completion results
-        for _ in 0..op_count {
-            if let Some(completion_entry) = ring.completion().next() {
-                let result = completion_entry.result();
-                if result < 0 {
-                    // For batch operations, we need to determine which operation failed
-                    // For now, we'll use the first operation type for error context
-                    return Err(Self::create_operation_failed_error(operation_types[0], result));
-                }
-                results.push(result);
-            } else {
-                return Err(Self::create_io_uring_error(
-                    operation_types[0],
-                    "batch completion queue",
-                    format!("Expected {} completions, got {}", op_count, results.len()),
-                ));
-            }
-        }
-
-        trace!("io_uring batch completed: {op_count} operations");
-        Ok(results)
+        let shared_ring = get_shared_ring()?;
+        let op_handle = shared_ring.submit_operation(operation)?;
+        op_handle.wait()
     }
 }
