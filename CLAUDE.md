@@ -149,7 +149,7 @@ Current implementation features:
 - **Offset-based positioning**: Sequential offsets within topics starting from 0
 - **Non-destructive polling**: Records remain in queue after being read
 - **FIFO ordering**: Records returned in the order they were posted with offset guarantees
-- **Thread safety**: Safe concurrent access using Arc<Mutex<>>
+- **Thread safety**: Safe concurrent access using DashMap and Arc<RwLock<>>
 - **ISO 8601 timestamps**: Human-readable timestamp format for record creation time
 - **Consumer groups**: Persistent consumer group offset management
 - **Replay functionality**: Seek to specific offsets with `from_offset` parameter
@@ -161,22 +161,22 @@ Current implementation features:
 ## Performance Characteristics
 
 **Memory Storage (Fast, Volatile):**
-- Throughput: 98K-549K records/sec
-- Latency: 1.8-10.2ms
+- Throughput: 100.6K-544K records/sec
+- Latency: 1.84-9.94ms
 - Best for: Real-time processing, temporary queues
 
 **File Storage - Standard (Persistent, Stable):**
-- Throughput: 10.5K-42.6K records/sec  
-- Latency: 23.5-95ms
+- Throughput: 10.3K-42.7K records/sec  
+- Latency: 23.4-96.8ms
 - Best for: Durable messaging, audit logs
 - Architecture: Kafka-aligned segments with sparse indexing
 
 **File Storage - io_uring (Experimental, Linux-only):**
-- Throughput: 807-3.3K records/sec
-- Latency: 300ms-1.24s
-- Status: Not optimized, 68-680x slower than memory storage
+- Throughput: 797-3.33K records/sec
+- Latency: 300ms-1.26s
+- Status: Not optimized, 68-683x slower than memory storage
 
-Memory storage provides 13-52x performance advantage over standard file storage. The io_uring implementation is currently experimental and significantly slower than standard file I/O, requiring optimization work.
+Memory storage provides 13-53x performance advantage over standard file storage. The io_uring implementation is currently experimental and significantly slower than standard file I/O, requiring optimization work.
 
 ## Documentation
 
