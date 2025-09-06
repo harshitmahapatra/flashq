@@ -71,41 +71,58 @@ impl SharedRingManager {
         ring: Arc<Mutex<IoUring>>,
         pending_operations: Arc<DashMap<u64, mpsc::Sender<Result<i32, FlashQError>>>>,
     ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            loop {
-                let completions = {
-                    let mut ring = ring.lock().unwrap();
-                    let mut completions = Vec::new();
-                    while let Some(cqe) = ring.completion().next() {
-                        completions.push((cqe.user_data(), cqe.result()));
-                    }
-
-                    completions
-                };
-
-                if !completions.is_empty() {
-                    for (user_data, result) in completions {
-                        if let Some((_, sender)) = pending_operations.remove(&user_data) {
-                            let completion_result = if result < 0 {
-                                Err(FlashQError::Storage(StorageError::WriteFailed {
-                                    context: format!(
-                                        "io_uring operation failed with code: {result}"
-                                    ),
-                                    source: Box::new(crate::error::StorageErrorSource::Custom(
-                                        format!("io_uring error code: {result}"),
-                                    )),
-                                }))
-                            } else {
-                                Ok(result)
-                            };
-
-                            let _ = sender.send(completion_result);
-                        }
-                    }
-                }
-                thread::sleep(std::time::Duration::from_millis(1));
+        thread::spawn(move || loop {
+            let completions = SharedRingManager::drain_completions(&ring);
+            if !completions.is_empty() {
+                SharedRingManager::dispatch_completions(&pending_operations, completions);
+                continue;
             }
+
+            if !pending_operations.is_empty() {
+                // Avoid deadlock: do not block with submit_and_wait while holding the ring lock,
+                // because submitters also need the same lock to push SQEs.
+                // Briefly yield when there is pending work but no completions yet.
+                std::thread::park_timeout(std::time::Duration::from_micros(100));
+                continue;
+            }
+
+            std::thread::park_timeout(std::time::Duration::from_millis(1));
         })
+    }
+
+    fn drain_completions(ring: &Arc<Mutex<IoUring>>) -> Vec<(u64, i32)> {
+        let mut out = Vec::new();
+        if let Ok(mut r) = ring.lock() {
+            while let Some(cqe) = r.completion().next() {
+                out.push((cqe.user_data(), cqe.result()));
+            }
+        }
+        out
+    }
+
+    fn dispatch_completions(
+        pending: &Arc<DashMap<u64, mpsc::Sender<Result<i32, FlashQError>>>>,
+        completions: Vec<(u64, i32)>,
+    ) {
+        for (user_data, result) in completions {
+            if let Some((_, sender)) = pending.remove(&user_data) {
+                let mapped = SharedRingManager::map_cqe_result(result);
+                let _ = sender.send(mapped);
+            }
+        }
+    }
+
+    fn map_cqe_result(result: i32) -> Result<i32, FlashQError> {
+        if result < 0 {
+            Err(FlashQError::Storage(StorageError::WriteFailed {
+                context: format!("io_uring operation failed with code: {result}"),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "io_uring error code: {result}"
+                ))),
+            }))
+        } else {
+            Ok(result)
+        }
     }
 
     fn submit_operation(
