@@ -6,6 +6,7 @@ use fs4::fs_std::FileExt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 use sysinfo::{ProcessesToUpdate, System};
 
 #[derive(Debug)]
@@ -17,7 +18,7 @@ pub enum StorageBackend {
         data_dir: std::path::PathBuf,
         wal_commit_threshold: usize,
         segment_size_bytes: u64,
-        _directory_lock: std::fs::File,
+        _directory_lock: File,
     },
 }
 impl Drop for StorageBackend {
@@ -70,9 +71,12 @@ impl StorageBackend {
         })
     }
 
-    pub fn create(&self, topic: &str) -> Result<Box<dyn TopicLog + Send>, std::io::Error> {
+    pub fn create(
+        &self,
+        topic: &str,
+    ) -> Result<Arc<RwLock<dyn TopicLog + Send + Sync>>, std::io::Error> {
         match self {
-            StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
+            StorageBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryTopicLog::new()))),
             StorageBackend::File {
                 sync_mode,
                 io_mode,
@@ -89,7 +93,7 @@ impl StorageBackend {
                         data_dir,
                         *segment_size_bytes,
                     )?;
-                    Ok(Box::new(file_log))
+                    Ok(Arc::new(RwLock::new(file_log)))
                 }
                 #[cfg(target_os = "linux")]
                 FileIOMode::IoUring => {
@@ -101,7 +105,7 @@ impl StorageBackend {
                         data_dir,
                         *segment_size_bytes,
                     )?;
-                    Ok(Box::new(file_log))
+                    Ok(Arc::new(RwLock::new(file_log)))
                 }
             },
         }
@@ -110,11 +114,11 @@ impl StorageBackend {
     pub fn create_consumer_group(
         &self,
         group_id: &str,
-    ) -> Result<Box<dyn ConsumerGroup>, Box<dyn std::error::Error>> {
+    ) -> Result<Arc<RwLock<dyn ConsumerGroup>>, Box<dyn std::error::Error>> {
         match self {
-            StorageBackend::Memory => {
-                Ok(Box::new(InMemoryConsumerGroup::new(group_id.to_string())))
-            }
+            StorageBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryConsumerGroup::new(
+                group_id.to_string(),
+            )))),
             StorageBackend::File {
                 sync_mode,
                 io_mode,
@@ -127,7 +131,7 @@ impl StorageBackend {
                     > = crate::storage::file::FileConsumerGroup::new(
                         group_id, *sync_mode, data_dir,
                     )?;
-                    Ok(Box::new(consumer_group))
+                    Ok(Arc::new(RwLock::new(consumer_group)))
                 }
                 #[cfg(target_os = "linux")]
                 FileIOMode::IoUring => {
@@ -136,7 +140,7 @@ impl StorageBackend {
                     > = crate::storage::file::FileConsumerGroup::new(
                         group_id, *sync_mode, data_dir,
                     )?;
-                    Ok(Box::new(consumer_group))
+                    Ok(Arc::new(RwLock::new(consumer_group)))
                 }
             },
         }
@@ -315,17 +319,17 @@ mod tests {
     #[test]
     fn test_storage_backend_memory() {
         let backend = StorageBackend::new_memory();
-        let mut storage = backend.create("test_topic").unwrap();
+        let storage = backend.create("test_topic").unwrap();
 
-        assert_eq!(storage.len(), 0);
-        assert!(storage.is_empty());
-        assert_eq!(storage.next_offset(), 0);
+        assert_eq!(storage.read().unwrap().len(), 0);
+        assert!(storage.read().unwrap().is_empty());
+        assert_eq!(storage.read().unwrap().next_offset(), 0);
 
         let record = Record::new(None, "test".to_string(), None);
-        let offset = storage.append(record).unwrap();
+        let offset = storage.write().unwrap().append(record).unwrap();
         assert_eq!(offset, 0);
-        assert_eq!(storage.len(), 1);
-        assert_eq!(storage.next_offset(), 1);
+        assert_eq!(storage.read().unwrap().len(), 1);
+        assert_eq!(storage.read().unwrap().next_offset(), 1);
     }
 
     #[test]

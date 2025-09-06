@@ -10,11 +10,11 @@ graph TD
     C[Interactive Demo] --> D[FlashQ Core]
     B --> D
     
-    D --> E[Topics Map]
-    D --> F[Consumer Groups]
+    D --> E[DashMap Topics]
+    D --> F[DashMap Consumer Groups]
     
-    E --> G[TopicLog Trait]
-    F --> H[ConsumerGroup Trait]
+    E --> G[Arc RwLock TopicLog]
+    F --> H[Arc RwLock ConsumerGroup]
     
     subgraph "Storage Backends"
         I[InMemoryTopicLog]
@@ -65,7 +65,7 @@ graph TD
 - `InMemoryTopicLog`: Fast in-memory storage implementation
 
 **Key Features:**
-- Thread-safe concurrent access with pluggable storage backends
+- Concurrent access with DashMap and reader-writer locks for improved performance
 - Kafka-aligned segment architecture with rolling and sparse indexing
 - Pluggable I/O layer with standard and io_uring implementations
 - Directory locking and crash recovery for data durability
@@ -99,7 +99,7 @@ sequenceDiagram
 - Sequential offsets with ISO 8601 timestamps
 - Append-only logs ensure FIFO ordering  
 - Non-destructive polling (records persist)
-- Thread-safe with `Arc<Mutex<>>`
+- Concurrent access with DashMap and RwLock for improved performance
 - Segment-based storage for scalability and Kafka alignment
 
 ## Segment-Based Storage
@@ -145,7 +145,7 @@ data/
 - File storage: O(1) append, O(k) for k records read
 - Post: O(1) append operation (with segment indexing)
 - Poll: O(k) for k records
-- Concurrency: Single lock bottleneck per storage backend
+- Concurrency: DashMap provides lock-free access, RwLock enables concurrent reads
 
 **Trade-offs:**
 - **Memory vs File**: Speed vs persistence (13-680x performance difference)
