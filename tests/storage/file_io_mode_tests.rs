@@ -15,13 +15,13 @@ fn test_storage_backend_with_standard_io() {
     let topic_log = backend.create("test_topic").unwrap();
 
     let record = flashq::Record::new(Some("key1".to_string()), "test_value".to_string(), None);
-    let offset = topic_log.lock().unwrap().append(record).unwrap();
+    let offset = topic_log.write().unwrap().append(record).unwrap();
 
     assert_eq!(offset, 0);
-    assert_eq!(topic_log.lock().unwrap().len(), 1);
+    assert_eq!(topic_log.read().unwrap().len(), 1);
 
     let records = topic_log
-        .lock()
+        .read()
         .unwrap()
         .get_records_from_offset(0, Some(1))
         .unwrap();
@@ -54,13 +54,13 @@ fn test_storage_backend_with_io_uring() {
         "io_uring_value".to_string(),
         None,
     );
-    let offset = topic_log.lock().unwrap().append(record).unwrap();
+    let offset = topic_log.write().unwrap().append(record).unwrap();
 
     assert_eq!(offset, 0);
-    assert_eq!(topic_log.lock().unwrap().len(), 1);
+    assert_eq!(topic_log.read().unwrap().len(), 1);
 
     let records = topic_log
-        .lock()
+        .read()
         .unwrap()
         .get_records_from_offset(0, Some(1))
         .unwrap();
@@ -97,17 +97,17 @@ fn test_consumer_group_with_standard_io() {
     let consumer_group = backend.create_consumer_group("test_group").unwrap();
 
     // Test initial state
-    assert_eq!(consumer_group.lock().unwrap().get_offset("test_topic"), 0);
+    assert_eq!(consumer_group.read().unwrap().get_offset("test_topic"), 0);
 
     // Test setting offset
     consumer_group
-        .lock()
+        .write()
         .unwrap()
         .set_offset("test_topic".to_string(), 42);
-    assert_eq!(consumer_group.lock().unwrap().get_offset("test_topic"), 42);
+    assert_eq!(consumer_group.read().unwrap().get_offset("test_topic"), 42);
 
     // Test group ID
-    assert_eq!(consumer_group.lock().unwrap().group_id(), "test_group");
+    assert_eq!(consumer_group.read().unwrap().group_id(), "test_group");
 }
 
 #[cfg(target_os = "linux")]
@@ -132,22 +132,22 @@ fn test_consumer_group_with_io_uring() {
 
     // Test initial state
     assert_eq!(
-        consumer_group.lock().unwrap().get_offset("io_uring_topic"),
+        consumer_group.read().unwrap().get_offset("io_uring_topic"),
         0
     );
 
     // Test setting offset
     consumer_group
-        .lock()
+        .write()
         .unwrap()
         .set_offset("io_uring_topic".to_string(), 99);
     assert_eq!(
-        consumer_group.lock().unwrap().get_offset("io_uring_topic"),
+        consumer_group.read().unwrap().get_offset("io_uring_topic"),
         99
     );
 
     // Test group ID
-    assert_eq!(consumer_group.lock().unwrap().group_id(), "io_uring_group");
+    assert_eq!(consumer_group.read().unwrap().group_id(), "io_uring_group");
 }
 
 /// Integration test comparing behavior between I/O modes
@@ -168,12 +168,12 @@ fn test_io_mode_behavior_compatibility() {
     let record2 = flashq::Record::new(Some("key2".to_string()), "value2".to_string(), None);
 
     let offset1_std = std_topic_log
-        .lock()
+        .write()
         .unwrap()
         .append(record1.clone())
         .unwrap();
     let offset2_std = std_topic_log
-        .lock()
+        .write()
         .unwrap()
         .append(record2.clone())
         .unwrap();
@@ -193,12 +193,12 @@ fn test_io_mode_behavior_compatibility() {
 
             let io_uring_topic_log = io_uring_backend.create("compat_topic").unwrap();
             let offset1_io_uring = io_uring_topic_log
-                .lock()
+                .write()
                 .unwrap()
                 .append(record1.clone())
                 .unwrap();
             let offset2_io_uring = io_uring_topic_log
-                .lock()
+                .write()
                 .unwrap()
                 .append(record2.clone())
                 .unwrap();
@@ -207,22 +207,22 @@ fn test_io_mode_behavior_compatibility() {
             assert_eq!(offset1_std, offset1_io_uring);
             assert_eq!(offset2_std, offset2_io_uring);
             assert_eq!(
-                std_topic_log.lock().unwrap().len(),
-                io_uring_topic_log.lock().unwrap().len()
+                std_topic_log.read().unwrap().len(),
+                io_uring_topic_log.read().unwrap().len()
             );
             assert_eq!(
-                std_topic_log.lock().unwrap().next_offset(),
-                io_uring_topic_log.lock().unwrap().next_offset()
+                std_topic_log.read().unwrap().next_offset(),
+                io_uring_topic_log.read().unwrap().next_offset()
             );
 
             // Records should be identical
             let std_records = std_topic_log
-                .lock()
+                .read()
                 .unwrap()
                 .get_records_from_offset(0, None)
                 .unwrap();
             let io_uring_records = io_uring_topic_log
-                .lock()
+                .read()
                 .unwrap()
                 .get_records_from_offset(0, None)
                 .unwrap();

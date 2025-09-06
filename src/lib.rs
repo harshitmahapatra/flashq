@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use storage::{ConsumerGroup, TopicLog};
 
 pub mod demo;
@@ -64,8 +64,8 @@ impl RecordWithOffset {
 // =============================================================================
 
 pub struct FlashQ {
-    topics: Arc<DashMap<String, Arc<Mutex<dyn TopicLog>>>>,
-    consumer_groups: Arc<DashMap<String, Arc<Mutex<dyn ConsumerGroup>>>>,
+    topics: Arc<DashMap<String, Arc<RwLock<dyn TopicLog>>>>,
+    consumer_groups: Arc<DashMap<String, Arc<RwLock<dyn ConsumerGroup>>>>,
     storage_backend: storage::StorageBackend,
 }
 
@@ -109,7 +109,7 @@ impl FlashQ {
         });
         topic_log
             .value()
-            .lock()
+            .write()
             .unwrap()
             .append(record)
             .map_err(FlashQError::from)
@@ -127,7 +127,7 @@ impl FlashQ {
         });
 
         let mut offsets = Vec::new();
-        let mut topic_log_locked = topic_log.value().lock().unwrap();
+        let mut topic_log_locked = topic_log.value().write().unwrap();
         for record in records {
             offsets.push(topic_log_locked.append(record).map_err(FlashQError::from)?);
         }
@@ -151,7 +151,7 @@ impl FlashQ {
         match self.topics.get(topic) {
             Some(topic_log) => topic_log
                 .value()
-                .lock()
+                .read()
                 .unwrap()
                 .get_records_from_offset(offset, count)
                 .map_err(FlashQError::from),
@@ -183,7 +183,7 @@ impl FlashQ {
         topic: &str,
     ) -> Result<u64, FlashQError> {
         match self.consumer_groups.get(group_id) {
-            Some(consumer_group) => Ok(consumer_group.value().lock().unwrap().get_offset(topic)),
+            Some(consumer_group) => Ok(consumer_group.value().read().unwrap().get_offset(topic)),
             None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
@@ -197,7 +197,7 @@ impl FlashQ {
         offset: u64,
     ) -> Result<(), FlashQError> {
         let topic_next_offset = match self.topics.get(&topic) {
-            Some(topic_log) => topic_log.value().lock().unwrap().next_offset(),
+            Some(topic_log) => topic_log.value().write().unwrap().next_offset(),
             None => {
                 return Err(FlashQError::TopicNotFound {
                     topic: topic.clone(),
@@ -217,7 +217,7 @@ impl FlashQ {
             Some(consumer_group) => {
                 consumer_group
                     .value()
-                    .lock()
+                    .write()
                     .unwrap()
                     .set_offset(topic, offset);
                 Ok(())
@@ -268,7 +268,7 @@ impl FlashQ {
 
     pub fn get_high_water_mark(&self, topic: &str) -> u64 {
         match self.topics.get(topic) {
-            Some(topic_log) => topic_log.value().lock().unwrap().next_offset(),
+            Some(topic_log) => topic_log.value().read().unwrap().next_offset(),
             None => 0,
         }
     }

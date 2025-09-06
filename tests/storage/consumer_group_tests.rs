@@ -9,8 +9,8 @@ fn test_consumer_group_creation_backends() {
 
     let memory_backend = StorageBackend::new_memory();
     let memory_group = memory_backend.create_consumer_group(&group_id).unwrap();
-    assert_eq!(memory_group.lock().unwrap().group_id(), &group_id);
-    assert_eq!(memory_group.lock().unwrap().get_offset("test_topic"), 0);
+    assert_eq!(memory_group.read().unwrap().group_id(), &group_id);
+    assert_eq!(memory_group.read().unwrap().get_offset("test_topic"), 0);
 
     let file_backend = StorageBackend::new_file_with_path(
         config.sync_mode,
@@ -19,8 +19,8 @@ fn test_consumer_group_creation_backends() {
     )
     .unwrap();
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();
-    assert_eq!(file_group.lock().unwrap().group_id(), &group_id);
-    assert_eq!(file_group.lock().unwrap().get_offset("test_topic"), 0);
+    assert_eq!(file_group.read().unwrap().group_id(), &group_id);
+    assert_eq!(file_group.read().unwrap().get_offset("test_topic"), 0);
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn test_consumer_group_persistence() {
         .unwrap();
         let consumer_group = backend.create_consumer_group(&group_id).unwrap();
         consumer_group
-            .lock()
+            .write()
             .unwrap()
             .set_offset(topic_name.clone(), 5);
     }
@@ -49,7 +49,7 @@ fn test_consumer_group_persistence() {
             .unwrap();
     let recovered_group = backend.create_consumer_group(&group_id).unwrap();
 
-    assert_eq!(recovered_group.lock().unwrap().get_offset(&topic_name), 5);
+    assert_eq!(recovered_group.read().unwrap().get_offset(&topic_name), 5);
 }
 
 #[test]

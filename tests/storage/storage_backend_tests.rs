@@ -127,11 +127,11 @@ fn test_file_storage_vs_memory_storage_interface() {
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();
 
     assert_eq!(
-        memory_group.lock().unwrap().group_id(),
-        file_group.lock().unwrap().group_id()
+        memory_group.read().unwrap().group_id(),
+        file_group.read().unwrap().group_id()
     );
     assert_eq!(
-        memory_group.lock().unwrap().get_offset("any_topic"),
-        file_group.lock().unwrap().get_offset("any_topic")
+        memory_group.read().unwrap().get_offset("any_topic"),
+        file_group.read().unwrap().get_offset("any_topic")
     );
 }
