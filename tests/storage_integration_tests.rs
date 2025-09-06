@@ -7,6 +7,7 @@
 mod storage {
     pub mod consumer_group_tests;
     pub mod directory_locking_tests;
+    #[cfg(target_os = "linux")]
     pub mod error_simulation_tests;
     pub mod file_io_integration_tests;
     pub mod file_io_mode_tests;
