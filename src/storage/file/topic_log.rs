@@ -5,7 +5,6 @@ use crate::storage::file::std_io::StdFileIO;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};
-use std::marker::PhantomData;
 use std::path::Path;
 
 /// File-based topic log implementation using Kafka-aligned segment architecture
@@ -13,7 +12,6 @@ pub struct FileTopicLog<F: FileIO = StdFileIO> {
     segment_manager: SegmentManager<F>,
     next_offset: u64,
     record_count: usize,
-    _phantom: PhantomData<F>,
 }
 
 impl<F: FileIO> FileTopicLog<F> {
@@ -41,7 +39,6 @@ impl<F: FileIO> FileTopicLog<F> {
             segment_manager,
             next_offset: 0,
             record_count: 0,
-            _phantom: PhantomData,
         };
 
         log.recover_from_segments()

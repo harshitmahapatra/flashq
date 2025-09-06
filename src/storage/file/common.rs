@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::{BufReader, Read},
     path::Path,
 };
@@ -23,14 +22,6 @@ pub fn ensure_directory_exists<P: AsRef<Path>>(dir: P) -> Result<(), std::io::Er
         std::fs::create_dir_all(dir)?;
     }
     Ok(())
-}
-
-pub fn sync_file_if_needed(file: &File, sync_mode: SyncMode) -> Result<(), std::io::Error> {
-    if sync_mode == SyncMode::Immediate {
-        file.sync_all()
-    } else {
-        Ok(())
-    }
 }
 
 pub fn deserialize_record<R: Read>(

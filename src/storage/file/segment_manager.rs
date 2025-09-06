@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::{collections::BTreeMap, io::BufReader};
 
@@ -21,7 +20,6 @@ pub struct SegmentManager<F: FileIO = StdFileIO> {
     segment_size_bytes: u64,
     sync_mode: SyncMode,
     indexing_config: IndexingConfig,
-    _phantom: PhantomData<F>,
 }
 
 impl<F: FileIO> SegmentManager<F> {
@@ -38,7 +36,6 @@ impl<F: FileIO> SegmentManager<F> {
             segment_size_bytes,
             sync_mode,
             indexing_config,
-            _phantom: PhantomData,
         }
     }
 

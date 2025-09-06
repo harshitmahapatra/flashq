@@ -129,5 +129,3 @@ impl FileIO for StdFileIO {
         Ok(file_metadata.len())
     }
 }
-
-// Tests moved to tests/storage/file_io_integration_tests.rs

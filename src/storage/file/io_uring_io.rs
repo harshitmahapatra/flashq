@@ -328,5 +328,3 @@ impl IoUringFileIO {
         FlashQError::Storage(storage_error)
     }
 }
-
-// Tests moved to tests/storage/file_io_integration_tests.rs

@@ -63,21 +63,7 @@ fn test_storage_backend_with_io_uring() {
 #[test]
 fn test_file_io_mode_default_selection() {
     let default_mode = FileIOMode::default();
-
-    #[cfg(target_os = "linux")]
-    {
-        use flashq::storage::file::IoUringFileIO;
-        if IoUringFileIO::is_available() {
-            assert_eq!(default_mode, FileIOMode::IoUring);
-        } else {
-            assert_eq!(default_mode, FileIOMode::Standard);
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        assert_eq!(default_mode, FileIOMode::Standard);
-    }
+    assert_eq!(default_mode, FileIOMode::Standard);
 }
 
 #[test]
