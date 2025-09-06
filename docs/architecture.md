@@ -28,12 +28,18 @@ graph TD
         N[LogSegment]
         O[SparseIndex]
         P[Serialization Utils]
+        Q[FileIO Trait]
+        R[StdFileIO]
+        S[IoUringFileIO - Linux]
     end
     
     J --> M
     M --> N
     N --> O
     J --> P
+    N --> Q
+    Q --> R
+    Q --> S
     
     G --> I
     G --> J
@@ -51,13 +57,17 @@ graph TD
 - `StorageBackend`: Factory with directory locking and backend selection
 - `FileTopicLog`: Kafka-aligned segment-based file storage with crash recovery
 - `SegmentManager`: Manages log segment lifecycle and rolling
-- `LogSegment`: Individual segment files with sparse indexing
+- `LogSegment`: Individual segment files with sparse indexing and pluggable I/O
 - `SparseIndex`: Efficient offset-to-position mapping within segments
+- `FileIO` trait: Abstraction for file I/O operations (standard vs io_uring)
+- `StdFileIO`: Standard file I/O implementation using std::fs
+- `IoUringFileIO`: Linux io_uring implementation for high-performance I/O (experimental)
 - `InMemoryTopicLog`: Fast in-memory storage implementation
 
 **Key Features:**
 - Thread-safe concurrent access with pluggable storage backends
 - Kafka-aligned segment architecture with rolling and sparse indexing
+- Pluggable I/O layer with standard and io_uring implementations
 - Directory locking and crash recovery for data durability
 - Append-only logs with FIFO ordering and non-destructive polling
 
@@ -119,6 +129,7 @@ data/
 
 **Architecture Choices:**
 - **Storage abstraction**: Trait-based pluggable backends with memory and file implementations
+- **I/O abstraction**: FileIO trait enables standard vs io_uring implementations
 - **Segment-based storage**: Kafka-aligned architecture for scalability and industry compatibility
 - **Directory locking**: Prevents data corruption from concurrent processes
 - **Sparse indexing**: Efficient offset lookup without loading entire segments
@@ -137,7 +148,8 @@ data/
 - Concurrency: Single lock bottleneck per storage backend
 
 **Trade-offs:**
-- **Memory vs File**: Speed vs persistence (930x performance difference)
+- **Memory vs File**: Speed vs persistence (13-680x performance difference)
+- **Standard vs io_uring I/O**: Maturity vs experimental performance
 - **Segment rolling**: Storage efficiency vs lookup complexity
 - **Directory locking**: Safety vs multi-process access
 - **Sparse indexing**: Memory efficiency vs lookup speed
