@@ -69,13 +69,38 @@ impl IoUringFileIO {
             .unwrap_or(DEFAULT_RING_ENTRIES)
     }
 
+    /// Create IoUring with optimized builder flags, fallback to basic creation if needed
+    fn create_io_uring(entries: u32) -> Result<IoUring, std::io::Error> {
+        // Try with cooperation flags for better performance (best-effort)
+        match io_uring::IoUring::builder()
+            .setup_coop_taskrun()
+            .setup_single_issuer()
+            .build(entries)
+        {
+            Ok(ring) => {
+                info!("io_uring created with cooperation flags enabled");
+                Ok(ring)
+            }
+            Err(_) => {
+                // Fallback to basic IoUring creation without advanced flags
+                match IoUring::new(entries) {
+                    Ok(ring) => {
+                        info!("io_uring created with basic configuration");
+                        Ok(ring)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    }
+
     /// Check if io_uring is available on the current system
     pub fn is_available() -> bool {
         *GLOBAL_IO_URING_AVAILABILITY_STATUS.get_or_init(Self::detect_io_uring_functionality)
     }
 
     fn detect_io_uring_functionality() -> bool {
-        match IoUring::new(Self::ring_entries()) {
+        match Self::create_io_uring(Self::ring_entries()) {
             Ok(mut new_ring) => match Self::validate_io_uring_with_nop_operation(&mut new_ring) {
                 Ok(_) => {
                     info!("io_uring detected and functional");
@@ -117,7 +142,7 @@ impl IoUringFileIO {
     }
 
     fn create_handle(file: std::fs::File) -> Result<IoUringFileHandle, FlashQError> {
-        let ring = IoUring::new(Self::ring_entries()).map_err(|e| {
+        let ring = Self::create_io_uring(Self::ring_entries()).map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to create IoUring instance",
@@ -365,5 +390,65 @@ impl IoUringFileIO {
         } else {
             Ok(result)
         }
+    }
+
+    /// Batch execution of multiple io_uring operations for improved performance
+    /// Internal helper that submits multiple operations and waits for all completions
+    fn execute_batch(
+        handle: &mut IoUringFileHandle,
+        operations: &[io_uring::squeue::Entry],
+        operation_types: &[IoRingOperationType],
+    ) -> Result<Vec<i32>, FlashQError> {
+        if operations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let op_count = operations.len();
+        if op_count != operation_types.len() {
+            return Err(FlashQError::Storage(StorageError::WriteFailed {
+                context: "Batch operation count mismatch".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(
+                    "Operations and types arrays must have same length".to_string(),
+                )),
+            }));
+        }
+
+        let mut ring = handle.ring.lock().unwrap();
+        let mut results = Vec::with_capacity(op_count);
+
+        // Submit all operations to the submission queue
+        for (i, operation) in operations.iter().enumerate() {
+            unsafe {
+                ring.submission().push(operation).map_err(|e| {
+                    Self::create_io_uring_error(operation_types[i], "batch submission push", e)
+                })?;
+            }
+        }
+
+        // Submit all operations and wait for all completions
+        ring.submit_and_wait(op_count)
+            .map_err(|e| Self::create_io_uring_error(operation_types[0], "batch submit_and_wait", e))?;
+
+        // Collect all completion results
+        for _ in 0..op_count {
+            if let Some(completion_entry) = ring.completion().next() {
+                let result = completion_entry.result();
+                if result < 0 {
+                    // For batch operations, we need to determine which operation failed
+                    // For now, we'll use the first operation type for error context
+                    return Err(Self::create_operation_failed_error(operation_types[0], result));
+                }
+                results.push(result);
+            } else {
+                return Err(Self::create_io_uring_error(
+                    operation_types[0],
+                    "batch completion queue",
+                    format!("Expected {} completions, got {}", op_count, results.len()),
+                ));
+            }
+        }
+
+        trace!("io_uring batch completed: {op_count} operations");
+        Ok(results)
     }
 }
