@@ -56,6 +56,14 @@ impl SparseIndex {
         }
     }
 
+    pub fn serialize_entry(&self, entry: &IndexEntry, base_offset: u64) -> Vec<u8> {
+        let relative_offset = (entry.offset - base_offset) as u32;
+        let mut buf = Vec::with_capacity(8);
+        buf.extend_from_slice(&relative_offset.to_be_bytes());
+        buf.extend_from_slice(&entry.position.to_be_bytes());
+        buf
+    }
+
     pub fn write_entry_to_file<W: Write>(
         &self,
         writer: &mut BufWriter<W>,

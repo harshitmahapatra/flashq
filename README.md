@@ -13,7 +13,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 - Thread-safe concurrent access
 - Kafka-aligned segment-based file storage with crash recovery
 - Error handling with structured logging
-- Pluggable storage backends (in-memory and file-based)
+- Pluggable storage backends (in-memory, standard file I/O, experimental io_uring on Linux)
 - Performance benchmarking with memory profiling
 
 ## Quick Start
@@ -36,6 +36,10 @@ cargo run --bin server 9090      # Custom port
 # File storage backend
 cargo run --bin server -- --storage=file --data-dir=./data
 cargo run --bin server 9090 -- --storage=file --sync-mode=always
+
+# File storage with I/O modes (Linux only)
+cargo run --bin server -- --storage=file --io-mode=standard   # Default
+cargo run --bin server -- --storage=file --io-mode=io_uring   # Experimental
 ```
 
 **Basic client usage:**

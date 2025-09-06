@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::OpenOptions,
-    io::Write,
+    marker::PhantomData,
     path::{Path, PathBuf},
 };
 
@@ -10,10 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{
-        SyncMode,
-        common::{ensure_directory_exists, sync_file_if_needed},
-    },
+    file::{SyncMode, common::ensure_directory_exists, file_io::FileIO, std_io::StdFileIO},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,14 +18,15 @@ struct ConsumerGroupData {
     topic_offsets: HashMap<String, u64>,
 }
 
-pub struct FileConsumerGroup {
+pub struct FileConsumerGroup<F: FileIO = StdFileIO> {
     group_id: String,
     topic_offsets: HashMap<String, u64>,
     file_path: PathBuf,
     sync_mode: SyncMode,
+    _phantom: PhantomData<F>,
 }
 
-impl FileConsumerGroup {
+impl<F: FileIO> FileConsumerGroup<F> {
     pub fn new<P: AsRef<Path>>(
         group_id: &str,
         sync_mode: SyncMode,
@@ -43,6 +40,7 @@ impl FileConsumerGroup {
             topic_offsets,
             file_path,
             sync_mode,
+            _phantom: PhantomData,
         };
 
         consumer_group.persist_to_disk()?;
@@ -68,7 +66,9 @@ impl FileConsumerGroup {
             return Ok(HashMap::new());
         }
 
+        // Use standard file operations for reading consumer group state
         let contents = std::fs::read_to_string(file_path)?;
+
         if contents.trim().is_empty() {
             return Ok(HashMap::new());
         }
@@ -95,14 +95,14 @@ impl FileConsumerGroup {
         let json_data = serde_json::to_string_pretty(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.file_path)?;
+        let mut file_handle = F::create_with_write_truncate_permissions(&self.file_path)
+            .map_err(std::io::Error::other)?;
+        F::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0)
+            .map_err(std::io::Error::other)?;
 
-        file.write_all(json_data.as_bytes())?;
-        sync_file_if_needed(&file, self.sync_mode)?;
+        if self.sync_mode == SyncMode::Immediate {
+            F::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
+        }
 
         Ok(())
     }
@@ -112,7 +112,7 @@ impl FileConsumerGroup {
 // CONSUMER GROUP TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl ConsumerGroup for FileConsumerGroup {
+impl<F: FileIO> ConsumerGroup for FileConsumerGroup<F> {
     fn get_offset(&self, topic: &str) -> u64 {
         self.topic_offsets.get(topic).copied().unwrap_or(0)
     }

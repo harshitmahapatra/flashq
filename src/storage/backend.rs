@@ -1,4 +1,5 @@
 use crate::error::StorageError;
+use crate::storage::file::FileIOMode;
 use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
 use crate::warn;
 use fs4::fs_std::FileExt;
@@ -12,6 +13,7 @@ pub enum StorageBackend {
     Memory,
     File {
         sync_mode: crate::storage::file::SyncMode,
+        io_mode: FileIOMode,
         data_dir: std::path::PathBuf,
         wal_commit_threshold: usize,
         segment_size_bytes: u64,
@@ -37,19 +39,21 @@ impl StorageBackend {
     }
 
     pub fn new_file(sync_mode: crate::storage::file::SyncMode) -> Result<Self, StorageError> {
-        Self::new_file_with_path(sync_mode, "./data")
+        Self::new_file_with_path(sync_mode, FileIOMode::default(), "./data")
     }
 
     pub fn new_file_with_path<P: AsRef<Path>>(
         sync_mode: crate::storage::file::SyncMode,
+        io_mode: FileIOMode,
         data_dir: P,
     ) -> Result<Self, StorageError> {
         const DEFAULT_SEGMENT_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
-        Self::new_file_with_config(sync_mode, data_dir, 1000, DEFAULT_SEGMENT_SIZE)
+        Self::new_file_with_config(sync_mode, io_mode, data_dir, 1000, DEFAULT_SEGMENT_SIZE)
     }
 
     pub fn new_file_with_config<P: AsRef<Path>>(
         sync_mode: crate::storage::file::SyncMode,
+        io_mode: FileIOMode,
         data_dir: P,
         wal_commit_threshold: usize,
         segment_size_bytes: u64,
@@ -58,6 +62,7 @@ impl StorageBackend {
         let directory_lock = acquire_directory_lock(&data_dir)?;
         Ok(StorageBackend::File {
             sync_mode,
+            io_mode,
             data_dir,
             wal_commit_threshold,
             segment_size_bytes,
@@ -70,18 +75,35 @@ impl StorageBackend {
             StorageBackend::Memory => Ok(Box::new(InMemoryTopicLog::new())),
             StorageBackend::File {
                 sync_mode,
+                io_mode,
                 data_dir,
                 segment_size_bytes,
                 ..
-            } => {
-                let file_log = crate::storage::file::FileTopicLog::new(
-                    topic,
-                    *sync_mode,
-                    data_dir,
-                    *segment_size_bytes,
-                )?;
-                Ok(Box::new(file_log))
-            }
+            } => match io_mode {
+                FileIOMode::Standard => {
+                    let file_log: crate::storage::file::FileTopicLog<
+                        crate::storage::file::std_io::StdFileIO,
+                    > = crate::storage::file::FileTopicLog::new(
+                        topic,
+                        *sync_mode,
+                        data_dir,
+                        *segment_size_bytes,
+                    )?;
+                    Ok(Box::new(file_log))
+                }
+                #[cfg(target_os = "linux")]
+                FileIOMode::IoUring => {
+                    let file_log: crate::storage::file::FileTopicLog<
+                        crate::storage::file::io_uring_io::IoUringFileIO,
+                    > = crate::storage::file::FileTopicLog::new(
+                        topic,
+                        *sync_mode,
+                        data_dir,
+                        *segment_size_bytes,
+                    )?;
+                    Ok(Box::new(file_log))
+                }
+            },
         }
     }
 
@@ -95,13 +117,28 @@ impl StorageBackend {
             }
             StorageBackend::File {
                 sync_mode,
+                io_mode,
                 data_dir,
                 ..
-            } => {
-                let consumer_group =
-                    crate::storage::file::FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
-                Ok(Box::new(consumer_group))
-            }
+            } => match io_mode {
+                FileIOMode::Standard => {
+                    let consumer_group: crate::storage::file::FileConsumerGroup<
+                        crate::storage::file::std_io::StdFileIO,
+                    > = crate::storage::file::FileConsumerGroup::new(
+                        group_id, *sync_mode, data_dir,
+                    )?;
+                    Ok(Box::new(consumer_group))
+                }
+                #[cfg(target_os = "linux")]
+                FileIOMode::IoUring => {
+                    let consumer_group: crate::storage::file::FileConsumerGroup<
+                        crate::storage::file::io_uring_io::IoUringFileIO,
+                    > = crate::storage::file::FileConsumerGroup::new(
+                        group_id, *sync_mode, data_dir,
+                    )?;
+                    Ok(Box::new(consumer_group))
+                }
+            },
         }
     }
 

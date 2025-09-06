@@ -13,6 +13,8 @@ FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, 
 - `cargo run --bin flashq` - Build and run the interactive demo
 - `cargo run --bin server` - Build and run the HTTP server (in-memory storage)
 - `cargo run --bin server -- --storage=file --data-dir=./data` - Run server with file storage
+- `cargo run --bin server -- --storage=file --io-mode=standard` - Standard file I/O (default)
+- `cargo run --bin server -- --storage=file --io-mode=io_uring` - io_uring I/O (Linux, experimental)
 - `cargo run --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
 
@@ -34,7 +36,8 @@ FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, 
 ```bash
 cargo bench                              # Run all benchmarks
 cargo bench --bench memory_storage       # Memory storage benchmarks only
-cargo bench --bench file_storage         # File storage benchmarks only
+cargo bench --bench file_storage_std     # Standard file I/O benchmarks
+cargo bench --bench file_storage_io_uring # io_uring I/O benchmarks (Linux)
 ```
 
 
@@ -73,8 +76,11 @@ Following Rust best practices with library and binary crates:
 - `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer
 - `FileTopicLog` - Kafka-aligned segment-based file storage with crash recovery
 - `SegmentManager` - Manages log segment lifecycle and rolling
-- `LogSegment` - Individual segment files with sparse indexing
+- `LogSegment` - Individual segment files with sparse indexing and pluggable I/O
 - `SparseIndex` - Efficient offset-to-position mapping within segments
+- `FileIO` trait - Abstraction for file I/O operations (standard vs io_uring)
+- `StdFileIO` - Standard file I/O implementation using std::fs
+- `IoUringFileIO` - Linux io_uring implementation (experimental, currently slower)
 - `FileConsumerGroup` - Persistent consumer group offset management
 - Directory locking mechanism to prevent concurrent access
 - Comprehensive error handling and recovery capabilities
@@ -155,17 +161,22 @@ Current implementation features:
 ## Performance Characteristics
 
 **Memory Storage (Fast, Volatile):**
-- Throughput: 10K-276K records/sec
-- Latency: 1.8-10ms
+- Throughput: 98K-549K records/sec
+- Latency: 1.8-10.2ms
 - Best for: Real-time processing, temporary queues
 
-**File Storage (Persistent, Segment-Based):**
-- Throughput: 856-17.5K records/sec  
-- Latency: 28.6-116.8ms
+**File Storage - Standard (Persistent, Stable):**
+- Throughput: 10.5K-42.6K records/sec  
+- Latency: 23.5-95ms
 - Best for: Durable messaging, audit logs
 - Architecture: Kafka-aligned segments with sparse indexing
 
-Memory storage provides 12-310x performance advantage over file storage, while file storage offers full persistence and crash recovery capabilities.
+**File Storage - io_uring (Experimental, Linux-only):**
+- Throughput: 807-3.3K records/sec
+- Latency: 300ms-1.24s
+- Status: Not optimized, 68-680x slower than memory storage
+
+Memory storage provides 13-52x performance advantage over standard file storage. The io_uring implementation is currently experimental and significantly slower than standard file I/O, requiring optimization work.
 
 ## Documentation
 
@@ -191,6 +202,10 @@ After building with `cargo build --release`:
 # Segment-based file storage backend
 ./target/release/server -- --storage=file --data-dir=./data
 ./target/release/server 9090 -- --storage=file --data-dir=./data
+
+# File storage with I/O mode selection (Linux only)
+./target/release/server -- --storage=file --io-mode=standard   # Recommended
+./target/release/server -- --storage=file --io-mode=io_uring   # Experimental
 ```
 
 **Logging Behavior:**
