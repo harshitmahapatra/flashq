@@ -80,10 +80,9 @@ impl StorageBackend {
                 segment_size_bytes,
                 ..
             } => {
-                let file_log = crate::storage::file::FileTopicLog::new(
+                let file_log: crate::storage::file::FileTopicLog = crate::storage::file::FileTopicLog::new(
                     topic,
                     *sync_mode,
-                    *io_mode,
                     data_dir,
                     *segment_size_bytes,
                 )?;
@@ -106,8 +105,8 @@ impl StorageBackend {
                 data_dir,
                 ..
             } => {
-                let consumer_group = crate::storage::file::FileConsumerGroup::new(
-                    group_id, *sync_mode, *io_mode, data_dir,
+                let consumer_group: crate::storage::file::FileConsumerGroup = crate::storage::file::FileConsumerGroup::new(
+                    group_id, *sync_mode, data_dir,
                 )?;
                 Ok(Box::new(consumer_group))
             }
