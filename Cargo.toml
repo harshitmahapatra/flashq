@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [features]
-default = ["http"]
+default = ["http", "io_uring"]
 http = []
 io_uring = ["dep:io-uring"]
 

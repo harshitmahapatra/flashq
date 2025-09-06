@@ -81,16 +81,16 @@ impl SharedRingManager {
 
             // If there are pending operations but no completions yet, block until at least one arrives.
             if !pending_operations.is_empty() {
-                if let Ok(mut r) = ring.lock() {
+                if let Ok(r) = ring.lock() {
                     // Wait for one completion; holding the lock is acceptable here because
-                    // submissions have already happened and we only block while completions are outstanding.
+                    // submissions have already happened, and we only block while completions are outstanding.
                     let _ = r.submit_and_wait(1);
                 }
                 continue;
             }
 
             // Idle backoff.
-            std::thread::park_timeout(std::time::Duration::from_millis(1));
+            thread::park_timeout(std::time::Duration::from_millis(1));
         })
     }
 
@@ -211,7 +211,7 @@ impl IoUringFileIO {
         // Try with cooperative task run for better performance (best-effort).
         // Avoid setup_single_issuer to allow submissions from multiple threads
         // when tests run in parallel.
-        match io_uring::IoUring::builder()
+        match IoUring::builder()
             .setup_coop_taskrun()
             .build(entries)
         {
