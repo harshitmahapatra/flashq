@@ -1,16 +1,17 @@
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::file_io::FileIO;
 use crate::error::{FlashQError, StorageError};
 
 use io_uring::{IoUring, opcode, types::Fd};
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 
 static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
 
-const INITIAL_RING_ENTRIES: u32 = 32;
+const DEFAULT_RING_ENTRIES: u32 = 256;
 const NOP_OPERATION_USER_DATA: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,8 @@ impl IoRingOperationType {
 pub struct IoUringFileHandle {
     file: std::fs::File,
     ring: Arc<Mutex<IoUring>>,
+    /// Cached file size for append operations (optimization for single-writer segments)
+    cached_size: AtomicU64,
 }
 
 impl AsRawFd for IoUringFileHandle {
@@ -58,13 +61,21 @@ impl AsRawFd for IoUringFileHandle {
 pub struct IoUringFileIO;
 
 impl IoUringFileIO {
+    /// Get the ring entries count from environment variable or use default
+    fn ring_entries() -> u32 {
+        std::env::var("FLASHQ_IOURING_ENTRIES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_RING_ENTRIES)
+    }
+
     /// Check if io_uring is available on the current system
     pub fn is_available() -> bool {
         *GLOBAL_IO_URING_AVAILABILITY_STATUS.get_or_init(Self::detect_io_uring_functionality)
     }
 
     fn detect_io_uring_functionality() -> bool {
-        match IoUring::new(INITIAL_RING_ENTRIES) {
+        match IoUring::new(Self::ring_entries()) {
             Ok(mut new_ring) => match Self::validate_io_uring_with_nop_operation(&mut new_ring) {
                 Ok(_) => {
                     info!("io_uring detected and functional");
@@ -106,16 +117,20 @@ impl IoUringFileIO {
     }
 
     fn create_handle(file: std::fs::File) -> Result<IoUringFileHandle, FlashQError> {
-        let ring = IoUring::new(INITIAL_RING_ENTRIES).map_err(|e| {
+        let ring = IoUring::new(Self::ring_entries()).map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to create IoUring instance",
             ))
         })?;
 
+        // Initialize cached size with current file size
+        let initial_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+
         Ok(IoUringFileHandle {
             file,
             ring: Arc::new(Mutex::new(ring)),
+            cached_size: AtomicU64::new(initial_size),
         })
     }
 }
@@ -179,7 +194,7 @@ impl FileIO for IoUringFileIO {
                 .user_data(op_type.user_data());
 
         let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
-        debug!("io_uring write completed: {result} bytes at offset {offset}");
+        trace!("io_uring write completed: {result} bytes at offset {offset}");
         Ok(())
     }
 
@@ -199,7 +214,7 @@ impl FileIO for IoUringFileIO {
         .user_data(op_type.user_data());
 
         let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
-        debug!("io_uring read completed: {result} bytes from offset {offset}");
+        trace!("io_uring read completed: {result} bytes from offset {offset}");
 
         if result < buffer.len() as i32 {
             return Err(FlashQError::Storage(StorageError::ReadFailed {
@@ -216,9 +231,13 @@ impl FileIO for IoUringFileIO {
     }
 
     fn append_data_to_end(handle: &mut Self::Handle, data: &[u8]) -> Result<u64, FlashQError> {
-        // For io_uring append operations, we need to get current file size first
-        let current_size = Self::get_file_size(handle)?;
+        // Use cached size for append operations (optimization for single-writer segments)
+        let current_size = handle.cached_size.load(Ordering::Relaxed);
         Self::write_data_at_offset(handle, data, current_size)?;
+        // Update cached size to include the appended data
+        handle
+            .cached_size
+            .store(current_size + data.len() as u64, Ordering::Relaxed);
         Ok(current_size)
     }
 
@@ -229,7 +248,7 @@ impl FileIO for IoUringFileIO {
             .user_data(op_type.user_data());
 
         let _result = Self::execute_io_uring_operation(handle, operation, op_type)?;
-        debug!("io_uring fsync completed");
+        trace!("io_uring fsync completed");
         Ok(())
     }
 
@@ -241,7 +260,12 @@ impl FileIO for IoUringFileIO {
             ))
         })?;
 
-        Ok(file_metadata.len())
+        let actual_size = file_metadata.len();
+
+        // Sync cached size with actual size when explicitly queried
+        handle.cached_size.store(actual_size, Ordering::Relaxed);
+
+        Ok(actual_size)
     }
 }
 
@@ -260,20 +284,23 @@ impl IoUringFileIO {
                 .map_err(|e| Self::create_io_uring_error(operation_type, "submission push", e))?;
         }
 
-        // Submit to kernel and wait for exactly 1 completion
+        // Submit-first optimization: submit and try to get completion without waiting
+        ring.submit()
+            .map_err(|e| Self::create_io_uring_error(operation_type, "submit", e))?;
+
+        // Check if completion is already available (reduces syscalls)
+        if let Some(completion_entry) = ring.completion().next() {
+            return Self::process_completion_entry(completion_entry, operation_type);
+        }
+
+        // Fallback: wait for completion if not immediately available
         ring.submit_and_wait(1)
             .map_err(|e| Self::create_io_uring_error(operation_type, "submit_and_wait", e))?;
 
-        // Get the completion result
         if let Some(completion_entry) = ring.completion().next() {
-            let result = completion_entry.result();
-            if result < 0 {
-                return Err(Self::create_operation_failed_error(operation_type, result));
-            }
-            return Ok(result);
+            return Self::process_completion_entry(completion_entry, operation_type);
         }
 
-        // This should not happen with submit_and_wait(1)
         Err(Self::create_io_uring_error(
             operation_type,
             "completion queue",
@@ -326,5 +353,17 @@ impl IoUringFileIO {
             }
         };
         FlashQError::Storage(storage_error)
+    }
+
+    fn process_completion_entry(
+        completion_entry: io_uring::cqueue::Entry,
+        operation_type: IoRingOperationType,
+    ) -> Result<i32, FlashQError> {
+        let result = completion_entry.result();
+        if result < 0 {
+            Err(Self::create_operation_failed_error(operation_type, result))
+        } else {
+            Ok(result)
+        }
     }
 }
