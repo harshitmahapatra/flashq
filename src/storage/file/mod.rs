@@ -32,18 +32,9 @@ pub enum FileIOMode {
 
 impl Default for FileIOMode {
     fn default() -> Self {
-        #[cfg(target_os = "linux")]
-        {
-            if IoUringFileIO::is_available() {
-                Self::IoUring
-            } else {
-                Self::Standard
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            Self::Standard
-        }
+        // Use Standard I/O by default for better performance
+        // io_uring can still be explicitly selected when needed
+        Self::Standard
     }
 }
 
