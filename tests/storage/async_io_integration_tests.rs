@@ -1,17 +1,6 @@
-use flashq::storage::file::async_io::{AsyncFileHandle, IoRingExecutor};
+use flashq::storage::file::async_io::AsyncFileHandle;
 use flashq::storage::file::common::FileIoMode;
 use tempfile::tempdir;
-
-#[test]
-fn test_io_uring_availability_detection() {
-    // Setup: Query io_uring availability
-    // Action: Check if io_uring is available on current system
-    let availability_status = IoRingExecutor::is_available_on_current_system();
-
-    // Expectation: Status should be boolean (actual value depends on system)
-    println!("io_uring available: {availability_status}");
-    assert!(availability_status || !availability_status); // Always true, but documents the test purpose
-}
 
 #[test]
 fn test_append_and_read_operations() {

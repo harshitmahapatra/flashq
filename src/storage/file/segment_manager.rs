@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, io::BufReader};
 
 use crate::RecordWithOffset;
 use crate::error::StorageError;
-use crate::storage::file::common::{deserialize_record, FileIoMode};
+use crate::storage::file::common::{FileIoMode, deserialize_record};
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
 use log::warn;

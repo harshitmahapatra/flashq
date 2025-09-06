@@ -56,13 +56,14 @@ impl LogSegment {
             })?;
 
         // Use AsyncFileHandle for index file with async operations
-        let index_file = AsyncFileHandle::create_with_append_and_read_permissions(&index_path, io_mode)
-            .map_err(|e| {
-                StorageError::from_io_error(
-                    std::io::Error::other(e.to_string()),
-                    "Failed to open index file",
-                )
-            })?;
+        let index_file =
+            AsyncFileHandle::create_with_append_and_read_permissions(&index_path, io_mode)
+                .map_err(|e| {
+                    StorageError::from_io_error(
+                        std::io::Error::other(e.to_string()),
+                        "Failed to open index file",
+                    )
+                })?;
 
         Ok(LogSegment {
             base_offset,

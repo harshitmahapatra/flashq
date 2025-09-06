@@ -1,5 +1,5 @@
 use crate::error::StorageError;
-use crate::storage::file::common::{ensure_directory_exists, FileIoMode};
+use crate::storage::file::common::{FileIoMode, ensure_directory_exists};
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};

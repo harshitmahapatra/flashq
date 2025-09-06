@@ -48,13 +48,7 @@ impl StorageBackend {
         data_dir: P,
     ) -> Result<Self, StorageError> {
         const DEFAULT_SEGMENT_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
-        Self::new_file_with_config(
-            sync_mode,
-            io_mode,
-            data_dir,
-            1000,
-            DEFAULT_SEGMENT_SIZE,
-        )
+        Self::new_file_with_config(sync_mode, io_mode, data_dir, 1000, DEFAULT_SEGMENT_SIZE)
     }
 
     pub fn new_file_with_config<P: AsRef<Path>>(
@@ -84,7 +78,7 @@ impl StorageBackend {
                 io_mode,
                 data_dir,
                 segment_size_bytes,
-                .. 
+                ..
             } => {
                 let file_log = crate::storage::file::FileTopicLog::new(
                     topic,
@@ -110,13 +104,10 @@ impl StorageBackend {
                 sync_mode,
                 io_mode,
                 data_dir,
-                .. 
+                ..
             } => {
                 let consumer_group = crate::storage::file::FileConsumerGroup::new(
-                    group_id,
-                    *sync_mode,
-                    *io_mode,
-                    data_dir,
+                    group_id, *sync_mode, *io_mode, data_dir,
                 )?;
                 Ok(Box::new(consumer_group))
             }

@@ -1,6 +1,6 @@
 use crate::error::{FlashQError, StorageError};
 use crate::storage::file::common::FileIoMode;
-use io_uring::{opcode, IoUring};
+use io_uring::{IoUring, opcode};
 use log::{debug, info, warn};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
@@ -145,8 +145,8 @@ impl UnifiedAsyncFileHandle {
         path: P,
         io_mode: FileIoMode,
     ) -> Result<Self, FlashQError> {
-        let opened_file =
-            File::open(&path).map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
+        let opened_file = File::open(&path)
+            .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
         Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
     }
@@ -299,7 +299,8 @@ impl UnifiedAsyncFileHandle {
     }
 
     fn append_data_using_standard_io(&mut self, data: &[u8]) -> Result<usize, FlashQError> {
-        let start_position = self.underlying_file
+        let start_position = self
+            .underlying_file
             .seek(SeekFrom::End(0))
             .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "seeking to end")))?;
 
