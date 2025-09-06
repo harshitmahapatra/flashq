@@ -1,17 +1,32 @@
+#[cfg(target_os = "linux")]
 use divan::{AllocProfiler, Bencher, black_box};
+#[cfg(target_os = "linux")]
 use flashq::storage::file::FileIOMode;
+#[cfg(target_os = "linux")]
 use flashq::storage::{StorageBackend, file::SyncMode};
+#[cfg(target_os = "linux")]
 use flashq::{FlashQ, Record};
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use tempfile::TempDir;
 
+#[cfg(target_os = "linux")]
 #[global_allocator]
 static ALLOC: AllocProfiler = AllocProfiler::system();
 
+#[cfg(target_os = "linux")]
 fn main() {
     divan::main();
 }
 
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("io_uring benchmarks are only available on Linux");
+    std::process::exit(1);
+}
+
+#[cfg(target_os = "linux")]
 fn create_1kb_record(index: usize) -> Record {
     let payload = "x".repeat(1024);
     Record::new(
@@ -25,6 +40,7 @@ fn create_1kb_record(index: usize) -> Record {
     )
 }
 
+#[cfg(target_os = "linux")]
 fn create_file_storage_queue() -> (FlashQ, TempDir) {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let storage_backend = StorageBackend::new_file_with_path(
@@ -39,6 +55,7 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
 }
 
 // Minimal smoke benchmark to ensure io_uring backend runs quickly.
+#[cfg(target_os = "linux")]
 #[divan::bench(
 sample_size=1,
 sample_count=1,
@@ -58,6 +75,7 @@ fn quick_smoke_io_uring(bencher: Bencher) {
     });
 }
 
+#[cfg(target_os = "linux")]
 #[divan::bench]
 fn empty_topic_write_throughput(bencher: Bencher) {
     bencher.bench(|| {
@@ -71,6 +89,7 @@ fn empty_topic_write_throughput(bencher: Bencher) {
     });
 }
 
+#[cfg(target_os = "linux")]
 #[divan::bench]
 fn empty_topic_read_throughput(bencher: Bencher) {
     bencher.bench(|| {
@@ -89,6 +108,7 @@ fn empty_topic_read_throughput(bencher: Bencher) {
     });
 }
 
+#[cfg(target_os = "linux")]
 #[divan::bench]
 fn large_file_write_throughput(bencher: Bencher) {
     bencher.bench(|| {
@@ -109,6 +129,7 @@ fn large_file_write_throughput(bencher: Bencher) {
     });
 }
 
+#[cfg(target_os = "linux")]
 #[divan::bench]
 fn large_file_read_throughput(bencher: Bencher) {
     bencher.bench(|| {
