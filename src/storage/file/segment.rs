@@ -49,22 +49,20 @@ impl<F: FileIO> LogSegment<F> {
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
         // Use FileIO trait for log file operations
-        let log_file = F::create_with_append_and_read_permissions(&log_path)
-            .map_err(|e| {
-                StorageError::from_io_error(
-                    std::io::Error::other(e.to_string()),
-                    "Failed to open log file",
-                )
-            })?;
+        let log_file = F::create_with_append_and_read_permissions(&log_path).map_err(|e| {
+            StorageError::from_io_error(
+                std::io::Error::other(e.to_string()),
+                "Failed to open log file",
+            )
+        })?;
 
         // Use FileIO trait for index file operations
-        let index_file = F::create_with_append_and_read_permissions(&index_path)
-            .map_err(|e| {
-                StorageError::from_io_error(
-                    std::io::Error::other(e.to_string()),
-                    "Failed to open index file",
-                )
-            })?;
+        let index_file = F::create_with_append_and_read_permissions(&index_path).map_err(|e| {
+            StorageError::from_io_error(
+                std::io::Error::other(e.to_string()),
+                "Failed to open index file",
+            )
+        })?;
 
         Ok(LogSegment {
             base_offset,
@@ -124,8 +122,8 @@ impl<F: FileIO> LogSegment<F> {
 
     fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {
         // Use FileIO trait's append method
-        let start_position = F::append_data_to_end(&mut self.log_file, serialized_record)
-            .map_err(|e| {
+        let start_position =
+            F::append_data_to_end(&mut self.log_file, serialized_record).map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to append record to log file",
@@ -198,13 +196,12 @@ impl<F: FileIO> LogSegment<F> {
             return Ok(());
         }
 
-        F::append_data_to_end(&mut self.index_file, &self.index_buffer)
-            .map_err(|e| {
-                StorageError::from_io_error(
-                    std::io::Error::other(e.to_string()),
-                    "Failed to write to index file",
-                )
-            })?;
+        F::append_data_to_end(&mut self.index_file, &self.index_buffer).map_err(|e| {
+            StorageError::from_io_error(
+                std::io::Error::other(e.to_string()),
+                "Failed to write to index file",
+            )
+        })?;
 
         self.index_buffer.clear();
         Ok(())

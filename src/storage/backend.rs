@@ -79,31 +79,31 @@ impl StorageBackend {
                 data_dir,
                 segment_size_bytes,
                 ..
-            } => {
-                match io_mode {
-                    FileIOMode::Standard => {
-                        let file_log: crate::storage::file::FileTopicLog<crate::storage::file::std_io::StdFileIO> = 
-                            crate::storage::file::FileTopicLog::new(
-                                topic,
-                                *sync_mode,
-                                data_dir,
-                                *segment_size_bytes,
-                            )?;
-                        Ok(Box::new(file_log))
-                    }
-                    #[cfg(target_os = "linux")]
-                    FileIOMode::IoUring => {
-                        let file_log: crate::storage::file::FileTopicLog<crate::storage::file::io_uring_io::IoUringFileIO> = 
-                            crate::storage::file::FileTopicLog::new(
-                                topic,
-                                *sync_mode,
-                                data_dir,
-                                *segment_size_bytes,
-                            )?;
-                        Ok(Box::new(file_log))
-                    }
+            } => match io_mode {
+                FileIOMode::Standard => {
+                    let file_log: crate::storage::file::FileTopicLog<
+                        crate::storage::file::std_io::StdFileIO,
+                    > = crate::storage::file::FileTopicLog::new(
+                        topic,
+                        *sync_mode,
+                        data_dir,
+                        *segment_size_bytes,
+                    )?;
+                    Ok(Box::new(file_log))
                 }
-            }
+                #[cfg(target_os = "linux")]
+                FileIOMode::IoUring => {
+                    let file_log: crate::storage::file::FileTopicLog<
+                        crate::storage::file::io_uring_io::IoUringFileIO,
+                    > = crate::storage::file::FileTopicLog::new(
+                        topic,
+                        *sync_mode,
+                        data_dir,
+                        *segment_size_bytes,
+                    )?;
+                    Ok(Box::new(file_log))
+                }
+            },
         }
     }
 
@@ -120,25 +120,25 @@ impl StorageBackend {
                 io_mode,
                 data_dir,
                 ..
-            } => {
-                match io_mode {
-                    FileIOMode::Standard => {
-                        let consumer_group: crate::storage::file::FileConsumerGroup<crate::storage::file::std_io::StdFileIO> = 
-                            crate::storage::file::FileConsumerGroup::new(
-                                group_id, *sync_mode, data_dir,
-                            )?;
-                        Ok(Box::new(consumer_group))
-                    }
-                    #[cfg(target_os = "linux")]
-                    FileIOMode::IoUring => {
-                        let consumer_group: crate::storage::file::FileConsumerGroup<crate::storage::file::io_uring_io::IoUringFileIO> = 
-                            crate::storage::file::FileConsumerGroup::new(
-                                group_id, *sync_mode, data_dir,
-                            )?;
-                        Ok(Box::new(consumer_group))
-                    }
+            } => match io_mode {
+                FileIOMode::Standard => {
+                    let consumer_group: crate::storage::file::FileConsumerGroup<
+                        crate::storage::file::std_io::StdFileIO,
+                    > = crate::storage::file::FileConsumerGroup::new(
+                        group_id, *sync_mode, data_dir,
+                    )?;
+                    Ok(Box::new(consumer_group))
                 }
-            }
+                #[cfg(target_os = "linux")]
+                FileIOMode::IoUring => {
+                    let consumer_group: crate::storage::file::FileConsumerGroup<
+                        crate::storage::file::io_uring_io::IoUringFileIO,
+                    > = crate::storage::file::FileConsumerGroup::new(
+                        group_id, *sync_mode, data_dir,
+                    )?;
+                    Ok(Box::new(consumer_group))
+                }
+            },
         }
     }
 

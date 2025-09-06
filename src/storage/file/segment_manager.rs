@@ -1,8 +1,8 @@
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::{collections::BTreeMap, io::BufReader};
-use std::marker::PhantomData;
 
 use crate::RecordWithOffset;
 use crate::error::StorageError;
@@ -128,7 +128,11 @@ impl<F: FileIO> SegmentManager<F> {
         }
     }
 
-    fn calculate_file_position_for_segment(&self, segment: &LogSegment<F>, start_offset: u64) -> u64 {
+    fn calculate_file_position_for_segment(
+        &self,
+        segment: &LogSegment<F>,
+        start_offset: u64,
+    ) -> u64 {
         if segment.contains_offset(start_offset) {
             segment.find_position_for_offset(start_offset).unwrap_or(0) as u64
         } else {

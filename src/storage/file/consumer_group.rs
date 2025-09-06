@@ -9,12 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{
-        SyncMode,
-        common::ensure_directory_exists,
-        file_io::FileIO,
-        std_io::StdFileIO,
-    },
+    file::{SyncMode, common::ensure_directory_exists, file_io::FileIO, std_io::StdFileIO},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,10 +47,7 @@ impl<F: FileIO> FileConsumerGroup<F> {
         Ok(consumer_group)
     }
 
-    pub fn new_default(
-        group_id: &str,
-        sync_mode: SyncMode,
-    ) -> Result<Self, std::io::Error> {
+    pub fn new_default(group_id: &str, sync_mode: SyncMode) -> Result<Self, std::io::Error> {
         Self::new(group_id, sync_mode, "./data")
     }
 
@@ -69,9 +61,7 @@ impl<F: FileIO> FileConsumerGroup<F> {
         Ok(consumer_groups_dir.join(format!("{group_id}.json")))
     }
 
-    fn load_existing_offsets(
-        file_path: &PathBuf,
-    ) -> Result<HashMap<String, u64>, std::io::Error> {
+    fn load_existing_offsets(file_path: &PathBuf) -> Result<HashMap<String, u64>, std::io::Error> {
         if !file_path.exists() {
             return Ok(HashMap::new());
         }
@@ -111,8 +101,7 @@ impl<F: FileIO> FileConsumerGroup<F> {
             .map_err(std::io::Error::other)?;
 
         if self.sync_mode == SyncMode::Immediate {
-            F::synchronize_to_disk(&mut file_handle)
-                .map_err(std::io::Error::other)?;
+            F::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
         }
 
         Ok(())

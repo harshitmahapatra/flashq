@@ -2,10 +2,10 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::error::{FlashQError, StorageError};
 use super::file_io::FileIO;
+use crate::error::{FlashQError, StorageError};
 
-use io_uring::{opcode, types::Fd, IoUring};
+use io_uring::{IoUring, opcode, types::Fd};
 use log::{debug, info, warn};
 
 static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
@@ -106,11 +106,12 @@ impl IoUringFileIO {
     }
 
     fn create_handle(file: std::fs::File) -> Result<IoUringFileHandle, FlashQError> {
-        let ring = IoUring::new(INITIAL_RING_ENTRIES)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(
+        let ring = IoUring::new(INITIAL_RING_ENTRIES).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
-                "Failed to create IoUring instance"
-            )))?;
+                "Failed to create IoUring instance",
+            ))
+        })?;
 
         Ok(IoUringFileHandle {
             file,
@@ -128,10 +129,12 @@ impl FileIO for IoUringFileIO {
             .append(true)
             .read(true)
             .open(path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(
-                e,
-                &format!("Failed to create file with append+read permissions: {path:?}"),
-            )))?;
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("Failed to create file with append+read permissions: {path:?}"),
+                ))
+            })?;
 
         Self::create_handle(file)
     }
@@ -142,41 +145,49 @@ impl FileIO for IoUringFileIO {
             .write(true)
             .truncate(true)
             .open(path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(
-                e,
-                &format!("Failed to create file with write+truncate permissions: {path:?}"),
-            )))?;
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("Failed to create file with write+truncate permissions: {path:?}"),
+                ))
+            })?;
 
         Self::create_handle(file)
     }
 
     fn open_with_read_only_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
-        let file = std::fs::File::open(path)
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(
+        let file = std::fs::File::open(path).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
                 e,
                 &format!("Failed to open file with read-only permissions: {path:?}"),
-            )))?;
+            ))
+        })?;
 
         Self::create_handle(file)
     }
 
-    fn write_data_at_offset(handle: &mut Self::Handle, data: &[u8], offset: u64) -> Result<(), FlashQError> {
+    fn write_data_at_offset(
+        handle: &mut Self::Handle,
+        data: &[u8],
+        offset: u64,
+    ) -> Result<(), FlashQError> {
         let op_type = IoRingOperationType::Write;
-        let operation = opcode::Write::new(
-            Fd(handle.as_raw_fd()),
-            data.as_ptr(),
-            data.len() as u32,
-        )
-        .offset(offset)
-        .build()
-        .user_data(op_type.user_data());
+        let operation =
+            opcode::Write::new(Fd(handle.as_raw_fd()), data.as_ptr(), data.len() as u32)
+                .offset(offset)
+                .build()
+                .user_data(op_type.user_data());
 
         let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
         debug!("io_uring write completed: {result} bytes at offset {offset}");
         Ok(())
     }
 
-    fn read_data_at_offset(handle: &mut Self::Handle, buffer: &mut [u8], offset: u64) -> Result<(), FlashQError> {
+    fn read_data_at_offset(
+        handle: &mut Self::Handle,
+        buffer: &mut [u8],
+        offset: u64,
+    ) -> Result<(), FlashQError> {
         let op_type = IoRingOperationType::Read;
         let operation = opcode::Read::new(
             Fd(handle.as_raw_fd()),
@@ -189,16 +200,18 @@ impl FileIO for IoUringFileIO {
 
         let result = Self::execute_io_uring_operation(handle, operation, op_type)?;
         debug!("io_uring read completed: {result} bytes from offset {offset}");
-        
+
         if result < buffer.len() as i32 {
             return Err(FlashQError::Storage(StorageError::ReadFailed {
                 context: "io_uring read returned fewer bytes than expected".to_string(),
-                source: Box::new(crate::error::StorageErrorSource::Custom(
-                    format!("Expected {} bytes, got {}", buffer.len(), result)
-                )),
+                source: Box::new(crate::error::StorageErrorSource::Custom(format!(
+                    "Expected {} bytes, got {}",
+                    buffer.len(),
+                    result
+                ))),
             }));
         }
-        
+
         Ok(())
     }
 
@@ -221,11 +234,12 @@ impl FileIO for IoUringFileIO {
     }
 
     fn get_file_size(handle: &Self::Handle) -> Result<u64, FlashQError> {
-        let file_metadata = handle.file.metadata()
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(
+        let file_metadata = handle.file.metadata().map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
                 e,
                 "Failed to get file metadata",
-            )))?;
+            ))
+        })?;
 
         Ok(file_metadata.len())
     }
@@ -323,8 +337,8 @@ mod tests {
         // This test will succeed on systems with io_uring support
         // and provide useful information on systems without it
         let available = IoUringFileIO::is_available();
-        println!("io_uring availability: {}", available);
-        
+        println!("io_uring availability: {available}");
+
         // Test should not fail regardless of availability
         // It's informational only
     }
@@ -343,7 +357,7 @@ mod tests {
 
         // Test create and write
         let mut handle = IoUringFileIO::create_with_append_and_read_permissions(path).unwrap();
-        
+
         let data = b"test data for io_uring";
         let pos = IoUringFileIO::append_data_to_end(&mut handle, data).unwrap();
         assert_eq!(pos, 0);

@@ -1,5 +1,5 @@
 use super::test_utilities::*;
-use flashq::storage::file::{FileTopicLog, StdFileIO, FileIOMode};
+use flashq::storage::file::{FileIOMode, FileTopicLog, StdFileIO};
 use flashq::storage::{StorageBackend, TopicLog};
 use flashq::{FlashQ, Record};
 
