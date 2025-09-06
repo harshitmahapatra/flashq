@@ -25,19 +25,6 @@ fn create_1kb_record(index: usize) -> Record {
     )
 }
 
-fn create_small_record(index: usize) -> Record {
-    let payload = "x".repeat(128);
-    Record::new(
-        Some(format!("key_{index}")),
-        payload,
-        Some({
-            let mut headers = HashMap::new();
-            headers.insert("index".to_string(), index.to_string());
-            headers
-        }),
-    )
-}
-
 fn create_file_storage_queue() -> (FlashQ, TempDir) {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let storage_backend = StorageBackend::new_file_with_path(
@@ -52,19 +39,22 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
 }
 
 // Minimal smoke benchmark to ensure io_uring backend runs quickly.
-#[divan::bench]
+#[divan::bench(
+sample_size=1,
+sample_count=1,
+)]
 fn quick_smoke_io_uring(bencher: Bencher) {
     bencher.bench(|| {
         let (queue, _temp_dir) = create_file_storage_queue();
         let topic = "smoke".to_string();
 
-        for i in 0..5 {
-            let record = create_small_record(i);
+        for i in 0..5000 {
+            let record = create_1kb_record(i);
             black_box(queue.post_record(topic.clone(), record).unwrap());
         }
 
-        let records = black_box(queue.poll_records(&topic, Some(5)).unwrap());
-        assert_eq!(records.len(), 5);
+        let records = black_box(queue.poll_records(&topic, None).unwrap());
+        assert_eq!(records.len(), 5000);
     });
 }
 

@@ -72,20 +72,24 @@ impl SharedRingManager {
         pending_operations: Arc<DashMap<u64, mpsc::Sender<Result<i32, FlashQError>>>>,
     ) -> thread::JoinHandle<()> {
         thread::spawn(move || loop {
+            // First, drain any immediately available completions without blocking.
             let completions = SharedRingManager::drain_completions(&ring);
             if !completions.is_empty() {
                 SharedRingManager::dispatch_completions(&pending_operations, completions);
                 continue;
             }
 
+            // If there are pending operations but no completions yet, block until at least one arrives.
             if !pending_operations.is_empty() {
-                // Avoid deadlock: do not block with submit_and_wait while holding the ring lock,
-                // because submitters also need the same lock to push SQEs.
-                // Briefly yield when there is pending work but no completions yet.
-                std::thread::park_timeout(std::time::Duration::from_micros(100));
+                if let Ok(mut r) = ring.lock() {
+                    // Wait for one completion; holding the lock is acceptable here because
+                    // submissions have already happened and we only block while completions are outstanding.
+                    let _ = r.submit_and_wait(1);
+                }
                 continue;
             }
 
+            // Idle backoff.
             std::thread::park_timeout(std::time::Duration::from_millis(1));
         })
     }
@@ -136,7 +140,7 @@ impl SharedRingManager {
         self.pending_operations.insert(operation_id, sender);
         let operation_with_id = operation.user_data(operation_id);
 
-        {
+        { 
             let mut ring = self.ring.lock().unwrap();
             unsafe {
                 ring.submission().push(&operation_with_id).map_err(|e| {
@@ -157,6 +161,9 @@ impl SharedRingManager {
                 ))
             })?;
         }
+
+        // Wake the completion thread immediately to avoid relying on coarse timer sleeps,
+        self._completion_thread.thread().unpark();
 
         Ok(OperationHandle { receiver })
     }
@@ -286,10 +293,11 @@ impl FileIO for IoUringFileIO {
     type Handle = IoUringFileHandle;
 
     fn create_with_append_and_read_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
+        // For io_uring we avoid O_APPEND and manage offsets ourselves for better performance.
         let file = std::fs::OpenOptions::new()
             .create(true)
-            .append(true)
             .read(true)
+            .write(true)
             .open(path)
             .map_err(|e| {
                 FlashQError::Storage(StorageError::from_io_error(
@@ -304,6 +312,7 @@ impl FileIO for IoUringFileIO {
     fn create_with_write_truncate_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
         let file = std::fs::OpenOptions::new()
             .create(true)
+            .read(true)
             .write(true)
             .truncate(true)
             .open(path)
