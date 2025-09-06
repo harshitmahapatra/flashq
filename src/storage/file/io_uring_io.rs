@@ -253,30 +253,32 @@ impl IoUringFileIO {
     ) -> Result<i32, FlashQError> {
         let mut ring = handle.ring.lock().unwrap();
 
-        // Submit operation without waiting
+        // Submit operation
         unsafe {
             ring.submission()
                 .push(&operation)
                 .map_err(|e| Self::create_io_uring_error(operation_type, "submission push", e))?;
         }
 
-        // Submit to kernel without blocking
-        ring.submit()
-            .map_err(|e| Self::create_io_uring_error(operation_type, "submit", e))?;
+        // Submit to kernel and wait for exactly 1 completion
+        ring.submit_and_wait(1)
+            .map_err(|e| Self::create_io_uring_error(operation_type, "submit_and_wait", e))?;
 
-        // Poll for completion (non-blocking loop with yield)
-        loop {
-            if let Some(completion_entry) = ring.completion().next() {
-                let result = completion_entry.result();
-                if result < 0 {
-                    return Err(Self::create_operation_failed_error(operation_type, result));
-                }
-                return Ok(result);
+        // Get the completion result
+        if let Some(completion_entry) = ring.completion().next() {
+            let result = completion_entry.result();
+            if result < 0 {
+                return Err(Self::create_operation_failed_error(operation_type, result));
             }
-
-            // Yield CPU to avoid busy waiting
-            std::thread::yield_now();
+            return Ok(result);
         }
+
+        // This should not happen with submit_and_wait(1)
+        Err(Self::create_io_uring_error(
+            operation_type,
+            "completion queue",
+            "No completion received after submit_and_wait",
+        ))
     }
 
     fn create_io_uring_error(
