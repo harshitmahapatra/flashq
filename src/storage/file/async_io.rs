@@ -3,11 +3,10 @@ use crate::storage::file::common::FileIoMode;
 use io_uring::{IoUring, opcode};
 use log::{debug, info, warn};
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
-use tokio::runtime::Runtime;
 
 static GLOBAL_IO_URING_AVAILABILITY_STATUS: OnceLock<bool> = OnceLock::new();
 
@@ -46,11 +45,8 @@ impl IoRingOperationType {
     }
 }
 
-pub struct IoRingExecutorWithRuntime {
-    tokio_runtime: Runtime,
-}
-
-impl IoRingExecutorWithRuntime {
+pub struct IoRingExecutor;
+impl IoRingExecutor {
     pub fn is_available_on_current_system() -> bool {
         *GLOBAL_IO_URING_AVAILABILITY_STATUS.get_or_init(Self::detect_io_uring_functionality)
     }
@@ -96,14 +92,6 @@ impl IoRingExecutorWithRuntime {
 
         Err("No-op operation failed".into())
     }
-
-    pub fn execute_future_synchronously<F, R>(&mut self, future: F) -> R
-    where
-        F: std::future::Future<Output = R> + Send + 'static,
-        R: Send + 'static,
-    {
-        self.tokio_runtime.block_on(future)
-    }
 }
 
 pub struct UnifiedAsyncFileHandle {
@@ -124,7 +112,7 @@ impl UnifiedAsyncFileHandle {
             .open(&path)
             .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
+        Self::create_handle(opened_file, path.as_ref(), io_mode)
     }
 
     pub fn create_with_write_truncate_permissions<P: AsRef<Path>>(
@@ -138,7 +126,7 @@ impl UnifiedAsyncFileHandle {
             .open(&path)
             .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
+        Self::create_handle(opened_file, path.as_ref(), io_mode)
     }
 
     pub fn open_with_read_only_permissions<P: AsRef<Path>>(
@@ -148,7 +136,7 @@ impl UnifiedAsyncFileHandle {
         let opened_file = File::open(&path)
             .map_err(|e| Self::create_file_error(e, path.as_ref(), "opening file"))?;
 
-        Self::create_handle_with_debug_logging(opened_file, path.as_ref(), io_mode)
+        Self::create_handle(opened_file, path.as_ref(), io_mode)
     }
 
     fn create_file_error(error: std::io::Error, path: &Path, context: &str) -> FlashQError {
@@ -158,13 +146,13 @@ impl UnifiedAsyncFileHandle {
         ))
     }
 
-    fn create_handle_with_debug_logging(
+    fn create_handle(
         file: File,
         path: &Path,
         io_mode: FileIoMode,
     ) -> Result<Self, FlashQError> {
         let use_uring = if io_mode == FileIoMode::IoUring {
-            IoRingExecutorWithRuntime::is_available_on_current_system()
+            IoRingExecutor::is_available_on_current_system()
         } else {
             false
         };
@@ -241,21 +229,11 @@ impl UnifiedAsyncFileHandle {
         }
     }
 
-    pub fn seek_to_end_and_get_position(&mut self) -> Result<u64, FlashQError> {
-        self.underlying_file
-            .seek(SeekFrom::End(0))
-            .map_err(|e| FlashQError::Storage(StorageError::from_io_error(e, "seeking to end")))
-    }
-
     pub fn get_current_file_size_in_bytes(&mut self) -> Result<u64, FlashQError> {
         let file_metadata = self.underlying_file.metadata().map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(e, "getting file metadata"))
         })?;
         Ok(file_metadata.len())
-    }
-
-    pub fn create_buffered_reader_for_sequential_access(&mut self) -> BufReader<&mut File> {
-        BufReader::new(&mut self.underlying_file)
     }
 
     fn write_at_offset_using_standard_io(
@@ -542,7 +520,6 @@ impl AsRawFd for UnifiedAsyncFileHandle {
 }
 
 pub type AsyncFileHandle = UnifiedAsyncFileHandle;
-pub type IoRingExecutor = IoRingExecutorWithRuntime;
 
 #[cfg(test)]
 mod tests {
@@ -559,10 +536,6 @@ mod tests {
         assert_eq!(
             std::any::type_name::<AsyncFileHandle>(),
             std::any::type_name::<UnifiedAsyncFileHandle>()
-        );
-        assert_eq!(
-            std::any::type_name::<IoRingExecutor>(),
-            std::any::type_name::<IoRingExecutorWithRuntime>()
         );
     }
 }
