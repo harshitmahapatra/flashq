@@ -55,6 +55,7 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
 }
 
 // Minimal smoke benchmark to ensure io_uring backend runs quickly.
+// IGNORE THIS TEST FOR PERFORMANCE DOCS SINCE THIS HAS LOW SAMPLE_SIZE AND SAMPLE_COUNT
 #[cfg(target_os = "linux")]
 #[divan::bench(
 sample_size=1,
