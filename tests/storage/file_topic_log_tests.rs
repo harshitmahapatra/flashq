@@ -211,9 +211,8 @@ fn test_flashq_large_file_benchmark_scenario() {
 
     // Setup: Create FlashQ with file storage and helper function
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let storage_backend =
-        StorageBackend::new_file_with_path(SyncMode::None, Default::default(), temp_dir.path())
-            .expect("Failed to create file storage backend");
+    let storage_backend = StorageBackend::new_file_with_path(SyncMode::None, temp_dir.path())
+        .expect("Failed to create file storage backend");
     let queue = FlashQ::with_storage_backend(storage_backend);
     let topic = "benchmark".to_string();
 

@@ -9,14 +9,12 @@ fn test_directory_locking() {
 
     let backend1 = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("First backend should acquire lock successfully");
 
     let backend2_result = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     );
 
@@ -34,7 +32,6 @@ fn test_directory_locking() {
 
     let _backend2 = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("Second backend should acquire lock after first is dropped");
@@ -47,7 +44,6 @@ fn test_file_backend_creation() {
 
     let backend = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("Should be able to create file backend");
@@ -71,7 +67,6 @@ fn test_stale_lock_recovery() {
 
     let _backend = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("Should recover from stale lock");
@@ -84,7 +79,6 @@ fn test_concurrent_access_prevention() {
 
     let _backend1 = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("First backend should acquire lock");
@@ -92,7 +86,6 @@ fn test_concurrent_access_prevention() {
     for i in 0..3 {
         let result = StorageBackend::new_file_with_path(
             flashq::storage::file::SyncMode::Immediate,
-            Default::default(),
             &test_data_dir,
         );
 
@@ -113,7 +106,6 @@ fn test_lock_file_cleanup_on_drop() {
     // Create backend and verify lock file exists
     let backend = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        Default::default(),
         &test_data_dir,
     )
     .expect("Backend creation should succeed");

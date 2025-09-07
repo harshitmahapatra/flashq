@@ -12,12 +12,8 @@ fn test_consumer_group_creation_backends() {
     assert_eq!(memory_group.read().unwrap().group_id(), &group_id);
     assert_eq!(memory_group.read().unwrap().get_offset("test_topic"), 0);
 
-    let file_backend = StorageBackend::new_file_with_path(
-        config.sync_mode,
-        Default::default(),
-        config.temp_dir_path(),
-    )
-    .unwrap();
+    let file_backend =
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap();
     let file_group = file_backend.create_consumer_group(&group_id).unwrap();
     assert_eq!(file_group.read().unwrap().group_id(), &group_id);
     assert_eq!(file_group.read().unwrap().get_offset("test_topic"), 0);
@@ -31,12 +27,8 @@ fn test_consumer_group_persistence() {
     let temp_dir = config.temp_dir_path().to_path_buf();
 
     {
-        let backend = StorageBackend::new_file_with_path(
-            config.sync_mode,
-            Default::default(),
-            temp_dir.clone(),
-        )
-        .unwrap();
+        let backend =
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap();
         let consumer_group = backend.create_consumer_group(&group_id).unwrap();
         consumer_group
             .write()
@@ -44,9 +36,7 @@ fn test_consumer_group_persistence() {
             .set_offset(topic_name.clone(), 5);
     }
 
-    let backend =
-        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
-            .unwrap();
+    let backend = StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap();
     let recovered_group = backend.create_consumer_group(&group_id).unwrap();
 
     assert_eq!(recovered_group.read().unwrap().get_offset(&topic_name), 5);
@@ -62,12 +52,7 @@ fn test_consumer_group_topic_recovery() {
 
     {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(
-                config.sync_mode,
-                Default::default(),
-                temp_dir.clone(),
-            )
-            .unwrap(),
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
         );
 
         queue
@@ -94,8 +79,7 @@ fn test_consumer_group_topic_recovery() {
     }
 
     let new_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
-            .unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
 
     let records = new_queue
@@ -114,12 +98,7 @@ fn test_multiple_consumer_groups_isolation() {
     let topic_name = config.topic_name.clone();
 
     let queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(
-            config.sync_mode,
-            Default::default(),
-            config.temp_dir_path(),
-        )
-        .unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
     );
 
     queue

@@ -1,5 +1,4 @@
 use flashq::storage::StorageBackend;
-use flashq::storage::file::FileIOMode;
 use tempfile::tempdir;
 
 #[test]
@@ -7,7 +6,6 @@ fn test_storage_backend_with_standard_io() {
     let temp_dir = tempdir().unwrap();
     let backend = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        FileIOMode::Standard,
         temp_dir.path(),
     )
     .unwrap();
@@ -30,17 +28,10 @@ fn test_storage_backend_with_standard_io() {
 }
 
 #[test]
-fn test_file_io_mode_default_selection() {
-    let default_mode = FileIOMode::default();
-    assert_eq!(default_mode, FileIOMode::Standard);
-}
-
-#[test]
 fn test_consumer_group_with_standard_io() {
     let temp_dir = tempdir().unwrap();
     let backend = StorageBackend::new_file_with_path(
         flashq::storage::file::SyncMode::Immediate,
-        FileIOMode::Standard,
         temp_dir.path(),
     )
     .unwrap();
