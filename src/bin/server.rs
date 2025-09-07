@@ -80,17 +80,6 @@ async fn main() {
                 }
                 match args[i].as_str() {
                     "standard" => io_mode = flashq::storage::file::FileIOMode::Standard,
-                    "io_uring" => {
-                        #[cfg(target_os = "linux")]
-                        {
-                            io_mode = flashq::storage::file::FileIOMode::IoUring;
-                        }
-                        #[cfg(not(target_os = "linux"))]
-                        {
-                            log::error!("io_uring is only supported on Linux");
-                            std::process::exit(1);
-                        }
-                    }
                     "auto" => io_mode = flashq::storage::file::FileIOMode::default(),
                     _ => {
                         log::error!(

@@ -41,10 +41,7 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
 // Minimal smoke benchmark to ensure std backend runs quickly.
 // IGNORE THIS TEST FOR PERFORMANCE DOCS SINCE THIS HAS LOW SAMPLE_SIZE AND SAMPLE_COUNT
 #[cfg(target_os = "linux")]
-#[divan::bench(
-    sample_size=1,
-    sample_count=1,
-)]
+#[divan::bench(sample_size = 1, sample_count = 1)]
 fn quick_smoke_std(bencher: Bencher) {
     bencher.bench(|| {
         let (queue, _temp_dir) = create_file_storage_queue();

@@ -403,7 +403,6 @@ dependencies = [
  "divan",
  "env_logger",
  "fs4",
- "io-uring",
  "log",
  "reqwest",
  "serde",

@@ -5,9 +5,8 @@ edition = "2024"
 license = "MIT"
 
 [features]
-default = ["http", "io_uring"]
+default = ["http"]
 http = []
-io_uring = ["dep:io-uring"]
 
 [dependencies]
 axum = "0.8"
@@ -21,7 +20,6 @@ fs4 = "0.13.1"
 sysinfo = "0.37.0"
 log = "0.4"
 env_logger = "0.11"
-io-uring = { version = "0.7.10", optional = true }
 dashmap = "6.1.0"
 
 [dev-dependencies]
@@ -36,8 +34,4 @@ harness = false
 
 [[bench]]
 name = "file_storage_std"
-harness = false
-
-[[bench]]
-name = "file_storage_io_uring"
 harness = false
