@@ -226,7 +226,7 @@ fn test_flashq_large_file_benchmark_scenario() {
     // Action: Write 1000 records (~1MB total, simulates benchmark scenario)
     for i in 0..1000 {
         queue
-            .post_record(topic.clone(), create_1kb_record(i))
+            .post_records(topic.clone(), vec![create_1kb_record(i)])
             .unwrap();
     }
 

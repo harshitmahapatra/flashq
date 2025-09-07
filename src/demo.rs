@@ -73,7 +73,7 @@ fn post_record_interactive(queue: &FlashQ, topics_created: &mut HashMap<String, 
         headers: None,
     };
 
-    match queue.post_record(topic.clone(), record) {
+    match queue.post_records(topic.clone(), vec![record]) {
         Ok(record_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
             println!("✅ Record posted successfully!");
@@ -192,7 +192,7 @@ fn run_demo(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
     ];
 
     println!(
-        "📝 Posting {} demo records to topic '{}'...",
+        "📝 Posting {} demo records to topic '{}'வுகளை...",
         demo_records.len(),
         demo_topic
     );
@@ -203,7 +203,7 @@ fn run_demo(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
             value: content.to_string(),
             headers: None,
         };
-        match queue.post_record(demo_topic.clone(), record) {
+        match queue.post_records(demo_topic.clone(), vec![record]) {
             Ok(record_id) => {
                 println!("  ✅ Record {} posted (ID: {})", i + 1, record_id);
                 *topics_created.entry(demo_topic.clone()).or_insert(0) += 1;

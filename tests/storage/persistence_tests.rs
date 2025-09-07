@@ -53,15 +53,15 @@ fn test_flashq_persistence_across_instances() {
         );
 
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "persistent1".to_string(), None),
+                vec![Record::new(None, "persistent1".to_string(), None)],
             )
             .unwrap();
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "persistent2".to_string(), None),
+                vec![Record::new(None, "persistent2".to_string(), None)],
             )
             .unwrap();
     }
@@ -89,9 +89,9 @@ fn test_offset_continuation_after_recovery() {
             StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
         );
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "before_restart".to_string(), None),
+                vec![Record::new(None, "before_restart".to_string(), None)],
             )
             .unwrap();
     }
@@ -101,9 +101,9 @@ fn test_offset_continuation_after_recovery() {
     );
 
     let new_offset = new_queue
-        .post_record(
+        .post_records(
             topic_name.clone(),
-            Record::new(None, "after_restart".to_string(), None),
+            vec![Record::new(None, "after_restart".to_string(), None)],
         )
         .unwrap();
 
@@ -128,9 +128,9 @@ fn test_empty_data_directory_recovery() {
     assert!(poll_result.is_err());
 
     let offset = queue
-        .post_record(
+        .post_records(
             config.topic_name.clone(),
-            Record::new(None, "first_record".to_string(), None),
+            vec![Record::new(None, "first_record".to_string(), None)],
         )
         .unwrap();
     assert_eq!(offset, 0);

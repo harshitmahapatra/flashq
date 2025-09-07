@@ -56,15 +56,15 @@ fn test_consumer_group_topic_recovery() {
         );
 
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                flashq::Record::new(None, "msg1".to_string(), None),
+                vec![flashq::Record::new(None, "msg1".to_string(), None)],
             )
             .unwrap();
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                flashq::Record::new(None, "msg2".to_string(), None),
+                vec![flashq::Record::new(None, "msg2".to_string(), None)],
             )
             .unwrap();
 
@@ -102,15 +102,15 @@ fn test_multiple_consumer_groups_isolation() {
     );
 
     queue
-        .post_record(
+        .post_records(
             topic_name.clone(),
-            flashq::Record::new(None, "msg1".to_string(), None),
+            vec![flashq::Record::new(None, "msg1".to_string(), None)],
         )
         .unwrap();
     queue
-        .post_record(
+        .post_records(
             topic_name.clone(),
-            flashq::Record::new(None, "msg2".to_string(), None),
+            vec![flashq::Record::new(None, "msg2".to_string(), None)],
         )
         .unwrap();
 

@@ -19,9 +19,8 @@ async fn test_post_record_integration() {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offsets.len(), 1);
-    assert_eq!(response_data.offsets[0].offset, 0);
-    assert!(response_data.offsets[0].timestamp.contains("T"));
+    assert_eq!(response_data.offset, 0);
+    assert!(response_data.timestamp.contains("T"));
 
     let mut headers = std::collections::HashMap::new();
     headers.insert("source".to_string(), "integration-test".to_string());
@@ -42,8 +41,7 @@ async fn test_post_record_integration() {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_data.offsets.len(), 1);
-    assert_eq!(response_data.offsets[0].offset, 1);
+    assert_eq!(response_data.offset, 1);
 }
 
 #[tokio::test]
@@ -313,8 +311,7 @@ async fn test_batch_record_posting() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let response_data: ProduceResponse = response.json().await.unwrap();
-    assert_eq!(response_data.offsets.len(), 1);
-    assert_eq!(response_data.offsets[0].offset, 0);
+    assert_eq!(response_data.offset, 0);
 
     // Test multiple records batch
     let mut headers = std::collections::HashMap::new();
@@ -344,10 +341,7 @@ async fn test_batch_record_posting() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let response_data: ProduceResponse = response.json().await.unwrap();
-    assert_eq!(response_data.offsets.len(), 3);
-    assert_eq!(response_data.offsets[0].offset, 1);
-    assert_eq!(response_data.offsets[1].offset, 2);
-    assert_eq!(response_data.offsets[2].offset, 3);
+    assert_eq!(response_data.offset, 3);
 
     // Verify all records were posted correctly
     let response = helper.poll_records_for_testing(topic, None).await.unwrap();

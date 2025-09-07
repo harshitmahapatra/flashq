@@ -101,25 +101,7 @@ impl FlashQ {
         queue
     }
 
-    pub fn post_record(&self, topic: String, record: Record) -> Result<u64, FlashQError> {
-        let topic_log = self.topics.entry(topic.clone()).or_insert_with(|| {
-            self.storage_backend
-                .create(&topic)
-                .expect("Failed to create storage backend")
-        });
-        topic_log
-            .value()
-            .write()
-            .unwrap()
-            .append(record)
-            .map_err(FlashQError::from)
-    }
-
-    pub fn post_records(
-        &self,
-        topic: String,
-        records: Vec<Record>,
-    ) -> Result<Vec<u64>, FlashQError> {
+    pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<u64, FlashQError> {
         let topic_log = self.topics.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
                 .create(&topic)
@@ -131,7 +113,7 @@ impl FlashQ {
         for record in records {
             offsets.push(topic_log_locked.append(record).map_err(FlashQError::from)?);
         }
-        Ok(offsets)
+        Ok(offsets.last().cloned().unwrap_or_default())
     }
 
     pub fn poll_records(
@@ -397,7 +379,7 @@ mod tests {
     fn test_post_single_record() {
         let queue = FlashQ::new();
         let record = Record::new(None, "test record".to_string(), None);
-        let result = queue.post_record("test_topic".to_string(), record);
+        let result = queue.post_records("test_topic".to_string(), vec![record]);
 
         assert!(result.is_ok());
         assert_eq!(result.expect("posting record should succeed"), 0); // First record should have offset 0
@@ -412,13 +394,13 @@ mod tests {
         let record3 = Record::new(None, "msg3".to_string(), None);
 
         let offset1 = queue
-            .post_record("topic".to_string(), record1)
+            .post_records("topic".to_string(), vec![record1])
             .expect("posting first record should succeed");
         let offset2 = queue
-            .post_record("topic".to_string(), record2)
+            .post_records("topic".to_string(), vec![record2])
             .expect("posting second record should succeed");
         let offset3 = queue
-            .post_record("different_topic".to_string(), record3)
+            .post_records("different_topic".to_string(), vec![record3])
             .expect("posting record to different topic should succeed");
 
         assert_eq!(offset1, 0);
@@ -434,10 +416,10 @@ mod tests {
         let record2 = Record::new(None, "second news".to_string(), None);
 
         queue
-            .post_record("news".to_string(), record1)
+            .post_records("news".to_string(), vec![record1])
             .expect("posting first record should succeed");
         queue
-            .post_record("news".to_string(), record2)
+            .post_records("news".to_string(), vec![record2])
             .expect("posting second record should succeed");
 
         let records = queue
@@ -457,8 +439,12 @@ mod tests {
         let record1 = Record::new(None, "first news".to_string(), None);
         let record2 = Record::new(None, "second news".to_string(), None);
 
-        queue.post_record("news".to_string(), record1).unwrap();
-        queue.post_record("news".to_string(), record2).unwrap();
+        queue
+            .post_records("news".to_string(), vec![record1])
+            .unwrap();
+        queue
+            .post_records("news".to_string(), vec![record2])
+            .unwrap();
 
         let records = queue.poll_records("news", Some(1)).unwrap();
         assert_eq!(records.len(), 1);
@@ -480,9 +466,15 @@ mod tests {
         let record2 = Record::new(None, "second".to_string(), None);
         let record3 = Record::new(None, "third".to_string(), None);
 
-        queue.post_record("ordered".to_string(), record1).unwrap();
-        queue.post_record("ordered".to_string(), record2).unwrap();
-        queue.post_record("ordered".to_string(), record3).unwrap();
+        queue
+            .post_records("ordered".to_string(), vec![record1])
+            .unwrap();
+        queue
+            .post_records("ordered".to_string(), vec![record2])
+            .unwrap();
+        queue
+            .post_records("ordered".to_string(), vec![record3])
+            .unwrap();
 
         let records = queue.poll_records("ordered", None).unwrap();
         assert_eq!(records[0].record.value, "first");
@@ -498,7 +490,9 @@ mod tests {
     fn test_records_persist_after_polling() {
         let queue = FlashQ::new();
         let record = Record::new(None, "first news".to_string(), None);
-        queue.post_record("news".to_string(), record).unwrap();
+        queue
+            .post_records("news".to_string(), vec![record])
+            .unwrap();
 
         let first_polling_records = queue.poll_records("news", None).unwrap();
         let second_polling_records = queue.poll_records("news", None).unwrap();
@@ -513,8 +507,12 @@ mod tests {
         let record_a = Record::new(None, "record for A".to_string(), None);
         let record_b = Record::new(None, "record for B".to_string(), None);
 
-        queue.post_record("topic_a".to_string(), record_a).unwrap();
-        queue.post_record("topic_b".to_string(), record_b).unwrap();
+        queue
+            .post_records("topic_a".to_string(), vec![record_a])
+            .unwrap();
+        queue
+            .post_records("topic_b".to_string(), vec![record_b])
+            .unwrap();
 
         let records_in_topic_a = queue.poll_records("topic_a", None).unwrap();
         let records_in_topic_b = queue.poll_records("topic_b", None).unwrap();
@@ -539,7 +537,7 @@ mod tests {
         );
 
         queue
-            .post_record("metadata_topic".to_string(), record)
+            .post_records("metadata_topic".to_string(), vec![record])
             .expect("posting record with metadata should succeed");
         let records = queue
             .poll_records("metadata_topic", None)
@@ -625,9 +623,15 @@ mod tests {
         let record2 = Record::new(None, "msg2".to_string(), None);
         let record3 = Record::new(None, "msg3".to_string(), None);
 
-        queue.post_record(topic.to_string(), record1).unwrap();
-        queue.post_record(topic.to_string(), record2).unwrap();
-        queue.post_record(topic.to_string(), record3).unwrap();
+        queue
+            .post_records(topic.to_string(), vec![record1])
+            .unwrap();
+        queue
+            .post_records(topic.to_string(), vec![record2])
+            .unwrap();
+        queue
+            .post_records(topic.to_string(), vec![record3])
+            .unwrap();
 
         // Initial offset should be 0
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
@@ -752,7 +756,9 @@ mod tests {
 
         // Create topic by posting a record
         let record = Record::new(None, "test record".to_string(), None);
-        queue.post_record("topic1".to_string(), record).unwrap();
+        queue
+            .post_records("topic1".to_string(), vec![record])
+            .unwrap();
 
         // Set an offset to verify the group exists
         queue
@@ -810,9 +816,15 @@ mod tests {
         let record2 = Record::new(None, "test record 2".to_string(), None);
         let record3 = Record::new(None, "test record 3".to_string(), None);
 
-        queue.post_record("topic1".to_string(), record1).unwrap();
-        queue.post_record("topic2".to_string(), record2).unwrap();
-        queue.post_record("topic3".to_string(), record3).unwrap();
+        queue
+            .post_records("topic1".to_string(), vec![record1])
+            .unwrap();
+        queue
+            .post_records("topic2".to_string(), vec![record2])
+            .unwrap();
+        queue
+            .post_records("topic3".to_string(), vec![record3])
+            .unwrap();
 
         // Set offsets for multiple topics
         queue
@@ -855,7 +867,9 @@ mod tests {
         let record = Record::new(None, "test".to_string(), None);
 
         // Post a record to create topic with offset 0
-        queue.post_record("test-topic".to_string(), record).unwrap();
+        queue
+            .post_records("test-topic".to_string(), vec![record])
+            .unwrap();
 
         // Create consumer group and try to set invalid offset (beyond available records)
         queue

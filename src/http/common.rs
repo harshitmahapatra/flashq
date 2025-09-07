@@ -14,14 +14,9 @@ pub struct ProduceRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct OffsetInfo {
+pub struct ProduceResponse {
     pub offset: u64,
     pub timestamp: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ProduceResponse {
-    pub offsets: Vec<OffsetInfo>,
 }
 
 // =============================================================================

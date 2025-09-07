@@ -15,10 +15,10 @@ fn test_memory_vs_file_basic_operations() {
     let test_record = Record::new(Some("test_key".to_string()), "test_value".to_string(), None);
 
     let memory_offset = memory_queue
-        .post_record(topic_name.clone(), test_record.clone())
+        .post_records(topic_name.clone(), vec![test_record.clone()])
         .unwrap();
     let file_offset = file_queue
-        .post_record(topic_name.clone(), test_record.clone())
+        .post_records(topic_name.clone(), vec![test_record.clone()])
         .unwrap();
 
     assert_eq!(memory_offset, file_offset);
@@ -45,10 +45,10 @@ fn test_consumer_group_compatibility() {
     for i in 0..3 {
         let record = Record::new(None, format!("message_{i}"), None);
         memory_queue
-            .post_record(topic_name.clone(), record.clone())
+            .post_records(topic_name.clone(), vec![record.clone()])
             .unwrap();
         file_queue
-            .post_record(topic_name.clone(), record.clone())
+            .post_records(topic_name.clone(), vec![record.clone()])
             .unwrap();
     }
 
@@ -86,7 +86,9 @@ fn test_sync_mode_behavior() {
         let mode_topic = format!("{topic_name}_{i}");
         let record = Record::new(None, format!("sync_test_{sync_mode:?}"), None);
 
-        let offset = queue.post_record(mode_topic.clone(), record).unwrap();
+        let offset = queue
+            .post_records(mode_topic.clone(), vec![record])
+            .unwrap();
         assert_eq!(offset, 0);
 
         let records = queue.poll_records(&mode_topic, None).unwrap();

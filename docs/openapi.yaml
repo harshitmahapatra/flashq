@@ -100,11 +100,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProduceResponse"
               example:
-                offsets:
-                  - offset: 142
-                    timestamp: "2024-01-15T10:30:00.123Z"
-                  - offset: 143
-                    timestamp: "2024-01-15T10:30:00.124Z"
+                offset: 142
+                timestamp: "2024-01-15T10:30:00.123Z"
         "400":
           $ref: "#/components/responses/BadRequest"
         "422":
@@ -439,27 +436,19 @@ components:
     ProduceResponse:
       type: object
       required:
-        - offsets
+        - offset
+        - timestamp
       properties:
-        offsets:
-          type: array
-          description: Assigned offsets for each produced record
-          items:
-            type: object
-            required:
-              - offset
-              - timestamp
-            properties:
-              offset:
-                type: integer
-                description: Assigned offset for the record
-                minimum: 0
-                example: 142
-              timestamp:
-                type: string
-                format: date-time
-                description: Server timestamp when record was stored
-                example: "2024-01-15T10:30:00.123Z"
+        offset:
+          type: integer
+          description: Assigned offset for the last record in the batch
+          minimum: 0
+          example: 142
+        timestamp:
+          type: string
+          format: date-time
+          description: Server timestamp when the last record was stored
+          example: "2024-01-15T10:30:00.123Z"
 
     # Consumer Group Schemas
     ConsumerGroupResponse:
