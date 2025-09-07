@@ -4,6 +4,15 @@ use std::collections::HashMap;
 
 pub trait TopicLog: Send + Sync {
     fn append(&mut self, record: Record) -> Result<u64, StorageError>;
+    /// Append a batch of records, taking ownership to avoid cloning.
+    /// Default implementation appends one-by-one; implementers may override for efficiency.
+    fn append_batch(&mut self, records: Vec<Record>) -> Result<u64, StorageError> {
+        let mut last = 0;
+        for r in records.into_iter() {
+            last = self.append(r)?;
+        }
+        Ok(last)
+    }
     fn get_records_from_offset(
         &self,
         offset: u64,

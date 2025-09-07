@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub struct InMemoryTopicLog {
     records: Vec<RecordWithOffset>,
     next_offset: u64,
+    batch_bytes: usize,
 }
 
 impl Default for InMemoryTopicLog {
@@ -20,6 +21,15 @@ impl InMemoryTopicLog {
         InMemoryTopicLog {
             records: Vec::new(),
             next_offset: 0,
+            batch_bytes: crate::storage::default_batch_bytes(),
+        }
+    }
+
+    pub fn new_with_batch_bytes(batch_bytes: usize) -> Self {
+        InMemoryTopicLog {
+            records: Vec::new(),
+            next_offset: 0,
+            batch_bytes,
         }
     }
 }
@@ -31,6 +41,49 @@ impl TopicLog for InMemoryTopicLog {
         self.records.push(record_with_offset);
         self.next_offset += 1;
         Ok(current_offset)
+    }
+
+    fn append_batch(&mut self, records: Vec<Record>) -> Result<u64, StorageError> {
+        if records.is_empty() {
+            return Ok(self.next_offset);
+        }
+
+        // Chunk roughly by batch_bytes to align with configured behavior
+        fn approx_record_size(r: &Record) -> usize {
+            let mut len = 16 + 32 + r.value.len();
+            if let Some(k) = &r.key {
+                len += k.len();
+            }
+            if let Some(h) = &r.headers {
+                for (k, v) in h {
+                    len += k.len() + v.len();
+                }
+            }
+            len + 64
+        }
+
+        let mut last = self.next_offset.saturating_sub(1);
+        let mut start = 0usize;
+        while start < records.len() {
+            let mut end = start;
+            let mut acc = 0usize;
+            while end < records.len() {
+                let est = approx_record_size(&records[end]);
+                if acc > 0 && acc + est > self.batch_bytes {
+                    break;
+                }
+                acc += est;
+                end += 1;
+            }
+
+            // Append this chunk
+            self.records.reserve(end - start);
+            for r in records[start..end].iter().cloned() {
+                last = self.append(r)?;
+            }
+            start = end;
+        }
+        Ok(last)
     }
 
     fn get_records_from_offset(
@@ -48,13 +101,12 @@ impl TopicLog for InMemoryTopicLog {
         if start_index >= self.records.len() {
             return Ok(Vec::new());
         }
-
         let slice = &self.records[start_index..];
-        let limited_slice = match count {
+        let limited = match count {
             Some(limit) => &slice[..limit.min(slice.len())],
             None => slice,
         };
-        Ok(limited_slice.to_vec())
+        Ok(limited.to_vec())
     }
 
     fn len(&self) -> usize {

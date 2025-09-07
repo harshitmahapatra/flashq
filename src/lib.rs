@@ -108,12 +108,11 @@ impl FlashQ {
                 .expect("Failed to create storage backend")
         });
 
-        let mut offsets = Vec::new();
         let mut topic_log_locked = topic_log.value().write().unwrap();
-        for record in records {
-            offsets.push(topic_log_locked.append(record).map_err(FlashQError::from)?);
-        }
-        Ok(offsets.last().cloned().unwrap_or_default())
+        let last = topic_log_locked
+            .append_batch(records)
+            .map_err(FlashQError::from)?;
+        Ok(last)
     }
 
     pub fn poll_records(
@@ -280,7 +279,7 @@ impl FlashQ {
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
             storage::StorageBackend::File { data_dir, .. } => data_dir.clone(),
-            storage::StorageBackend::Memory => return Ok(()), // No recovery needed for memory
+            storage::StorageBackend::Memory { .. } => return Ok(()), // No recovery needed for memory
         };
 
         let consumer_groups_dir = data_dir.join("consumer_groups");

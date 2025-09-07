@@ -10,6 +10,7 @@ pub struct FileTopicLog {
     segment_manager: SegmentManager,
     next_offset: u64,
     record_count: usize,
+    batch_bytes: usize,
 }
 
 impl FileTopicLog {
@@ -18,6 +19,22 @@ impl FileTopicLog {
         sync_mode: SyncMode,
         data_dir: P,
         segment_size_bytes: u64,
+    ) -> Result<Self, std::io::Error> {
+        Self::new_with_batch_bytes(
+            topic,
+            sync_mode,
+            data_dir,
+            segment_size_bytes,
+            crate::storage::default_batch_bytes(),
+        )
+    }
+
+    pub fn new_with_batch_bytes<P: AsRef<Path>>(
+        topic: &str,
+        sync_mode: SyncMode,
+        data_dir: P,
+        segment_size_bytes: u64,
+        batch_bytes: usize,
     ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
@@ -37,6 +54,7 @@ impl FileTopicLog {
             segment_manager,
             next_offset: 0,
             record_count: 0,
+            batch_bytes,
         };
 
         log.recover_from_segments()
@@ -106,12 +124,81 @@ impl TopicLog for FileTopicLog {
         Ok(offset)
     }
 
+    fn append_batch(&mut self, records: Vec<Record>) -> Result<u64, StorageError> {
+        if records.is_empty() {
+            return Ok(self.next_offset);
+        }
+        // Chunk by approximate serialized size to keep each write under batch_bytes
+        fn approx_record_size(r: &Record) -> usize {
+            let mut len = 16 + 32 + r.value.len(); // header + ts + value
+            if let Some(k) = &r.key {
+                len += k.len();
+            }
+            if let Some(h) = &r.headers {
+                for (k, v) in h {
+                    len += k.len() + v.len();
+                }
+            }
+            len + 64 // JSON structural overhead
+        }
+
+        let mut start = 0usize;
+        let mut acc = 0usize;
+        let mut last_offset = self.next_offset.saturating_sub(1);
+        // Process in approx-size-bounded chunks
+        for i in 0..records.len() {
+            let est = approx_record_size(&records[i]);
+            if acc > 0 && acc + est > self.batch_bytes {
+                if self.segment_manager.should_roll_segment() {
+                    self.segment_manager.roll_to_new_segment(self.next_offset)?;
+                }
+                let active = self.segment_manager.active_segment_mut().ok_or_else(|| {
+                    StorageError::from_io_error(
+                        std::io::Error::other("No active segment"),
+                        "No active segment available for bulk writing",
+                    )
+                })?;
+
+                let start_off = self.next_offset;
+                last_offset = active.append_records_bulk(&records[start..i], start_off)?;
+                let appended = (last_offset - start_off + 1) as usize;
+                self.next_offset = last_offset + 1;
+                self.record_count += appended;
+                let _ = appended;
+                start = i;
+                acc = 0;
+            }
+            acc += est;
+        }
+
+        if start < records.len() {
+            if self.segment_manager.should_roll_segment() {
+                self.segment_manager.roll_to_new_segment(self.next_offset)?;
+            }
+            let active = self.segment_manager.active_segment_mut().ok_or_else(|| {
+                StorageError::from_io_error(
+                    std::io::Error::other("No active segment"),
+                    "No active segment available for bulk writing",
+                )
+            })?;
+            let start_off = self.next_offset;
+            last_offset = active.append_records_bulk(&records[start..], start_off)?;
+            let appended = (last_offset - start_off + 1) as usize;
+            self.next_offset = last_offset + 1;
+            self.record_count += appended;
+            let _ = appended;
+        }
+
+        Ok(last_offset)
+    }
+
     fn get_records_from_offset(
         &self,
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        self.segment_manager.read_records_from_offset(offset, count)
+        // Use streaming reader to minimize per-chunk reopens/seeks
+        self.segment_manager.read_records_streaming(offset, count)
     }
 
     fn len(&self) -> usize {

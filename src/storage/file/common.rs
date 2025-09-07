@@ -102,6 +102,35 @@ pub fn serialize_record(record: &Record, offset: u64) -> Result<Vec<u8>, Storage
     ))
 }
 
+/// Zero-copy style: append the serialized record directly into `buf` and return the number of bytes written.
+/// Writes a placeholder for payload size and backfills it after writing JSON.
+pub fn serialize_record_into_buffer(
+    buf: &mut Vec<u8>,
+    record: &Record,
+    offset: u64,
+    timestamp: &str,
+) -> Result<u32, StorageError> {
+    let ts_bytes = timestamp.as_bytes();
+    let ts_len_u32 = ts_bytes.len() as u32;
+
+    let start = buf.len();
+    // Reserve header + timestamp upfront
+    buf.extend_from_slice(&0u32.to_be_bytes()); // payload size placeholder
+    buf.extend_from_slice(&offset.to_be_bytes());
+    buf.extend_from_slice(&ts_len_u32.to_be_bytes());
+    buf.extend_from_slice(ts_bytes);
+
+    let json_start = buf.len();
+    serde_json::to_writer(&mut *buf, record).map_err(|e| {
+        StorageError::from_serialization_error(e, "Failed to serialize record to JSON")
+    })?;
+    let json_len = (buf.len() - json_start) as u32;
+    let payload_size = json_len + 4 + ts_len_u32;
+    // Backfill payload size
+    buf[start..start + 4].copy_from_slice(&payload_size.to_be_bytes());
+    Ok((buf.len() - start) as u32)
+}
+
 fn serialize_record_payload(record: &Record) -> Result<Vec<u8>, StorageError> {
     serde_json::to_vec(record).map_err(|e| {
         StorageError::from_serialization_error(e, "Failed to serialize record to JSON")

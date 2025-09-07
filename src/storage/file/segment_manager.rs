@@ -84,6 +84,56 @@ impl SegmentManager {
         Ok(collected_records)
     }
 
+    /// Streaming read that keeps a single reader per segment and iterates sequentially across segments
+    pub fn read_records_streaming(
+        &self,
+        offset: u64,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        let max_records = count.unwrap_or(usize::MAX);
+        if max_records == 0 {
+            return Ok(Vec::new());
+        }
+
+        let segments_sorted_by_offset = self.get_segments_sorted_by_offset();
+        let start_idx = self.find_starting_segment_index(&segments_sorted_by_offset, offset)?;
+
+        let mut results: Vec<RecordWithOffset> = Vec::new();
+        let mut need_offset = offset;
+
+        for segment in &segments_sorted_by_offset[start_idx..] {
+            if results.len() >= max_records {
+                break;
+            }
+
+            let file_pos = self.calculate_file_position_for_segment(segment, need_offset);
+            let mut reader = match create_segment_reader(segment, file_pos) {
+                Ok(r) => r,
+                Err(e) => {
+                    log_read_error(&e);
+                    continue;
+                }
+            };
+
+            while results.len() < max_records {
+                match deserialize_record(&mut reader) {
+                    Ok(r) => {
+                        if r.offset >= need_offset {
+                            results.push(r);
+                        }
+                    }
+                    Err(_) => break, // next segment
+                }
+            }
+
+            if let Some(last) = results.last() {
+                need_offset = last.offset + 1;
+            }
+        }
+
+        Ok(results)
+    }
+
     fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
         let mut segments: Vec<&LogSegment> = self.all_segments().collect();
         segments.sort_by_key(|s| s.base_offset);
