@@ -127,20 +127,25 @@ impl LogSegment {
         start_offset: u64,
     ) -> Result<u64, StorageError> {
         if records.is_empty() {
-            return Ok(start_offset.saturating_sub(1));
+            return Err(StorageError::WriteFailed {
+                context: "append_records_bulk: empty input".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(
+                    "invalid input: no records".to_string(),
+                )),
+            });
         }
 
         // Serialize all records into a single buffer and remember each record's
         // starting position within the buffer as well as its size.
-        let mut buf: Vec<u8> = Vec::with_capacity(records.len() * 512);
+        let mut buf: Vec<u8> = Vec::with_capacity(records.len().saturating_mul(64));
         let mut rel_positions: Vec<u32> = Vec::with_capacity(records.len());
         let mut sizes: Vec<u32> = Vec::with_capacity(records.len());
 
         let mut next_offset = start_offset;
+        let timestamp = chrono::Utc::now().to_rfc3339();
         for record in records {
             let before = buf.len();
-            // Create a timestamp per record to preserve previous semantics
-            let timestamp = chrono::Utc::now().to_rfc3339();
+            // Use a single timestamp for the whole batch
             let rec_size = serialize_record_into_buffer(&mut buf, record, next_offset, &timestamp)?;
             rel_positions.push(before as u32);
             sizes.push(rec_size);

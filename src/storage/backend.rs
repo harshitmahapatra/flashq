@@ -39,7 +39,7 @@ impl Drop for StorageBackend {
 impl StorageBackend {
     pub fn new_memory() -> Self {
         StorageBackend::Memory {
-            batch_bytes: crate::storage::default_batch_bytes(),
+            batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
         }
     }
 
@@ -72,7 +72,7 @@ impl StorageBackend {
             data_dir,
             wal_commit_threshold,
             segment_size_bytes,
-            batch_bytes: crate::storage::default_batch_bytes(),
+            batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
             _directory_lock: directory_lock,
         })
     }

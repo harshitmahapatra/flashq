@@ -62,9 +62,9 @@ async fn main() {
                     std::process::exit(1);
                 }
                 match args[i].parse::<usize>() {
-                    Ok(v) if v > 0 => batch_bytes = Some(v),
+                    Ok(v) if v > 0 && v <= 16 * 1024 * 1024 => batch_bytes = Some(v),
                     _ => {
-                        log::error!("--batch-bytes must be a positive integer (bytes)");
+                        log::error!("--batch-bytes must be between 1 and 16 MiB (bytes)");
                         print_usage();
                         std::process::exit(1);
                     }
@@ -133,6 +133,6 @@ fn print_usage() {
     log::info!("    file: File-based storage (data persisted to ./data directory)");
     log::info!("  --data-dir: Custom data directory for file storage (overrides --storage file)");
     log::info!(
-        "  --batch-bytes: Target maximum bytes per storage I/O batch (default OS-aware ~128 KiB)"
+        "  --batch-bytes: Target maximum bytes per storage I/O batch (1..=16 MiB; default OS-aware ~128 KiB)"
     );
 }

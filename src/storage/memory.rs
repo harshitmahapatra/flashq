@@ -21,7 +21,7 @@ impl InMemoryTopicLog {
         InMemoryTopicLog {
             records: Vec::new(),
             next_offset: 0,
-            batch_bytes: crate::storage::default_batch_bytes(),
+            batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
         }
     }
 
@@ -48,27 +48,13 @@ impl TopicLog for InMemoryTopicLog {
             return Ok(self.next_offset);
         }
 
-        // Chunk roughly by batch_bytes to align with configured behavior
-        fn approx_record_size(r: &Record) -> usize {
-            let mut len = 16 + 32 + r.value.len();
-            if let Some(k) = &r.key {
-                len += k.len();
-            }
-            if let Some(h) = &r.headers {
-                for (k, v) in h {
-                    len += k.len() + v.len();
-                }
-            }
-            len + 64
-        }
-
-        let mut last = self.next_offset.saturating_sub(1);
+        let mut last: u64 = self.next_offset.saturating_sub(1);
         let mut start = 0usize;
         while start < records.len() {
             let mut end = start;
             let mut acc = 0usize;
             while end < records.len() {
-                let est = approx_record_size(&records[end]);
+                let est = crate::storage::batching_heuristics::estimate_record_size(&records[end]);
                 if acc > 0 && acc + est > self.batch_bytes {
                     break;
                 }
@@ -76,11 +62,25 @@ impl TopicLog for InMemoryTopicLog {
                 end += 1;
             }
 
-            // Append this chunk
-            self.records.reserve(end - start);
-            for r in records[start..end].iter().cloned() {
-                last = self.append(r)?;
+            // Append this chunk in one go
+            let batch_len = end - start;
+            if batch_len == 0 {
+                break;
             }
+            self.records.reserve(batch_len);
+            let batch_ts = chrono::Utc::now().to_rfc3339();
+            let mut offset = self.next_offset;
+            for r in records[start..end].iter().cloned() {
+                let rwo = RecordWithOffset {
+                    record: r,
+                    offset,
+                    timestamp: batch_ts.clone(),
+                };
+                self.records.push(rwo);
+                last = offset;
+                offset += 1;
+            }
+            self.next_offset = offset;
             start = end;
         }
         Ok(last)

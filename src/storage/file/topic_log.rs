@@ -25,7 +25,7 @@ impl FileTopicLog {
             sync_mode,
             data_dir,
             segment_size_bytes,
-            crate::storage::default_batch_bytes(),
+            crate::storage::batching_heuristics::default_batch_bytes(),
         )
     }
 
@@ -129,25 +129,13 @@ impl TopicLog for FileTopicLog {
             return Ok(self.next_offset);
         }
         // Chunk by approximate serialized size to keep each write under batch_bytes
-        fn approx_record_size(r: &Record) -> usize {
-            let mut len = 16 + 32 + r.value.len(); // header + ts + value
-            if let Some(k) = &r.key {
-                len += k.len();
-            }
-            if let Some(h) = &r.headers {
-                for (k, v) in h {
-                    len += k.len() + v.len();
-                }
-            }
-            len + 64 // JSON structural overhead
-        }
 
         let mut start = 0usize;
         let mut acc = 0usize;
         let mut last_offset = self.next_offset.saturating_sub(1);
         // Process in approx-size-bounded chunks
         for i in 0..records.len() {
-            let est = approx_record_size(&records[i]);
+            let est = crate::storage::batching_heuristics::estimate_record_size(&records[i]);
             if acc > 0 && acc + est > self.batch_bytes {
                 if self.segment_manager.should_roll_segment() {
                     self.segment_manager.roll_to_new_segment(self.next_offset)?;
