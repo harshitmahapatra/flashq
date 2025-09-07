@@ -1,4 +1,5 @@
 use flashq::storage::file::SyncMode;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Generate a unique test ID for isolating test data
@@ -24,6 +25,23 @@ pub fn create_test_topic(prefix: &str) -> String {
 pub fn create_test_consumer_group(prefix: &str) -> String {
     let test_id = generate_test_id();
     format!("{prefix}_group_{test_id}")
+}
+
+/// Create a unique test directory path under target/test_data
+/// Caller is responsible for creating the directory.
+pub fn unique_test_dir(name: &str) -> PathBuf {
+    let mut dir = PathBuf::from("target/test_data");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    dir.push(format!("{name}_{nanos}"));
+    dir
+}
+
+/// Build a large string payload of given length
+pub fn big_val(len: usize) -> String {
+    std::iter::repeat('x').take(len).collect()
 }
 
 /// Common test configuration

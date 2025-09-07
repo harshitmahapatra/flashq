@@ -16,5 +16,5 @@ mod storage {
     pub mod segment_tests;
     pub mod storage_backend_tests;
     pub mod test_utilities;
-    pub mod time_polling_correctness_tests;
+    pub mod time_polling_tests;
 }

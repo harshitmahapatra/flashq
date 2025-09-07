@@ -1,6 +1,6 @@
 use super::test_utilities::{TestClient, TestServer};
 use flashq::http::*;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[tokio::test]
 async fn test_http_time_based_polling_memory() {
@@ -61,10 +61,7 @@ async fn test_http_time_based_polling_memory() {
         .unwrap();
     assert_eq!(resp.status(), 200); // control
     let client = reqwest::Client::new();
-    let url = format!(
-        "{}/consumer/{}/topics/{}",
-        helper.base_url, group_id, topic
-    );
+    let url = format!("{}/consumer/{}/topics/{}", helper.base_url, group_id, topic);
     let resp = client
         .get(&url)
         .query(&[("from_offset", "0"), ("from_time", "2025-01-01T00:00:00Z")])
@@ -76,4 +73,3 @@ async fn test_http_time_based_polling_memory() {
     // Cleanup group
     let _ = helper.leave_consumer_group(group_id).await;
 }
-
