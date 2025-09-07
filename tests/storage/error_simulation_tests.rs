@@ -2,7 +2,7 @@ use super::test_utilities::*;
 use flashq::Record;
 use flashq::error::StorageError;
 use flashq::storage::TopicLog;
-use flashq::storage::file::{FileTopicLog, StdFileIO, SyncMode};
+use flashq::storage::file::{FileTopicLog, SyncMode};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -42,7 +42,7 @@ fn corrupt_log_file(file_path: &std::path::Path) -> Result<(), Box<dyn std::erro
 fn test_disk_full_during_append() {
     let config = TestConfig::new("disk_full");
     let topic = &config.topic_name;
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
         config.temp_dir_path(),
@@ -70,7 +70,7 @@ fn test_disk_full_during_append() {
 fn test_insufficient_space_recovery() {
     let config = TestConfig::new("space_recovery");
     let topic = &config.topic_name;
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
         config.temp_dir_path(),
@@ -107,7 +107,7 @@ fn test_insufficient_space_recovery() {
 fn test_permission_denied_directory_creation() {
     let config = TestConfig::new("permission_test");
     let readonly_dir = create_permission_denied_scenario(config.temp_dir_path()).unwrap();
-    let result: Result<FileTopicLog<StdFileIO>, _> = FileTopicLog::new(
+    let result: Result<FileTopicLog, _> = FileTopicLog::new(
         "test_topic",
         SyncMode::Immediate,
         &readonly_dir,
@@ -145,7 +145,7 @@ fn test_permission_denied_file_write() {
     perms.set_mode(0o444);
     std::fs::set_permissions(config.temp_dir_path(), perms).unwrap();
 
-    let result: Result<FileTopicLog<StdFileIO>, _> = FileTopicLog::new(
+    let result: Result<FileTopicLog, _> = FileTopicLog::new(
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
@@ -182,7 +182,7 @@ fn test_permission_denied_file_write() {
 #[test]
 fn test_file_read_failure() {
     let config = TestConfig::new("read_failure");
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         SyncMode::Immediate,
         config.temp_dir_path(),
@@ -222,7 +222,7 @@ fn test_file_read_failure() {
 fn test_partial_record_corruption() {
     let config = TestConfig::new("partial_corruption");
     let topic = &config.topic_name;
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
         config.temp_dir_path(),
@@ -262,7 +262,7 @@ fn test_partial_record_corruption() {
 fn test_error_state_recovery() {
     let config = TestConfig::new("error_recovery");
     let topic = &config.topic_name;
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         topic,
         SyncMode::Immediate,
         config.temp_dir_path(),

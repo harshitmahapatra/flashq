@@ -1,12 +1,12 @@
 use super::test_utilities::*;
 use flashq::Record;
 use flashq::storage::TopicLog;
-use flashq::storage::file::{FileTopicLog, StdFileIO};
+use flashq::storage::file::FileTopicLog;
 
 #[test]
 fn test_basic_append_and_retrieval() {
     let config = TestConfig::new("basic_ops");
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -29,7 +29,7 @@ fn test_basic_append_and_retrieval() {
 #[test]
 fn test_empty_log_properties() {
     let config = TestConfig::new("empty_log");
-    let log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         &config.temp_dir,
@@ -45,7 +45,7 @@ fn test_empty_log_properties() {
 #[test]
 fn test_record_retrieval_from_offset() {
     let config = TestConfig::new("retrieval");
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -85,7 +85,7 @@ fn test_record_retrieval_from_offset() {
 #[test]
 fn test_record_retrieval_with_count_limit() {
     let config = TestConfig::new("count_limit");
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -109,7 +109,7 @@ fn test_record_retrieval_with_count_limit() {
 #[test]
 fn test_offset_consistency() {
     let config = TestConfig::new("offset_consistency");
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -137,7 +137,7 @@ fn test_segment_rolling() {
     // Setup
     let config = TestConfig::new("segment_rolling");
     let small_segment_size = 10 * 1024; // 10KB - forces rolling after ~10 records
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -171,7 +171,7 @@ fn test_segment_boundary_crossing() {
     // Setup - Use very small segments to force frequent rolling
     let config = TestConfig::new("segment_boundary_crossing");
     let small_segment_size = 5 * 1024; // 5KB - forces rolling after ~5 records
-    let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let mut log = FileTopicLog::new(
         &config.topic_name,
         config.sync_mode,
         config.temp_dir_path(),

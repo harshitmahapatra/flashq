@@ -1,5 +1,5 @@
 use super::test_utilities::*;
-use flashq::storage::file::{FileTopicLog, StdFileIO};
+use flashq::storage::file::FileTopicLog;
 use flashq::storage::{StorageBackend, TopicLog};
 use flashq::{FlashQ, Record};
 
@@ -9,7 +9,7 @@ fn test_file_topic_log_recovery() {
     let topic_name = config.topic_name.clone();
 
     {
-        let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+        let mut log = FileTopicLog::new(
             &topic_name,
             config.sync_mode,
             config.temp_dir_path(),
@@ -23,7 +23,7 @@ fn test_file_topic_log_recovery() {
         log.sync().unwrap();
     }
 
-    let recovered_log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let recovered_log = FileTopicLog::new(
         &topic_name,
         config.sync_mode,
         config.temp_dir_path(),

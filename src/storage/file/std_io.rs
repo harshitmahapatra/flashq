@@ -1,4 +1,3 @@
-use super::file_io::FileIO;
 use crate::error::{FlashQError, StorageError};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -9,10 +8,8 @@ use std::path::Path;
 /// currently scattered across segment.rs, consumer_group.rs, and async_io.rs
 pub struct StdFileIO;
 
-impl FileIO for StdFileIO {
-    type Handle = File;
-
-    fn create_with_append_and_read_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
+impl StdFileIO {
+    pub fn create_with_append_and_read_permissions(path: &Path) -> Result<File, FlashQError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_append_and_read_permissions
         OpenOptions::new()
             .create(true)
@@ -27,7 +24,7 @@ impl FileIO for StdFileIO {
             })
     }
 
-    fn create_with_write_truncate_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
+    pub fn create_with_write_truncate_permissions(path: &Path) -> Result<File, FlashQError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_write_truncate_permissions
         OpenOptions::new()
             .create(true)
@@ -42,7 +39,7 @@ impl FileIO for StdFileIO {
             })
     }
 
-    fn open_with_read_only_permissions(path: &Path) -> Result<Self::Handle, FlashQError> {
+    pub fn open_with_read_only_permissions(path: &Path) -> Result<File, FlashQError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::open_with_read_only_permissions
         File::open(path).map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(
@@ -52,8 +49,8 @@ impl FileIO for StdFileIO {
         })
     }
 
-    fn write_data_at_offset(
-        handle: &mut Self::Handle,
+    pub fn write_data_at_offset(
+        handle: &mut File,
         data: &[u8],
         offset: u64,
     ) -> Result<(), FlashQError> {
@@ -70,8 +67,8 @@ impl FileIO for StdFileIO {
         })
     }
 
-    fn read_data_at_offset(
-        handle: &mut Self::Handle,
+    pub fn read_data_at_offset(
+        handle: &mut File,
         buffer: &mut [u8],
         offset: u64,
     ) -> Result<(), FlashQError> {
@@ -88,7 +85,7 @@ impl FileIO for StdFileIO {
         })
     }
 
-    fn append_data_to_end(handle: &mut Self::Handle, data: &[u8]) -> Result<u64, FlashQError> {
+    pub fn append_data_to_end(handle: &mut File, data: &[u8]) -> Result<u64, FlashQError> {
         // Extract from async_io.rs append_data_using_standard_io
         let current_position = handle.seek(SeekFrom::End(0)).map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(
@@ -107,7 +104,7 @@ impl FileIO for StdFileIO {
         Ok(current_position)
     }
 
-    fn synchronize_to_disk(handle: &mut Self::Handle) -> Result<(), FlashQError> {
+    pub fn synchronize_to_disk(handle: &mut File) -> Result<(), FlashQError> {
         // Extract from async_io.rs sync_file_using_standard_io + common.rs sync_file_if_needed
         handle.sync_all().map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(
@@ -117,7 +114,7 @@ impl FileIO for StdFileIO {
         })
     }
 
-    fn get_file_size(handle: &Self::Handle) -> Result<u64, FlashQError> {
+    pub fn get_file_size(handle: &File) -> Result<u64, FlashQError> {
         // Extract from async_io.rs get_current_file_size_in_bytes
         let file_metadata = handle.metadata().map_err(|e| {
             FlashQError::Storage(StorageError::from_io_error(

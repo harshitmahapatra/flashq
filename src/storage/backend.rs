@@ -1,5 +1,5 @@
 use crate::error::StorageError;
-use crate::storage::file::{FileConsumerGroup, FileTopicLog, StdFileIO};
+use crate::storage::file::{FileConsumerGroup, FileTopicLog};
 use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
 use crate::warn;
 use fs4::fs_std::FileExt;
@@ -79,8 +79,7 @@ impl StorageBackend {
                 segment_size_bytes,
                 ..
             } => {
-                let file_log: FileTopicLog<StdFileIO> =
-                    FileTopicLog::new(topic, *sync_mode, data_dir, *segment_size_bytes)?;
+                let file_log = FileTopicLog::new(topic, *sync_mode, data_dir, *segment_size_bytes)?;
                 Ok(Arc::new(RwLock::new(file_log)))
             }
         }
@@ -99,8 +98,7 @@ impl StorageBackend {
                 data_dir,
                 ..
             } => {
-                let consumer_group: FileConsumerGroup<StdFileIO> =
-                    FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
+                let consumer_group = FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
                 Ok(Arc::new(RwLock::new(consumer_group)))
             }
         }

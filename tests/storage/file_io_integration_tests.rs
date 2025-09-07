@@ -1,4 +1,4 @@
-use flashq::storage::file::{FileIO, StdFileIO};
+use flashq::storage::file::StdFileIO;
 use tempfile::tempdir;
 
 /// Test basic file operations with StdFileIO
