@@ -34,9 +34,8 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Response (200):**
 ```json
 {
-  "offsets": [
-    {"offset": 0, "timestamp": "2024-01-15T10:30:45Z"}
-  ]
+  "offset": 0,
+  "timestamp": "2024-01-15T10:30:45Z"
 }
 ```
 

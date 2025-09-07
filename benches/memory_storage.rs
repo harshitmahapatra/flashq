@@ -30,7 +30,7 @@ fn empty_topic_write_throughput(bencher: Bencher) {
 
         for i in 0..5000 {
             let record = create_1kb_record(i);
-            black_box(queue.post_record(topic.clone(), record).unwrap());
+            black_box(queue.post_records(topic.clone(), vec![record]).unwrap());
         }
     });
 }
@@ -44,7 +44,7 @@ fn empty_topic_read_throughput(bencher: Bencher) {
         // Pre-populate with 5000 records (~5MB)
         for i in 0..5000 {
             let record = create_1kb_record(i);
-            queue.post_record(topic.clone(), record).unwrap();
+            queue.post_records(topic.clone(), vec![record]).unwrap();
         }
 
         // Benchmark reading all records back
@@ -62,13 +62,13 @@ fn large_dataset_write_throughput(bencher: Bencher) {
         // Pre-populate with 20,000 records (~20MB)
         for i in 0..20_000 {
             let record = create_1kb_record(i);
-            queue.post_record(topic.clone(), record).unwrap();
+            queue.post_records(topic.clone(), vec![record]).unwrap();
         }
 
         // Benchmark writing 1000 more records
         for i in 20_000..21_000 {
             let record = create_1kb_record(i);
-            black_box(queue.post_record(topic.clone(), record).unwrap());
+            black_box(queue.post_records(topic.clone(), vec![record]).unwrap());
         }
     });
 }
@@ -82,7 +82,7 @@ fn large_dataset_read_throughput(bencher: Bencher) {
         // Pre-populate with 20,000 records (~20MB)
         for i in 0..20_000 {
             let record = create_1kb_record(i);
-            queue.post_record(topic.clone(), record).unwrap();
+            queue.post_records(topic.clone(), vec![record]).unwrap();
         }
 
         // Benchmark reading recent 1000 records

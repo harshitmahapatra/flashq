@@ -1,5 +1,5 @@
 use super::test_utilities::*;
-use flashq::storage::file::{FileIOMode, FileTopicLog, StdFileIO};
+use flashq::storage::file::FileTopicLog;
 use flashq::storage::{StorageBackend, TopicLog};
 use flashq::{FlashQ, Record};
 
@@ -9,7 +9,7 @@ fn test_file_topic_log_recovery() {
     let topic_name = config.topic_name.clone();
 
     {
-        let mut log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+        let mut log = FileTopicLog::new(
             &topic_name,
             config.sync_mode,
             config.temp_dir_path(),
@@ -23,7 +23,7 @@ fn test_file_topic_log_recovery() {
         log.sync().unwrap();
     }
 
-    let recovered_log: FileTopicLog<StdFileIO> = FileTopicLog::new(
+    let recovered_log = FileTopicLog::new(
         &topic_name,
         config.sync_mode,
         config.temp_dir_path(),
@@ -49,30 +49,24 @@ fn test_flashq_persistence_across_instances() {
 
     {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(
-                config.sync_mode,
-                Default::default(),
-                temp_dir.clone(),
-            )
-            .unwrap(),
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
         );
 
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "persistent1".to_string(), None),
+                vec![Record::new(None, "persistent1".to_string(), None)],
             )
             .unwrap();
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "persistent2".to_string(), None),
+                vec![Record::new(None, "persistent2".to_string(), None)],
             )
             .unwrap();
     }
     let new_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
-            .unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
 
     let records = new_queue.poll_records(&topic_name, None).unwrap();
@@ -92,30 +86,24 @@ fn test_offset_continuation_after_recovery() {
 
     {
         let queue = FlashQ::with_storage_backend(
-            StorageBackend::new_file_with_path(
-                config.sync_mode,
-                Default::default(),
-                temp_dir.clone(),
-            )
-            .unwrap(),
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
         );
         queue
-            .post_record(
+            .post_records(
                 topic_name.clone(),
-                Record::new(None, "before_restart".to_string(), None),
+                vec![Record::new(None, "before_restart".to_string(), None)],
             )
             .unwrap();
     }
 
     let new_queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(config.sync_mode, Default::default(), temp_dir.clone())
-            .unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
 
     let new_offset = new_queue
-        .post_record(
+        .post_records(
             topic_name.clone(),
-            Record::new(None, "after_restart".to_string(), None),
+            vec![Record::new(None, "after_restart".to_string(), None)],
         )
         .unwrap();
 
@@ -133,21 +121,16 @@ fn test_empty_data_directory_recovery() {
     let config = TestConfig::new("empty_recovery");
 
     let queue = FlashQ::with_storage_backend(
-        StorageBackend::new_file_with_path(
-            config.sync_mode,
-            FileIOMode::default(),
-            config.temp_dir_path(),
-        )
-        .unwrap(),
+        StorageBackend::new_file_with_path(config.sync_mode, config.temp_dir_path()).unwrap(),
     );
 
     let poll_result = queue.poll_records(&config.topic_name, None);
     assert!(poll_result.is_err());
 
     let offset = queue
-        .post_record(
+        .post_records(
             config.topic_name.clone(),
-            Record::new(None, "first_record".to_string(), None),
+            vec![Record::new(None, "first_record".to_string(), None)],
         )
         .unwrap();
     assert_eq!(offset, 0);

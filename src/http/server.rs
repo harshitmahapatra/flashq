@@ -115,23 +115,14 @@ pub async fn produce_records(
         .collect();
 
     match app_state.queue.post_records(topic.clone(), records) {
-        Ok(offsets) => {
+        Ok(offset) => {
             trace!(
-                "POST /topics/{topic}/records - Posted {record_count} records, offsets: {offsets:?}"
+                "POST /topics/{topic}/records - Posted {record_count} records, offset: {offset}"
             );
 
             let timestamp = chrono::Utc::now().to_rfc3339();
-            let offset_infos: Vec<OffsetInfo> = offsets
-                .into_iter()
-                .map(|offset| OffsetInfo {
-                    offset,
-                    timestamp: timestamp.clone(),
-                })
-                .collect();
 
-            Ok(Json(ProduceResponse {
-                offsets: offset_infos,
-            }))
+            Ok(Json(ProduceResponse { offset, timestamp }))
         }
         Err(error) => {
             error!("POST /topics/{topic}/records failed: {error}");

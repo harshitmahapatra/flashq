@@ -1,20 +1,18 @@
 use crate::error::StorageError;
 use crate::storage::file::common::ensure_directory_exists;
-use crate::storage::file::file_io::FileIO;
-use crate::storage::file::std_io::StdFileIO;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::TopicLog;
 use crate::{Record, RecordWithOffset};
 use std::path::Path;
 
 /// File-based topic log implementation using Kafka-aligned segment architecture
-pub struct FileTopicLog<F: FileIO = StdFileIO> {
-    segment_manager: SegmentManager<F>,
+pub struct FileTopicLog {
+    segment_manager: SegmentManager,
     next_offset: u64,
     record_count: usize,
 }
 
-impl<F: FileIO> FileTopicLog<F> {
+impl FileTopicLog {
     pub fn new<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -86,7 +84,7 @@ impl<F: FileIO> FileTopicLog<F> {
     }
 }
 
-impl<F: FileIO> TopicLog for FileTopicLog<F> {
+impl TopicLog for FileTopicLog {
     fn append(&mut self, record: Record) -> Result<u64, StorageError> {
         let offset = self.next_offset;
 

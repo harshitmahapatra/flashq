@@ -16,11 +16,6 @@ Quick performance comparison between memory and file storage backends.
 - **Memory**: 12.9 MB - 54.0 MB
 - **Best for**: Durable messaging, audit logs
 
-**File Storage - io_uring** (Experimental, Linux-only)
-- **Throughput**: 797 - 3.33K records/sec  
-- **Latency**: 300ms - 1.26s
-- **Memory**: 12.9 MB - 54.0 MB
-- **Status**: Not optimized, slower than standard
 
 > ⚠️ **Note**: We're actively working on optimizing file storage performance in upcoming releases.
 
@@ -28,13 +23,13 @@ Quick performance comparison between memory and file storage backends.
 
 ### When to Use Each Backend
 
-| Scenario | Memory Storage | File Storage (Standard) | File Storage (io_uring) |
-|----------|----------------|-------------------------|------------------------|
-| High-frequency trading | ✅ Sub-10ms latency | ❌ 23-97ms latency | ❌ 300ms-1.3s latency |
-| Real-time analytics | ✅ 544K records/sec | ❌ 42.7K records/sec | ❌ 3.3K records/sec |
-| Message queues | ⚠️ Data loss risk | ✅ Persistent | ✅ Persistent |
-| Audit logs | ❌ No persistence | ✅ Durable | ✅ Durable |
-| Development/testing | ✅ Fast iterations | ✅ Production-like | ❌ Slow, experimental |
+| Scenario | Memory Storage | File Storage |
+|----------|----------------|--------------|
+| High-frequency trading | ✅ Sub-10ms latency | ❌ 23-97ms latency |
+| Real-time analytics | ✅ 544K records/sec | ❌ 42.7K records/sec |
+| Message queues | ⚠️ Data loss risk | ✅ Persistent |
+| Audit logs | ❌ No persistence | ✅ Durable |
+| Development/testing | ✅ Fast iterations | ✅ Production-like |
 
 ### Benchmark Results
 
@@ -46,26 +41,20 @@ Quick performance comparison between memory and file storage backends.
 | Memory | Empty topic write | 544K/sec | 1.84 ms | 6.57 MB |
 | Memory | Large dataset read | 105.3K/sec | 9.50 ms | 27.6 MB |
 | Memory | Large dataset write | 100.6K/sec | 9.94 ms | 27.5 MB |
-| File (Std) | Empty topic read | 30.3K/sec | 33.0 ms | 25.4 MB |
-| File (Std) | Empty topic write | 42.7K/sec | 23.4 ms | 12.9 MB |
-| File (Std) | Large file read | 10.8K/sec | 92.7 ms | 53.9 MB |
-| File (Std) | Large file write | 10.3K/sec | 96.8 ms | 54.0 MB |
-| File (io_uring) | Empty topic read | 3.23K/sec | 310ms | 25.4 MB |
-| File (io_uring) | Empty topic write | 3.33K/sec | 301ms | 12.9 MB |
-| File (io_uring) | Large file read | 840/sec | 1.19s | 53.9 MB |
-| File (io_uring) | Large file write | 797/sec | 1.26s | 54.0 MB |
+| File | Empty topic read | 30.3K/sec | 33.0 ms | 25.4 MB |
+| File | Empty topic write | 42.7K/sec | 23.4 ms | 12.9 MB |
+| File | Large file read | 10.8K/sec | 92.7 ms | 53.9 MB |
+| File | Large file write | 10.3K/sec | 96.8 ms | 54.0 MB |
 
 ## Quick Comparison
 
 **Memory vs File Storage Performance**:
-- **Standard File**: Memory is 13-53x faster
-- **io_uring File**: Memory is 68-683x faster (io_uring needs optimization)
+- **File Storage**: Memory is 13-53x faster
 
 | Backend | Speed vs Memory | Latency | When to Use |
 |---------|----------------|---------|-------------|
 | Memory | Baseline | Sub-10ms | High throughput, temporary data |
-| File (Standard) | 13-53x slower | 23-97ms | Persistence needed |
-| File (io_uring) | 68-683x slower | 300ms-1.3s | ❌ Not recommended yet |
+| File | 13-53x slower | 23-97ms | Persistence needed |
 
 ## Production Guidance
 
@@ -75,15 +64,11 @@ Quick performance comparison between memory and file storage backends.
 - Temporary data that doesn't need persistence
 - Development and testing environments
 
-### Choose File Storage (Standard) For:  
+### Choose File Storage For:  
 - Message queues that must survive restarts
 - Audit logs and compliance requirements
 - Long-term data storage
 - When you can accept 23-97ms latencies
-
-### Avoid File Storage (io_uring) For Now:
-- Currently unoptimized, 68-683x slower than memory
-- Use standard file storage instead until optimized
 
 ### Capacity Planning
 - **Memory**: ~6.6-32.1 MB RAM per 1000 records
@@ -94,4 +79,4 @@ Quick performance comparison between memory and file storage backends.
 
 **Benchmark Environment**: Linux WSL2 with 1KB test records  
 **Framework**: Divan with full memory profiling  
-**Note**: File storage uses optimal settings (no fsync) for these benchmarks. io_uring implementation needs optimization.
+**Note**: File storage uses optimal settings (no fsync) for these benchmarks.

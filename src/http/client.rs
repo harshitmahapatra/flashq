@@ -51,14 +51,10 @@ pub async fn handle_batch_post(
                             match response.json::<ProduceResponse>().await {
                                 Ok(produce_response) => {
                                     println!(
-                                        "Posted {} records to topic '{}' starting at offset: {}",
-                                        produce_response.offsets.len(),
+                                        "Posted {} records to topic '{}'. Last offset: {}",
+                                        request.records.len(),
                                         topic,
-                                        produce_response
-                                            .offsets
-                                            .first()
-                                            .map(|o| o.offset.to_string())
-                                            .unwrap_or_else(|| "unknown".to_string())
+                                        produce_response.offset
                                     );
                                 }
                                 Err(e) => println!("Failed to parse response: {e}"),
@@ -111,14 +107,10 @@ pub async fn post_records(
             if response.status().is_success() {
                 match response.json::<ProduceResponse>().await {
                     Ok(produce_response) => {
-                        if let Some(first_offset) = produce_response.offsets.first() {
-                            println!(
-                                "Posted record to topic '{}' with offset: {}",
-                                topic, first_offset.offset
-                            );
-                        } else {
-                            println!("Posted record to topic '{topic}' (no offset returned)");
-                        }
+                        println!(
+                            "Posted record to topic '{}' with offset: {}",
+                            topic, produce_response.offset
+                        );
                     }
                     Err(e) => println!("Failed to parse response: {e}"),
                 }

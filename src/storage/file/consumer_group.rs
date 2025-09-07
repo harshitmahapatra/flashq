@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    marker::PhantomData,
     path::{Path, PathBuf},
 };
 
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{SyncMode, common::ensure_directory_exists, file_io::FileIO, std_io::StdFileIO},
+    file::{SyncMode, common::ensure_directory_exists, file_io::FileIo},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,15 +17,14 @@ struct ConsumerGroupData {
     topic_offsets: HashMap<String, u64>,
 }
 
-pub struct FileConsumerGroup<F: FileIO = StdFileIO> {
+pub struct FileConsumerGroup {
     group_id: String,
     topic_offsets: HashMap<String, u64>,
     file_path: PathBuf,
     sync_mode: SyncMode,
-    _phantom: PhantomData<F>,
 }
 
-impl<F: FileIO> FileConsumerGroup<F> {
+impl FileConsumerGroup {
     pub fn new<P: AsRef<Path>>(
         group_id: &str,
         sync_mode: SyncMode,
@@ -40,7 +38,6 @@ impl<F: FileIO> FileConsumerGroup<F> {
             topic_offsets,
             file_path,
             sync_mode,
-            _phantom: PhantomData,
         };
 
         consumer_group.persist_to_disk()?;
@@ -95,13 +92,13 @@ impl<F: FileIO> FileConsumerGroup<F> {
         let json_data = serde_json::to_string_pretty(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut file_handle = F::create_with_write_truncate_permissions(&self.file_path)
+        let mut file_handle = FileIo::create_with_write_truncate_permissions(&self.file_path)
             .map_err(std::io::Error::other)?;
-        F::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0)
+        FileIo::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0)
             .map_err(std::io::Error::other)?;
 
         if self.sync_mode == SyncMode::Immediate {
-            F::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
+            FileIo::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
         }
 
         Ok(())
@@ -112,7 +109,7 @@ impl<F: FileIO> FileConsumerGroup<F> {
 // CONSUMER GROUP TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl<F: FileIO> ConsumerGroup for FileConsumerGroup<F> {
+impl ConsumerGroup for FileConsumerGroup {
     fn get_offset(&self, topic: &str) -> u64 {
         self.topic_offsets.get(topic).copied().unwrap_or(0)
     }

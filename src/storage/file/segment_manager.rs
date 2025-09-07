@@ -6,23 +6,21 @@ use std::{collections::BTreeMap, io::BufReader};
 use crate::RecordWithOffset;
 use crate::error::StorageError;
 use crate::storage::file::common::deserialize_record;
-use crate::storage::file::file_io::FileIO;
-use crate::storage::file::std_io::StdFileIO;
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
 use log::warn;
 
 /// Manager for multiple log segments, implementing segment rolling
-pub struct SegmentManager<F: FileIO = StdFileIO> {
-    segments: BTreeMap<u64, LogSegment<F>>,
-    active_segment: Option<LogSegment<F>>,
+pub struct SegmentManager {
+    segments: BTreeMap<u64, LogSegment>,
+    active_segment: Option<LogSegment>,
     base_dir: PathBuf,
     segment_size_bytes: u64,
     sync_mode: SyncMode,
     indexing_config: IndexingConfig,
 }
 
-impl<F: FileIO> SegmentManager<F> {
+impl SegmentManager {
     pub fn new(
         base_dir: PathBuf,
         segment_size_bytes: u64,
@@ -39,7 +37,7 @@ impl<F: FileIO> SegmentManager<F> {
         }
     }
 
-    pub fn find_segment_for_offset(&self, offset: u64) -> Option<&LogSegment<F>> {
+    pub fn find_segment_for_offset(&self, offset: u64) -> Option<&LogSegment> {
         if let Some(active) = &self.active_segment {
             if active.contains_offset(offset) {
                 return Some(active);
@@ -86,15 +84,15 @@ impl<F: FileIO> SegmentManager<F> {
         Ok(collected_records)
     }
 
-    fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment<F>> {
-        let mut segments: Vec<&LogSegment<F>> = self.all_segments().collect();
+    fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
+        let mut segments: Vec<&LogSegment> = self.all_segments().collect();
         segments.sort_by_key(|s| s.base_offset);
         segments
     }
 
     fn find_starting_segment_index(
         &self,
-        segments: &[&LogSegment<F>],
+        segments: &[&LogSegment],
         offset: u64,
     ) -> Result<usize, StorageError> {
         segments
@@ -110,7 +108,7 @@ impl<F: FileIO> SegmentManager<F> {
 
     fn read_records_from_single_segment(
         &self,
-        segment: &LogSegment<F>,
+        segment: &LogSegment,
         start_offset: u64,
         max_records: usize,
     ) -> Vec<RecordWithOffset> {
@@ -125,11 +123,7 @@ impl<F: FileIO> SegmentManager<F> {
         }
     }
 
-    fn calculate_file_position_for_segment(
-        &self,
-        segment: &LogSegment<F>,
-        start_offset: u64,
-    ) -> u64 {
+    fn calculate_file_position_for_segment(&self, segment: &LogSegment, start_offset: u64) -> u64 {
         if segment.contains_offset(start_offset) {
             segment.find_position_for_offset(start_offset).unwrap_or(0) as u64
         } else {
@@ -167,11 +161,11 @@ impl<F: FileIO> SegmentManager<F> {
         Ok(())
     }
 
-    pub fn active_segment_mut(&mut self) -> Option<&mut LogSegment<F>> {
+    pub fn active_segment_mut(&mut self) -> Option<&mut LogSegment> {
         self.active_segment.as_mut()
     }
 
-    pub fn all_segments(&self) -> impl Iterator<Item = &LogSegment<F>> {
+    pub fn all_segments(&self) -> impl Iterator<Item = &LogSegment> {
         self.segments.values().chain(self.active_segment.iter())
     }
 
@@ -245,8 +239,8 @@ fn extract_offset_from_log_file(file_path: &std::path::Path) -> Option<u64> {
     offset_string.parse::<u64>().ok()
 }
 
-fn create_segment_reader<F: FileIO>(
-    segment: &LogSegment<F>,
+fn create_segment_reader(
+    segment: &LogSegment,
     file_position: u64,
 ) -> Result<BufReader<File>, StorageError> {
     let mut segment_file = std::fs::File::open(&segment.log_path)

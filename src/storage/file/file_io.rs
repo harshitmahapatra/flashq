@@ -1,49 +1,126 @@
-use crate::error::FlashQError;
-use std::os::unix::io::AsRawFd;
+use crate::error::{FlashQError, StorageError};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-/// Trait for file I/O operations that can be implemented by different backends
-/// (standard I/O, io_uring, etc.) to provide a unified interface for file operations
-/// used throughout the storage layer.
-pub trait FileIO: Send + Sync {
-    /// The file handle type used by this implementation
-    type Handle: AsRawFd + Send + Sync;
+/// Standard file I/O implementation using std::fs::File
+pub struct FileIo;
 
-    // File lifecycle operations
+impl FileIo {
+    pub fn create_with_append_and_read_permissions(path: &Path) -> Result<File, FlashQError> {
+        // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_append_and_read_permissions
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .open(path)
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("Failed to create file with append+read permissions: {path:?}"),
+                ))
+            })
+    }
 
-    /// Create a new file or open existing with append and read permissions
-    fn create_with_append_and_read_permissions(path: &Path) -> Result<Self::Handle, FlashQError>;
+    pub fn create_with_write_truncate_permissions(path: &Path) -> Result<File, FlashQError> {
+        // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_write_truncate_permissions
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|e| {
+                FlashQError::Storage(StorageError::from_io_error(
+                    e,
+                    &format!("Failed to create file with write+truncate permissions: {path:?}"),
+                ))
+            })
+    }
 
-    /// Create a new file or truncate existing with write permissions
-    fn create_with_write_truncate_permissions(path: &Path) -> Result<Self::Handle, FlashQError>;
+    pub fn open_with_read_only_permissions(path: &Path) -> Result<File, FlashQError> {
+        // Extract from async_io.rs UnifiedAsyncFileHandle::open_with_read_only_permissions
+        File::open(path).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                &format!("Failed to open file with read-only permissions: {path:?}"),
+            ))
+        })
+    }
 
-    /// Open an existing file with read-only permissions
-    fn open_with_read_only_permissions(path: &Path) -> Result<Self::Handle, FlashQError>;
-
-    // Core I/O operations
-
-    /// Write data at a specific offset in the file
-    fn write_data_at_offset(
-        handle: &mut Self::Handle,
+    pub fn write_data_at_offset(
+        handle: &mut File,
         data: &[u8],
         offset: u64,
-    ) -> Result<(), FlashQError>;
+    ) -> Result<(), FlashQError> {
+        // Extract from async_io.rs write_at_offset_using_standard_io
+        handle.seek(SeekFrom::Start(offset)).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                &format!("Failed to seek to offset {offset}"),
+            ))
+        })?;
 
-    /// Read data from a specific offset in the file, filling the entire buffer
-    fn read_data_at_offset(
-        handle: &mut Self::Handle,
+        handle.write_all(data).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(e, "Failed to write data"))
+        })
+    }
+
+    pub fn read_data_at_offset(
+        handle: &mut File,
         buffer: &mut [u8],
         offset: u64,
-    ) -> Result<(), FlashQError>;
+    ) -> Result<(), FlashQError> {
+        // Extract from async_io.rs read_at_offset_using_standard_io + common.rs patterns
+        handle.seek(SeekFrom::Start(offset)).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                &format!("Failed to seek to offset {offset}"),
+            ))
+        })?;
 
-    /// Append data to the end of the file, returning the position where data was written
-    fn append_data_to_end(handle: &mut Self::Handle, data: &[u8]) -> Result<u64, FlashQError>;
+        handle.read_exact(buffer).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(e, "Failed to read exact data"))
+        })
+    }
 
-    // File operations
+    pub fn append_data_to_end(handle: &mut File, data: &[u8]) -> Result<u64, FlashQError> {
+        // Extract from async_io.rs append_data_using_standard_io
+        let current_position = handle.seek(SeekFrom::End(0)).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                "Failed to seek to end of file",
+            ))
+        })?;
 
-    /// Synchronize file data and metadata to disk (equivalent to fsync)
-    fn synchronize_to_disk(handle: &mut Self::Handle) -> Result<(), FlashQError>;
+        handle.write_all(data).map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                "Failed to append data to file",
+            ))
+        })?;
 
-    /// Get the current size of the file in bytes
-    fn get_file_size(handle: &Self::Handle) -> Result<u64, FlashQError>;
+        Ok(current_position)
+    }
+
+    pub fn synchronize_to_disk(handle: &mut File) -> Result<(), FlashQError> {
+        // Extract from async_io.rs sync_file_using_standard_io + common.rs sync_file_if_needed
+        handle.sync_all().map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                "Failed to sync file to disk",
+            ))
+        })
+    }
+
+    pub fn get_file_size(handle: &File) -> Result<u64, FlashQError> {
+        // Extract from async_io.rs get_current_file_size_in_bytes
+        let file_metadata = handle.metadata().map_err(|e| {
+            FlashQError::Storage(StorageError::from_io_error(
+                e,
+                "Failed to get file metadata",
+            ))
+        })?;
+
+        Ok(file_metadata.len())
+    }
 }

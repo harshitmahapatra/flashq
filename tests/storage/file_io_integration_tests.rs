@@ -1,211 +1,112 @@
-#[cfg(target_os = "linux")]
-use flashq::storage::file::IoUringFileIO;
-use flashq::storage::file::{FileIO, StdFileIO};
+use flashq::storage::StorageBackend;
+use flashq::storage::file::FileIo;
 use tempfile::tempdir;
 
 /// Test basic file operations with StdFileIO
 #[test]
-fn test_std_file_io_append_and_read() {
+fn test_file_io_append_and_read() {
     let temp_dir = tempdir().unwrap();
-    let test_file_path = temp_dir.path().join("std_append_read_test.log");
+    let test_file_path = temp_dir.path().join("fileio_append_read_test.log");
 
-    let mut file_handle =
-        StdFileIO::create_with_append_and_read_permissions(&test_file_path).unwrap();
+    let mut file_handle = FileIo::create_with_append_and_read_permissions(&test_file_path).unwrap();
 
     let test_data = b"Hello, Standard I/O!";
-    let start_position = StdFileIO::append_data_to_end(&mut file_handle, test_data).unwrap();
-    StdFileIO::synchronize_to_disk(&mut file_handle).unwrap();
+    let start_position = FileIo::append_data_to_end(&mut file_handle, test_data).unwrap();
+    FileIo::synchronize_to_disk(&mut file_handle).unwrap();
 
     let mut read_buffer = vec![0u8; test_data.len()];
-    StdFileIO::read_data_at_offset(&mut file_handle, &mut read_buffer, 0).unwrap();
+    FileIo::read_data_at_offset(&mut file_handle, &mut read_buffer, 0).unwrap();
 
     assert_eq!(start_position, 0, "First write should start at position 0");
     assert_eq!(
-        StdFileIO::get_file_size(&file_handle).unwrap(),
+        FileIo::get_file_size(&file_handle).unwrap(),
         test_data.len() as u64
     );
     assert_eq!(&read_buffer, test_data);
 }
 
 #[test]
-fn test_std_file_io_write_truncate_mode() {
+fn test_file_io_write_truncate_mode() {
     let temp_dir = tempdir().unwrap();
-    let test_file_path = temp_dir.path().join("std_truncate_test.json");
+    let test_file_path = temp_dir.path().join("fileio_truncate_test.json");
 
-    let mut file_handle =
-        StdFileIO::create_with_write_truncate_permissions(&test_file_path).unwrap();
+    let mut file_handle = FileIo::create_with_write_truncate_permissions(&test_file_path).unwrap();
 
     let json_data = r#"{"test": "standard_io_data"}"#;
-    StdFileIO::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0).unwrap();
-    StdFileIO::synchronize_to_disk(&mut file_handle).unwrap();
+    FileIo::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0).unwrap();
+    FileIo::synchronize_to_disk(&mut file_handle).unwrap();
 
-    let file_size = StdFileIO::get_file_size(&file_handle).unwrap();
+    let file_size = FileIo::get_file_size(&file_handle).unwrap();
     assert_eq!(file_size, json_data.len() as u64);
 }
 
 #[test]
-fn test_std_file_io_sequential_writes() {
+fn test_file_io_sequential_writes() {
     let temp_dir = tempdir().unwrap();
-    let test_file_path = temp_dir.path().join("std_sequential_test.log");
+    let test_file_path = temp_dir.path().join("fileio_sequential_test.log");
 
-    let mut file_handle =
-        StdFileIO::create_with_append_and_read_permissions(&test_file_path).unwrap();
+    let mut file_handle = FileIo::create_with_append_and_read_permissions(&test_file_path).unwrap();
 
     let data1 = b"First line\n";
     let data2 = b"Second line\n";
 
-    let pos1 = StdFileIO::append_data_to_end(&mut file_handle, data1).unwrap();
-    let pos2 = StdFileIO::append_data_to_end(&mut file_handle, data2).unwrap();
+    let pos1 = FileIo::append_data_to_end(&mut file_handle, data1).unwrap();
+    let pos2 = FileIo::append_data_to_end(&mut file_handle, data2).unwrap();
 
     assert_eq!(pos1, 0);
     assert_eq!(pos2, data1.len() as u64);
 
-    let total_size = StdFileIO::get_file_size(&file_handle).unwrap();
+    let total_size = FileIo::get_file_size(&file_handle).unwrap();
     assert_eq!(total_size, (data1.len() + data2.len()) as u64);
 }
 
-// io_uring tests (Linux only)
-#[cfg(target_os = "linux")]
-mod io_uring_tests {
-    use super::*;
+#[test]
+fn test_storage_backend_with_file_io() {
+    let temp_dir = tempdir().unwrap();
+    let backend = StorageBackend::new_file_with_path(
+        flashq::storage::file::SyncMode::Immediate,
+        temp_dir.path(),
+    )
+    .unwrap();
 
-    #[test]
-    fn test_io_uring_availability_detection() {
-        let available = IoUringFileIO::is_available();
-        println!("io_uring available: {available}");
-        // This test always passes, it's just informational
-    }
+    let topic_log = backend.create("test_topic").unwrap();
 
-    #[test]
-    fn test_io_uring_file_io_append_and_read() {
-        if !IoUringFileIO::is_available() {
-            println!("Skipping io_uring test - not available");
-            return;
-        }
+    let record = flashq::Record::new(Some("key1".to_string()), "test_value".to_string(), None);
+    let offset = topic_log.write().unwrap().append(record).unwrap();
 
-        let temp_dir = tempdir().unwrap();
-        let test_file_path = temp_dir.path().join("io_uring_append_read_test.log");
+    assert_eq!(offset, 0);
+    assert_eq!(topic_log.read().unwrap().len(), 1);
 
-        let mut file_handle =
-            IoUringFileIO::create_with_append_and_read_permissions(&test_file_path).unwrap();
-
-        let test_data = b"Hello, io_uring I/O!";
-        let start_position =
-            IoUringFileIO::append_data_to_end(&mut file_handle, test_data).unwrap();
-        IoUringFileIO::synchronize_to_disk(&mut file_handle).unwrap();
-
-        let mut read_buffer = vec![0u8; test_data.len()];
-        IoUringFileIO::read_data_at_offset(&mut file_handle, &mut read_buffer, 0).unwrap();
-
-        assert_eq!(start_position, 0, "First write should start at position 0");
-        assert_eq!(
-            IoUringFileIO::get_file_size(&file_handle).unwrap(),
-            test_data.len() as u64
-        );
-        assert_eq!(&read_buffer, test_data);
-    }
-
-    #[test]
-    fn test_io_uring_write_truncate_mode() {
-        if !IoUringFileIO::is_available() {
-            println!("Skipping io_uring test - not available");
-            return;
-        }
-
-        let temp_dir = tempdir().unwrap();
-        let test_file_path = temp_dir.path().join("io_uring_truncate_test.json");
-
-        let mut file_handle =
-            IoUringFileIO::create_with_write_truncate_permissions(&test_file_path).unwrap();
-
-        let json_data = r#"{"test": "io_uring_data"}"#;
-        IoUringFileIO::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0).unwrap();
-        IoUringFileIO::synchronize_to_disk(&mut file_handle).unwrap();
-
-        let file_size = IoUringFileIO::get_file_size(&file_handle).unwrap();
-        assert_eq!(file_size, json_data.len() as u64);
-    }
-
-    #[test]
-    fn test_io_uring_sequential_writes() {
-        if !IoUringFileIO::is_available() {
-            println!("Skipping io_uring test - not available");
-            return;
-        }
-
-        let temp_dir = tempdir().unwrap();
-        let test_file_path = temp_dir.path().join("io_uring_sequential_test.log");
-
-        let mut file_handle =
-            IoUringFileIO::create_with_append_and_read_permissions(&test_file_path).unwrap();
-
-        let data1 = b"First io_uring line\n";
-        let data2 = b"Second io_uring line\n";
-
-        let pos1 = IoUringFileIO::append_data_to_end(&mut file_handle, data1).unwrap();
-        let pos2 = IoUringFileIO::append_data_to_end(&mut file_handle, data2).unwrap();
-
-        assert_eq!(pos1, 0);
-        assert_eq!(pos2, data1.len() as u64);
-
-        let total_size = IoUringFileIO::get_file_size(&file_handle).unwrap();
-        assert_eq!(total_size, (data1.len() + data2.len()) as u64);
-    }
-
-    #[test]
-    fn test_io_uring_large_write() {
-        if !IoUringFileIO::is_available() {
-            println!("Skipping io_uring test - not available");
-            return;
-        }
-
-        let temp_dir = tempdir().unwrap();
-        let test_file_path = temp_dir.path().join("io_uring_large_test.log");
-
-        let mut file_handle =
-            IoUringFileIO::create_with_append_and_read_permissions(&test_file_path).unwrap();
-
-        // Create a 64KB buffer
-        let large_data = vec![b'A'; 64 * 1024];
-        let start_position =
-            IoUringFileIO::append_data_to_end(&mut file_handle, &large_data).unwrap();
-        IoUringFileIO::synchronize_to_disk(&mut file_handle).unwrap();
-
-        assert_eq!(start_position, 0);
-        assert_eq!(
-            IoUringFileIO::get_file_size(&file_handle).unwrap(),
-            large_data.len() as u64
-        );
-    }
+    let records = topic_log
+        .read()
+        .unwrap()
+        .get_records_from_offset(0, Some(1))
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].record.value, "test_value");
 }
 
-/// Test compatibility - ensure both implementations produce same results
 #[test]
-fn test_file_io_compatibility() {
+fn test_consumer_group_with_file_io() {
     let temp_dir = tempdir().unwrap();
+    let backend = StorageBackend::new_file_with_path(
+        flashq::storage::file::SyncMode::Immediate,
+        temp_dir.path(),
+    )
+    .unwrap();
 
-    // Test with StdFileIO
-    let std_path = temp_dir.path().join("std_compatibility.log");
-    let mut std_handle = StdFileIO::create_with_append_and_read_permissions(&std_path).unwrap();
-    let test_data = b"Compatibility test data";
-    StdFileIO::append_data_to_end(&mut std_handle, test_data).unwrap();
-    StdFileIO::synchronize_to_disk(&mut std_handle).unwrap();
-    let std_size = StdFileIO::get_file_size(&std_handle).unwrap();
+    let consumer_group = backend.create_consumer_group("test_group").unwrap();
 
-    #[cfg(target_os = "linux")]
-    {
-        if IoUringFileIO::is_available() {
-            // Test with IoUringFileIO
-            let io_uring_path = temp_dir.path().join("io_uring_compatibility.log");
-            let mut io_uring_handle =
-                IoUringFileIO::create_with_append_and_read_permissions(&io_uring_path).unwrap();
-            IoUringFileIO::append_data_to_end(&mut io_uring_handle, test_data).unwrap();
-            IoUringFileIO::synchronize_to_disk(&mut io_uring_handle).unwrap();
-            let io_uring_size = IoUringFileIO::get_file_size(&io_uring_handle).unwrap();
+    // Test initial state
+    assert_eq!(consumer_group.read().unwrap().get_offset("test_topic"), 0);
 
-            // Both implementations should produce same file size
-            assert_eq!(std_size, io_uring_size);
-            assert_eq!(std_size, test_data.len() as u64);
-        }
-    }
+    // Test setting offset
+    consumer_group
+        .write()
+        .unwrap()
+        .set_offset("test_topic".to_string(), 42);
+    assert_eq!(consumer_group.read().unwrap().get_offset("test_topic"), 42);
+
+    // Test group ID
+    assert_eq!(consumer_group.read().unwrap().group_id(), "test_group");
 }
