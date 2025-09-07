@@ -85,14 +85,15 @@ src/storage/            # Storage abstraction layer
 ├── trait.rs            # TopicLog and ConsumerGroup traits
 ├── backend.rs          # StorageBackend factory with directory locking
 ├── memory.rs           # InMemoryTopicLog implementation
-└── file/               # Kafka-aligned segment-based file storage
+└── file/               # Segment-based file storage
     ├── mod.rs          # File storage module exports
     ├── common.rs       # Shared serialization utilities
     ├── topic_log.rs    # FileTopicLog implementation
     ├── consumer_group.rs # File-based consumer groups
     ├── segment.rs      # LogSegment implementation
     ├── segment_manager.rs # Segment lifecycle management
-    └── index.rs        # Sparse indexing for segments
+    ├── index.rs        # Sparse indexing for segments
+    └── file_io.rs      # File I/O operations
 src/http/               # HTTP components
 ├── mod.rs              # HTTP types and validation
 ├── server.rs           # HTTP server implementation
@@ -101,11 +102,14 @@ src/http/               # HTTP components
 └── common.rs           # Shared validation logic
 src/bin/server.rs       # HTTP server binary with storage backend selection
 src/bin/client.rs       # CLI client binary
-tests/http/             # HTTP integration tests
-tests/storage/          # Storage integration tests
+tests/                  # Integration test suite
+├── http_integration_tests.rs # Main HTTP integration test runner
+├── storage_integration_tests.rs # Main storage integration test runner
+├── http/               # HTTP integration tests (API endpoints, client functionality)
+└── storage/            # Storage integration tests (persistence, crash recovery)
 benches/                # Performance benchmarks
 ├── memory_storage.rs   # Memory backend benchmarks
-└── file_storage.rs     # File backend benchmarks
+└── file_storage_std.rs # File backend benchmarks
 ```
 
 ## Contribution Guidelines
