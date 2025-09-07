@@ -18,6 +18,19 @@ pub trait TopicLog: Send + Sync {
         offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError>;
+    /// Fetch records whose timestamp is greater than or equal to the provided RFC3339 timestamp.
+    ///
+    /// Default implementation returns `Unavailable`, and concrete backends should override to
+    /// provide an efficient implementation (e.g., using a sparse time index for file storage).
+    fn get_records_from_timestamp(
+        &self,
+        _ts_rfc3339: &str,
+        _count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        Err(StorageError::Unavailable {
+            context: "time-based reads are not yet supported by this backend".to_string(),
+        })
+    }
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn next_offset(&self) -> u64;

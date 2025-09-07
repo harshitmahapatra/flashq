@@ -176,10 +176,11 @@ paths:
   # Consumer APIs
   /consumer/{group-id}/topics/{topic}:
     get:
-      summary: Fetch records from current offset
+      summary: Fetch records by offset or time
       description: |
-        Fetch records from the topic starting at the consumer group's current offset.
-        Automatically advances the offset after successful fetch.
+        Fetch records from the topic starting at the consumer group's current offset, from a specific
+        `from_offset`, or from a specific `from_time` (RFC3339). Polling does not advance the group's
+        committed offset; use the offset commit endpoint to advance it.
       operationId: fetchRecords
       tags:
         - Consumer
@@ -204,6 +205,16 @@ paths:
             type: integer
             minimum: 0
           example: 100
+        - name: from_time
+          in: query
+          required: false
+          description: |
+            Seek to the first record whose timestamp is greater than or equal to this RFC3339 time.
+            Mutually exclusive with `from_offset`.
+          schema:
+            type: string
+            format: date-time
+          example: "2025-01-01T00:00:00Z"
         - name: include_headers
           in: query
           required: false

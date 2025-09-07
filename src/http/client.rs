@@ -164,25 +164,34 @@ pub async fn leave_consumer_group_command(
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FetchParams {
+    pub max_records: Option<usize>,
+    pub from_offset: Option<u64>,
+    pub from_time: Option<String>,
+    pub include_headers: Option<bool>,
+}
+
 pub async fn fetch_consumer_records_command(
     client: &reqwest::Client,
     server_url: &str,
     group_id: &str,
     topic: &str,
-    max_records: Option<usize>,
-    from_offset: Option<u64>,
-    include_headers: Option<bool>,
+    params: FetchParams,
 ) {
     let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
     let mut query_params = Vec::new();
 
-    if let Some(c) = max_records {
+    if let Some(c) = params.max_records {
         query_params.push(format!("max_records={c}"));
     }
-    if let Some(offset) = from_offset {
+    if let Some(offset) = params.from_offset {
         query_params.push(format!("from_offset={offset}"));
     }
-    if let Some(headers) = include_headers {
+    if let Some(ts) = params.from_time.as_ref() {
+        query_params.push(format!("from_time={}", urlencoding::encode(ts)));
+    }
+    if let Some(headers) = params.include_headers {
         query_params.push(format!("include_headers={headers}"));
     }
 

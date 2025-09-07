@@ -127,3 +127,82 @@ fn large_file_read_throughput(bencher: Bencher) {
         assert_eq!(records.len(), 1000);
     });
 }
+
+#[divan::bench]
+fn time_read_from_start_file(bencher: Bencher) {
+    bencher.bench(|| {
+        let (queue, _tmp) = create_file_storage_queue();
+        let topic = "benchmark_time_file".to_string();
+
+        for i in 0..20_000 {
+            let record = create_1kb_record(i);
+            queue.post_records(topic.clone(), vec![record]).unwrap();
+        }
+
+        let ts0 = queue.poll_records_from_offset(&topic, 0, Some(1)).unwrap()[0]
+            .timestamp
+            .clone();
+
+        let out = black_box(
+            queue
+                .poll_records_from_time(&topic, &ts0, Some(1000))
+                .unwrap(),
+        );
+        assert_eq!(out.len(), 1000);
+    });
+}
+
+#[divan::bench]
+fn time_read_from_middle_file(bencher: Bencher) {
+    bencher.bench(|| {
+        let (queue, _tmp) = create_file_storage_queue();
+        let topic = "benchmark_time_file".to_string();
+
+        for i in 0..20_000 {
+            let record = create_1kb_record(i);
+            queue.post_records(topic.clone(), vec![record]).unwrap();
+        }
+
+        let ts_mid = queue
+            .poll_records_from_offset(&topic, 10_000, Some(1))
+            .unwrap()[0]
+            .timestamp
+            .clone();
+
+        let out = black_box(
+            queue
+                .poll_records_from_time(&topic, &ts_mid, Some(1000))
+                .unwrap(),
+        );
+        assert_eq!(out.len(), 1000);
+    });
+}
+
+#[divan::bench]
+fn time_read_from_end_file(bencher: Bencher) {
+    bencher.bench(|| {
+        let (queue, _tmp) = create_file_storage_queue();
+        let topic = "benchmark_time_file".to_string();
+
+        for i in 0..20_000 {
+            let record = create_1kb_record(i);
+            queue.post_records(topic.clone(), vec![record]).unwrap();
+        }
+
+        let start = 19_950u64;
+        let ts_near_end = queue
+            .poll_records_from_offset(&topic, start, Some(1))
+            .unwrap()[0]
+            .timestamp
+            .clone();
+
+        let out = black_box(
+            queue
+                .poll_records_from_time(&topic, &ts_near_end, Some(1000))
+                .unwrap(),
+        );
+        assert!(!out.is_empty());
+        assert!(out.len() <= 1000);
+        assert_eq!(out.last().unwrap().offset, 19_999);
+    });
+}

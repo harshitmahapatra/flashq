@@ -189,6 +189,15 @@ impl TopicLog for FileTopicLog {
         self.segment_manager.read_records_streaming(offset, count)
     }
 
+    fn get_records_from_timestamp(
+        &self,
+        ts_rfc3339: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        self.segment_manager
+            .read_records_from_timestamp(ts_rfc3339, count)
+    }
+
     fn len(&self) -> usize {
         self.record_count
     }

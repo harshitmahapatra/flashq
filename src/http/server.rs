@@ -382,14 +382,20 @@ pub async fn fetch_records_for_consumer_group(
     let limit = query.effective_limit();
     let include_headers = query.should_include_headers();
 
-    let records_result = match query.from_offset {
-        Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
+    let records_result = match (query.from_offset, query.from_time.as_ref()) {
+        (Some(offset), _) => app_state.queue.poll_records_for_consumer_group_from_offset(
             &params.group_id,
             &params.topic,
             offset,
             limit,
         ),
-        None => {
+        (None, Some(from_time)) => app_state.queue.poll_records_for_consumer_group_from_time(
+            &params.group_id,
+            &params.topic,
+            from_time,
+            limit,
+        ),
+        (None, None) => {
             app_state
                 .queue
                 .poll_records_for_consumer_group(&params.group_id, &params.topic, limit)
@@ -406,9 +412,10 @@ pub async fn fetch_records_for_consumer_group(
 
     match records_result {
         Ok(records) => {
-            let offset_info = match query.from_offset {
-                Some(offset) => format!(" from_offset: {offset}"),
-                None => String::new(),
+            let offset_info = match (query.from_offset, query.from_time.as_ref()) {
+                (Some(offset), _) => format!(" from_offset: {offset}"),
+                (None, Some(from_time)) => format!(" from_time: {from_time}"),
+                (None, None) => String::new(),
             };
 
             trace!(

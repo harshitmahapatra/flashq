@@ -56,6 +56,30 @@ impl SparseIndex {
         }
     }
 
+    /// Find the file position of the closest index entry whose position is <= target_pos.
+    /// This allows rounding down an approximate byte position to a known offset index anchor.
+    /// Returns Some(0) if the index is empty or the target precedes the first entry.
+    pub fn find_floor_position_for_position(&self, target_pos: u32) -> Option<u32> {
+        if self.entries.is_empty() {
+            return Some(0);
+        }
+
+        // Entries are appended in offset order, which is monotonic with file position.
+        match self
+            .entries
+            .binary_search_by_key(&target_pos, |entry| entry.position)
+        {
+            Ok(idx) => Some(self.entries[idx].position),
+            Err(idx) => {
+                if idx == 0 {
+                    Some(0)
+                } else {
+                    Some(self.entries[idx - 1].position)
+                }
+            }
+        }
+    }
+
     pub fn serialize_entry(&self, entry: &IndexEntry, base_offset: u64) -> Vec<u8> {
         let relative_offset = (entry.offset - base_offset) as u32;
         let mut buf = Vec::with_capacity(8);

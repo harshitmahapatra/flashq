@@ -61,6 +61,8 @@ pub enum ConsumerCommands {
         #[arg(long)]
         from_offset: Option<u64>,
         #[arg(long)]
+        from_time: Option<String>,
+        #[arg(long)]
         include_headers: Option<bool>,
     },
     #[command(subcommand)]
@@ -143,18 +145,16 @@ pub async fn handle_consumer_command(
             topic,
             max_records,
             from_offset,
+            from_time,
             include_headers,
         } => {
-            fetch_consumer_records_command(
-                client,
-                server_url,
-                &group_id,
-                &topic,
+            let params = super::client::FetchParams {
                 max_records,
                 from_offset,
+                from_time,
                 include_headers,
-            )
-            .await;
+            };
+            fetch_consumer_records_command(client, server_url, &group_id, &topic, params).await;
         }
         ConsumerCommands::Offset(offset_cmd) => {
             handle_offset_command(client, server_url, offset_cmd).await;

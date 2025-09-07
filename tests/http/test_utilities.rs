@@ -547,6 +547,28 @@ impl TestClient {
         request.send().await
     }
 
+    pub async fn fetch_records_for_consumer_group_with_time(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_time: &str,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut query = vec![("from_time", from_time.to_string())];
+        if let Some(c) = max_records {
+            query.push(("max_records", c.to_string()));
+        }
+
+        self.client
+            .get(format!(
+                "{}/consumer/{}/topics/{}",
+                self.base_url, group_id, topic
+            ))
+            .query(&query)
+            .send()
+            .await
+    }
+
     pub async fn assert_poll_response(
         &self,
         response: reqwest::Response,

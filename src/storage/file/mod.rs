@@ -4,6 +4,7 @@ pub mod file_io;
 pub mod index;
 pub mod segment;
 pub mod segment_manager;
+pub mod time_index;
 pub mod topic_log;
 
 pub use common::SyncMode;

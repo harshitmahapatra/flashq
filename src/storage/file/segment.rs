@@ -5,6 +5,8 @@ use crate::storage::file::common::{
 };
 use crate::storage::file::file_io::FileIo;
 use crate::storage::file::index::{IndexEntry, SparseIndex};
+use crate::storage::file::time_index::{SparseTimeIndex, TimeIndexEntry};
+use log::warn;
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -33,6 +35,11 @@ pub struct LogSegment {
     index_file: File,
     index_buffer: Vec<u8>,
     index: SparseIndex,
+    // Time-based sparse index (parallel to offset index)
+    pub time_index_path: PathBuf,
+    time_index_file: File,
+    time_index_buffer: Vec<u8>,
+    time_index: SparseTimeIndex,
     bytes_since_last_index: u32,
     records_since_last_index: u32,
     sync_mode: SyncMode,
@@ -64,6 +71,16 @@ impl LogSegment {
                 )
             })?;
 
+        // Prepare time index alongside
+        let time_index_path = index_path.with_extension("timeindex");
+        let time_index_file = FileIo::create_with_append_and_read_permissions(&time_index_path)
+            .map_err(|e| {
+                StorageError::from_io_error(
+                    std::io::Error::other(e.to_string()),
+                    "Failed to open time index file",
+                )
+            })?;
+
         Ok(LogSegment {
             base_offset,
             max_offset: None,
@@ -73,6 +90,10 @@ impl LogSegment {
             index_file,
             index_buffer: Vec::new(),
             index: SparseIndex::new(),
+            time_index_path,
+            time_index_file,
+            time_index_buffer: Vec::new(),
+            time_index: SparseTimeIndex::new(),
             bytes_since_last_index: 0,
             records_since_last_index: 0,
             sync_mode,
@@ -105,6 +126,30 @@ impl LogSegment {
                 .read_from_file(&mut index_reader, base_offset)?;
         }
 
+        if segment.time_index_path.exists() {
+            let time_index_file = std::fs::File::open(&segment.time_index_path).map_err(|e| {
+                StorageError::from_io_error(e, "Failed to open time index file for reading")
+            })?;
+            let mut time_index_reader = BufReader::new(time_index_file);
+            segment.time_index.read_from_file(&mut time_index_reader)?;
+
+            // If time index appears empty while log has data, rebuild it (treat as corrupt)
+            let log_len = match std::fs::metadata(&segment.log_path) {
+                Ok(m) => m.len(),
+                Err(_) => 0,
+            };
+            if segment.time_index.last_entry().is_none() && log_len > 0 {
+                warn!(
+                    "Time index at {:?} appears empty; rebuilding from log {:?}",
+                    segment.time_index_path, segment.log_path
+                );
+                segment.rebuild_time_index_from_log()?;
+            }
+        } else {
+            // Missing time index: build from the log
+            segment.rebuild_time_index_from_log()?;
+        }
+
         segment.max_offset = determine_max_offset(&segment.log_path, &segment.index)?;
 
         Ok(segment)
@@ -115,7 +160,48 @@ impl LogSegment {
         let start_position = self.write_record_to_log(&serialized)?;
 
         self.update_metadata(offset, serialized.len() as u32);
-        self.update_index_if_needed(offset, start_position)?;
+        // Best-effort timestamp for single append; may differ slightly from serialized value
+        let ts_ms = chrono::Utc::now().timestamp_millis();
+        let ts_ms = if ts_ms < 0 { 0 } else { ts_ms as u64 };
+
+        if self.should_add_index_entry() {
+            // Offset index update
+            let index_entry = IndexEntry {
+                offset,
+                position: start_position,
+            };
+            self.index.add_entry(index_entry.clone());
+            let serialized_entry = self.index.serialize_entry(&index_entry, self.base_offset);
+            self.index_buffer.extend_from_slice(&serialized_entry);
+            if self.index_buffer.len() >= self.indexing_config.index_interval_bytes as usize {
+                self.flush_index_buffer()?;
+            }
+
+            // Time index update (avoid writing duplicates for identical timestamps)
+            let write_time_entry = match self.time_index.last_entry() {
+                Some(last) => last.timestamp_ms != ts_ms,
+                None => true,
+            };
+            if write_time_entry {
+                let tentry = TimeIndexEntry {
+                    timestamp_ms: ts_ms,
+                    position: start_position,
+                };
+                self.time_index.add_entry(tentry.clone());
+                self.time_index_buffer
+                    .extend_from_slice(&tentry.timestamp_ms.to_be_bytes());
+                self.time_index_buffer
+                    .extend_from_slice(&tentry.position.to_be_bytes());
+                if self.time_index_buffer.len()
+                    >= self.indexing_config.index_interval_bytes as usize
+                {
+                    self.flush_time_index_buffer()?;
+                }
+            }
+
+            self.bytes_since_last_index = 0;
+            self.records_since_last_index = 0;
+        }
         self.sync_files_if_needed()
     }
 
@@ -143,6 +229,10 @@ impl LogSegment {
 
         let mut next_offset = start_offset;
         let timestamp = chrono::Utc::now().to_rfc3339();
+        let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(&timestamp)
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
+        let ts_ms = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
         for record in records {
             let before = buf.len();
             // Use a single timestamp for the whole batch
@@ -180,6 +270,28 @@ impl LogSegment {
                 }
                 self.bytes_since_last_index = 0;
                 self.records_since_last_index = 0;
+
+                // Time index: add only if timestamp changed from last entry to avoid heavy duplicates
+                let write_time_entry = match self.time_index.last_entry() {
+                    Some(last) => last.timestamp_ms != ts_ms,
+                    None => true,
+                };
+                if write_time_entry {
+                    let tentry = TimeIndexEntry {
+                        timestamp_ms: ts_ms,
+                        position: rec_pos_abs,
+                    };
+                    self.time_index.add_entry(tentry.clone());
+                    self.time_index_buffer
+                        .extend_from_slice(&tentry.timestamp_ms.to_be_bytes());
+                    self.time_index_buffer
+                        .extend_from_slice(&tentry.position.to_be_bytes());
+                    if self.time_index_buffer.len()
+                        >= self.indexing_config.index_interval_bytes as usize
+                    {
+                        self.flush_time_index_buffer()?;
+                    }
+                }
             }
 
             current_offset += 1;
@@ -210,35 +322,12 @@ impl LogSegment {
         self.records_since_last_index += 1;
     }
 
-    fn update_index_if_needed(
-        &mut self,
-        offset: u64,
-        start_position: u32,
-    ) -> Result<(), StorageError> {
-        if self.should_add_index_entry() {
-            let index_entry = IndexEntry {
-                offset,
-                position: start_position,
-            };
-
-            self.index.add_entry(index_entry.clone());
-
-            let serialized_entry = self.index.serialize_entry(&index_entry, self.base_offset);
-            self.index_buffer.extend_from_slice(&serialized_entry);
-
-            if self.index_buffer.len() >= self.indexing_config.index_interval_bytes as usize {
-                self.flush_index_buffer()?;
-            }
-
-            self.bytes_since_last_index = 0;
-            self.records_since_last_index = 0;
-        }
-        Ok(())
-    }
+    // removed: update_index_if_needed (rolled into append paths)
 
     fn sync_files_if_needed(&mut self) -> Result<(), StorageError> {
         if matches!(self.sync_mode, SyncMode::Immediate) {
             self.flush_index_buffer()?;
+            self.flush_time_index_buffer()?;
 
             FileIo::synchronize_to_disk(&mut self.log_file).map_err(|e| {
                 StorageError::from_io_error(
@@ -251,6 +340,12 @@ impl LogSegment {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to sync index file",
+                )
+            })?;
+            FileIo::synchronize_to_disk(&mut self.time_index_file).map_err(|e| {
+                StorageError::from_io_error(
+                    std::io::Error::other(e.to_string()),
+                    "Failed to sync time index file",
                 )
             })?;
         }
@@ -278,8 +373,35 @@ impl LogSegment {
         Ok(())
     }
 
+    fn flush_time_index_buffer(&mut self) -> Result<(), StorageError> {
+        if self.time_index_buffer.is_empty() {
+            return Ok(());
+        }
+
+        FileIo::append_data_to_end(&mut self.time_index_file, &self.time_index_buffer).map_err(
+            |e| {
+                StorageError::from_io_error(
+                    std::io::Error::other(e.to_string()),
+                    "Failed to write to time index file",
+                )
+            },
+        )?;
+
+        self.time_index_buffer.clear();
+        Ok(())
+    }
+
     pub fn find_position_for_offset(&self, offset: u64) -> Option<u32> {
         self.index.find_position_for_offset(offset)
+    }
+
+    pub fn find_position_for_timestamp(&self, ts_ms: u64) -> Option<u32> {
+        self.time_index.find_position_for_timestamp(ts_ms)
+    }
+
+    /// Find the nearest offset index anchor at or before the given file position.
+    pub fn find_floor_position_for_file_position(&self, file_pos: u32) -> Option<u32> {
+        self.index.find_floor_position_for_position(file_pos)
     }
 
     pub fn size_bytes(&mut self) -> Result<u64, StorageError> {
@@ -309,6 +431,7 @@ impl LogSegment {
 
     pub fn sync(&mut self) -> Result<(), StorageError> {
         self.flush_index_buffer()?;
+        self.flush_time_index_buffer()?;
 
         FileIo::synchronize_to_disk(&mut self.log_file).map_err(|e| {
             StorageError::from_io_error(
@@ -322,6 +445,84 @@ impl LogSegment {
                 "Failed to sync index file",
             )
         })?;
+        FileIo::synchronize_to_disk(&mut self.time_index_file).map_err(|e| {
+            StorageError::from_io_error(
+                std::io::Error::other(e.to_string()),
+                "Failed to sync time index file",
+            )
+        })?;
+        Ok(())
+    }
+
+    fn rebuild_time_index_from_log(&mut self) -> Result<(), StorageError> {
+        self.time_index = SparseTimeIndex::new();
+        self.time_index_buffer.clear();
+
+        // Open the log file and iterate records from the beginning
+        let mut log_file = std::fs::File::open(&self.log_path).map_err(|e| {
+            StorageError::from_io_error(e, "Failed to open log for time index rebuild")
+        })?;
+        let mut reader = BufReader::new(&mut log_file);
+        reader.seek(SeekFrom::Start(0)).map_err(|e| {
+            StorageError::from_io_error(e, "Failed to seek log for time index rebuild")
+        })?;
+
+        let mut bytes_since: u32 = 0;
+        let mut records_since: u32 = 0;
+        let mut last_ts_ms: Option<u64> = None;
+
+        loop {
+            let start_pos = reader
+                .stream_position()
+                .map_err(|e| StorageError::from_io_error(e, "Failed to get stream position"))?;
+            match deserialize_record(&mut reader) {
+                Ok(r) => {
+                    let end_pos = reader.stream_position().map_err(|e| {
+                        StorageError::from_io_error(e, "Failed to get stream position after read")
+                    })?;
+                    let sz = (end_pos - start_pos) as u32;
+                    bytes_since = bytes_since.saturating_add(sz);
+                    records_since = records_since.saturating_add(1);
+
+                    let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(&r.timestamp)
+                        .map(|dt| dt.timestamp_millis())
+                        .unwrap_or(0);
+                    let ts_ms = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
+
+                    if bytes_since >= self.indexing_config.index_interval_bytes
+                        || records_since >= self.indexing_config.index_interval_records
+                    {
+                        let should_write = match last_ts_ms {
+                            Some(v) => v != ts_ms,
+                            None => true,
+                        };
+                        if should_write {
+                            let pos_u32 = start_pos as u32;
+                            let entry = TimeIndexEntry {
+                                timestamp_ms: ts_ms,
+                                position: pos_u32,
+                            };
+                            self.time_index.add_entry(entry.clone());
+                            self.time_index_buffer
+                                .extend_from_slice(&entry.timestamp_ms.to_be_bytes());
+                            self.time_index_buffer
+                                .extend_from_slice(&entry.position.to_be_bytes());
+                            if self.time_index_buffer.len()
+                                >= self.indexing_config.index_interval_bytes as usize
+                            {
+                                self.flush_time_index_buffer()?;
+                            }
+                            last_ts_ms = Some(ts_ms);
+                        }
+                        bytes_since = 0;
+                        records_since = 0;
+                    }
+                }
+                Err(_) => break, // EOF or read error; best-effort rebuild
+            }
+        }
+
+        self.flush_time_index_buffer()?;
         Ok(())
     }
 }

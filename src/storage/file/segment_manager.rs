@@ -134,6 +134,86 @@ impl SegmentManager {
         Ok(results)
     }
 
+    /// Streaming read starting from the first record whose timestamp is >= `ts_rfc3339`.
+    /// Uses each segment's sparse time index to compute a near position and then streams forward.
+    pub fn read_records_from_timestamp(
+        &self,
+        ts_rfc3339: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        let max_records = count.unwrap_or(usize::MAX);
+        if max_records == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Parse the target timestamp to milliseconds since epoch
+        let ts_ms_i64 = match chrono::DateTime::parse_from_rfc3339(ts_rfc3339) {
+            Ok(dt) => dt.timestamp_millis(),
+            Err(e) => {
+                return Err(StorageError::DataCorruption {
+                    context: "parse from_time".to_string(),
+                    details: e.to_string(),
+                });
+            }
+        };
+        let target_ts_ms: u64 = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
+
+        let segments_sorted_by_offset = self.get_segments_sorted_by_offset();
+        let mut results: Vec<RecordWithOffset> = Vec::new();
+
+        // Conservative backseek window in bytes (bounded extra scan per segment)
+        const TIME_SEEK_BACK_BYTES: u64 = 16 * 1024; // 16KB default
+
+        for segment in &segments_sorted_by_offset {
+            if results.len() >= max_records {
+                break;
+            }
+
+            // Compute starting position in this segment using time index
+            let pos_time = segment
+                .find_position_for_timestamp(target_ts_ms)
+                .unwrap_or(0) as u64;
+
+            // Backseek by a bounded window to avoid missing equality-run boundaries
+            let back = std::cmp::min(pos_time, TIME_SEEK_BACK_BYTES);
+            let start_guess = pos_time.saturating_sub(back);
+
+            // Round down to previous offset-index anchor (two-step seek)
+            let pos_anchor = segment
+                .find_floor_position_for_file_position(start_guess as u32)
+                .unwrap_or(0) as u64;
+
+            // Start from the earlier of guess and anchor to be conservative
+            let start_pos = std::cmp::min(start_guess, pos_anchor);
+
+            let mut reader = match create_segment_reader(segment, start_pos) {
+                Ok(r) => r,
+                Err(e) => {
+                    log_read_error(&e);
+                    continue;
+                }
+            };
+
+            while results.len() < max_records {
+                match deserialize_record(&mut reader) {
+                    Ok(r) => {
+                        // Parse record ts to ms and compare
+                        let rec_ts_ms: u64 = chrono::DateTime::parse_from_rfc3339(&r.timestamp)
+                            .map(|dt| dt.timestamp_millis())
+                            .map(|v| if v < 0 { 0 } else { v as u64 })
+                            .unwrap_or(0);
+                        if rec_ts_ms >= target_ts_ms {
+                            results.push(r);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
         let mut segments: Vec<&LogSegment> = self.all_segments().collect();
         segments.sort_by_key(|s| s.base_offset);
