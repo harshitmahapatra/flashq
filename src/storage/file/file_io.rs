@@ -4,11 +4,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// Standard file I/O implementation using std::fs::File
-/// This implementation extracts and consolidates the file I/O patterns
-/// currently scattered across segment.rs, consumer_group.rs, and async_io.rs
-pub struct StdFileIO;
+pub struct FileIo;
 
-impl StdFileIO {
+impl FileIo {
     pub fn create_with_append_and_read_permissions(path: &Path) -> Result<File, FlashQError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_append_and_read_permissions
         OpenOptions::new()

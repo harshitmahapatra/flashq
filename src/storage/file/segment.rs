@@ -1,8 +1,8 @@
 use crate::Record;
 use crate::error::StorageError;
 use crate::storage::file::common::{SyncMode, deserialize_record, serialize_record};
+use crate::storage::file::file_io::FileIo;
 use crate::storage::file::index::{IndexEntry, SparseIndex};
-use crate::storage::file::std_io::StdFileIO;
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -46,17 +46,16 @@ impl LogSegment {
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
         // Use StdFileIO for log file operations
-        let log_file =
-            StdFileIO::create_with_append_and_read_permissions(&log_path).map_err(|e| {
-                StorageError::from_io_error(
-                    std::io::Error::other(e.to_string()),
-                    "Failed to open log file",
-                )
-            })?;
+        let log_file = FileIo::create_with_append_and_read_permissions(&log_path).map_err(|e| {
+            StorageError::from_io_error(
+                std::io::Error::other(e.to_string()),
+                "Failed to open log file",
+            )
+        })?;
 
         // Use StdFileIO for index file operations
         let index_file =
-            StdFileIO::create_with_append_and_read_permissions(&index_path).map_err(|e| {
+            FileIo::create_with_append_and_read_permissions(&index_path).map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to open index file",
@@ -120,7 +119,7 @@ impl LogSegment {
 
     fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {
         // Use StdFileIO append method
-        let start_position = StdFileIO::append_data_to_end(&mut self.log_file, serialized_record)
+        let start_position = FileIo::append_data_to_end(&mut self.log_file, serialized_record)
             .map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
@@ -167,14 +166,14 @@ impl LogSegment {
         if matches!(self.sync_mode, SyncMode::Immediate) {
             self.flush_index_buffer()?;
 
-            StdFileIO::synchronize_to_disk(&mut self.log_file).map_err(|e| {
+            FileIo::synchronize_to_disk(&mut self.log_file).map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to sync log file",
                 )
             })?;
 
-            StdFileIO::synchronize_to_disk(&mut self.index_file).map_err(|e| {
+            FileIo::synchronize_to_disk(&mut self.index_file).map_err(|e| {
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to sync index file",
@@ -194,7 +193,7 @@ impl LogSegment {
             return Ok(());
         }
 
-        StdFileIO::append_data_to_end(&mut self.index_file, &self.index_buffer).map_err(|e| {
+        FileIo::append_data_to_end(&mut self.index_file, &self.index_buffer).map_err(|e| {
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to write to index file",
@@ -210,7 +209,7 @@ impl LogSegment {
     }
 
     pub fn size_bytes(&mut self) -> Result<u64, StorageError> {
-        StdFileIO::get_file_size(&self.log_file).map_err(|e| {
+        FileIo::get_file_size(&self.log_file).map_err(|e| {
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to get log file size",
@@ -237,13 +236,13 @@ impl LogSegment {
     pub fn sync(&mut self) -> Result<(), StorageError> {
         self.flush_index_buffer()?;
 
-        StdFileIO::synchronize_to_disk(&mut self.log_file).map_err(|e| {
+        FileIo::synchronize_to_disk(&mut self.log_file).map_err(|e| {
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to sync log file",
             )
         })?;
-        StdFileIO::synchronize_to_disk(&mut self.index_file).map_err(|e| {
+        FileIo::synchronize_to_disk(&mut self.index_file).map_err(|e| {
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to sync index file",

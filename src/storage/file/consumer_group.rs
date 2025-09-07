@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::storage::{
     ConsumerGroup,
-    file::{SyncMode, common::ensure_directory_exists, std_io::StdFileIO},
+    file::{SyncMode, common::ensure_directory_exists, file_io::FileIo},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,13 +92,13 @@ impl FileConsumerGroup {
         let json_data = serde_json::to_string_pretty(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut file_handle = StdFileIO::create_with_write_truncate_permissions(&self.file_path)
+        let mut file_handle = FileIo::create_with_write_truncate_permissions(&self.file_path)
             .map_err(std::io::Error::other)?;
-        StdFileIO::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0)
+        FileIo::write_data_at_offset(&mut file_handle, json_data.as_bytes(), 0)
             .map_err(std::io::Error::other)?;
 
         if self.sync_mode == SyncMode::Immediate {
-            StdFileIO::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
+            FileIo::synchronize_to_disk(&mut file_handle).map_err(std::io::Error::other)?;
         }
 
         Ok(())
