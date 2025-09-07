@@ -49,6 +49,7 @@ graph TD
 - `TopicLog` trait: Storage abstraction with batched append operations (`append_batch`)
 - `ConsumerGroup` trait: Storage abstraction for offset management
 - `StorageBackend`: Factory with configurable batch_bytes and backend selection
+- `batching_heuristics`: Shared utilities for record size estimation and batching logic
 - `FileTopicLog`: Kafka-aligned segment-based file storage with batched writes
 - `SegmentManager`: Manages log segment lifecycle and rolling with streaming reads
 - `LogSegment`: Individual segment files with bulk append and sparse indexing

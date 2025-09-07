@@ -74,6 +74,7 @@ Following Rust best practices with library and binary crates:
 ### Storage Module (`src/storage/`)
 - `StorageBackend` enum - Pluggable storage backend selection (memory/file)
 - `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer with batched operations
+- `batching_heuristics` - Shared utilities for record size estimation and batch optimization
 - `FileTopicLog` - Kafka-aligned segment-based file storage with crash recovery
 - `SegmentManager` - Manages log segment lifecycle and rolling
 - `LogSegment` - Individual segment files with sparse indexing and pluggable I/O

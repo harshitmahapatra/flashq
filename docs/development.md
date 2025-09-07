@@ -87,6 +87,7 @@ src/storage/            # Storage abstraction layer
 ├── mod.rs              # Public exports and documentation
 ├── trait.rs            # TopicLog and ConsumerGroup traits
 ├── backend.rs          # StorageBackend factory with directory locking
+├── batching_heuristics.rs # Shared batching utilities and size estimation
 ├── memory.rs           # InMemoryTopicLog implementation
 └── file/               # Segment-based file storage
     ├── mod.rs          # File storage module exports
