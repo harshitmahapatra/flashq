@@ -55,6 +55,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Query Parameters:**
 - `max_records`: Maximum records to return
 - `from_offset`: Start from specific offset (replay)
+- `from_time`: Start from records at or after RFC3339 timestamp (e.g., `2025-01-01T00:00:00Z`)
 
 **Response (200):**
 ```json
@@ -80,7 +81,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Delete:** `DELETE /consumer/{group_id}` → 204 No Content  
 **Get Offset:** `GET /consumer/{group_id}/topics/{topic}/offset`  
 **Set Offset:** `POST /consumer/{group_id}/topics/{topic}/offset` with `{"offset": 10}`  
-**Poll:** `GET /consumer/{group_id}/topics/{topic}?max_records=5&from_offset=10`
+**Poll:** `GET /consumer/{group_id}/topics/{topic}?max_records=5&from_offset=10&from_time=2025-01-01T00:00:00Z`
 
 ## Health Check
 

@@ -27,12 +27,14 @@ graph TD
         M[SegmentManager]
         N[LogSegment]
         O[SparseIndex]
+        Q[SparseTimeIndex]
         P[Serialization Utils]
     end
     
     J --> M
     M --> N
     N --> O
+    N --> Q
     J --> P
     
     G --> I
@@ -54,6 +56,7 @@ graph TD
 - `SegmentManager`: Manages log segment lifecycle and rolling with streaming reads
 - `LogSegment`: Individual segment files with bulk append and sparse indexing
 - `SparseIndex`: Efficient offset-to-position mapping within segments
+- `SparseTimeIndex`: Efficient timestamp-to-position mapping for time-based queries
 - `InMemoryTopicLog`: Fast in-memory storage with batched operations
 
 **Key Features:**
@@ -110,7 +113,7 @@ sequenceDiagram
 ## Segment-Based Storage
 
 **File Storage Architecture:**
-- **Segment Structure**: Kafka-aligned .log files with sequential naming (000000000000000000.log)
+- **Segment Structure**: Kafka-aligned .log files with sequential naming (000000000000000000.log) and .timeindex files for time-based queries
 - **Rolling Segments**: New segments created when configured thresholds are met
 - **Sparse Index**: Efficient offset-to-file-position mapping within segments
 - **Crash Recovery**: Rebuilds state by scanning existing segment files on startup
@@ -125,8 +128,12 @@ sequenceDiagram
 ```
 data/
 └── {topic}/
-    ├── 00000000000000000000.log  # First segment
-    ├── 00000000000000000010.log  # Second segment (starting at offset 10)
+    ├── 00000000000000000000.log       # First segment
+    ├── 00000000000000000000.index     # Offset-to-position index
+    ├── 00000000000000000000.timeindex # Timestamp-to-position index
+    ├── 00000000000000000010.log       # Second segment (starting at offset 10)
+    ├── 00000000000000000010.index     # Index for second segment
+    ├── 00000000000000000010.timeindex # Time index for second segment
     └── ...
 ```
 
@@ -137,7 +144,7 @@ data/
 - **Storage abstraction**: Trait-based pluggable backends with memory and file implementations
 - **Segment-based storage**: Kafka-aligned architecture with bulk writes for scalability
 - **Directory locking**: Prevents data corruption from concurrent processes
-- **Sparse indexing**: Efficient offset lookup without loading entire segments
+- **Sparse indexing**: Efficient offset and timestamp lookup without loading entire segments
 - **Error handling**: Comprehensive error types with context preservation
 - **Owned data**: Returns `Vec<RecordWithOffset>` vs references
 - **Safe casting**: `try_into()` with bounds checking
