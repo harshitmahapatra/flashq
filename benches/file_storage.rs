@@ -36,25 +36,6 @@ fn create_file_storage_queue() -> (FlashQ, TempDir) {
     (queue, temp_dir)
 }
 
-// Minimal smoke benchmark to ensure std backend runs quickly.
-// IGNORE THIS TEST FOR PERFORMANCE DOCS SINCE THIS HAS LOW SAMPLE_SIZE AND SAMPLE_COUNT
-#[cfg(target_os = "linux")]
-#[divan::bench(sample_size = 1, sample_count = 1)]
-fn quick_smoke_std(bencher: Bencher) {
-    bencher.bench(|| {
-        let (queue, _temp_dir) = create_file_storage_queue();
-        let topic = "smoke".to_string();
-
-        for i in 0..5000 {
-            let record = create_1kb_record(i);
-            black_box(queue.post_records(topic.clone(), vec![record]).unwrap());
-        }
-
-        let records = black_box(queue.poll_records(&topic, None).unwrap());
-        assert_eq!(records.len(), 5000);
-    });
-}
-
 #[divan::bench]
 fn empty_topic_write_throughput(bencher: Bencher) {
     bencher.bench(|| {
