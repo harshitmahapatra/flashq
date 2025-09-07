@@ -44,13 +44,15 @@ cargo test -- --nocapture              # With output
 ```bash
 cargo bench                              # Run all benchmarks
 cargo bench --bench memory_storage       # Memory storage benchmarks only
-cargo bench --bench file_storage         # File storage benchmarks only
+cargo bench --bench file_storage_std     # File storage benchmarks only
+cargo bench --bench batching_baseline    # Batching performance benchmarks
 ```
 
 ### Test Coverage
 
 **HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
 **Storage Integration:** File persistence, crash recovery, directory locking, error simulation  
+**Batching Integration:** Batch operations, performance validation, memory efficiency  
 **Client Integration:** CLI commands, batch operations, consumer group lifecycle  
 **Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
 
@@ -68,6 +70,7 @@ cargo check                     # Fast compile check
 cargo run --bin flashq                           # Interactive demo
 cargo run --bin server                           # HTTP server (in-memory, TRACE logging)
 cargo run --bin server -- --storage=file         # File storage backend
+cargo run --bin server -- --batch-bytes=65536    # Custom batch size (64KB)
 cargo run --bin server 9090 -- --storage=file --data-dir=./test-data  # Custom config
 ./target/release/server 8080                     # Production (INFO logging)
 cargo run --bin client -- health                 # CLI client
@@ -84,6 +87,7 @@ src/storage/            # Storage abstraction layer
 ├── mod.rs              # Public exports and documentation
 ├── trait.rs            # TopicLog and ConsumerGroup traits
 ├── backend.rs          # StorageBackend factory with directory locking
+├── batching_heuristics.rs # Shared batching utilities and size estimation
 ├── memory.rs           # InMemoryTopicLog implementation
 └── file/               # Segment-based file storage
     ├── mod.rs          # File storage module exports
@@ -109,7 +113,8 @@ tests/                  # Integration test suite
 └── storage/            # Storage integration tests (persistence, crash recovery)
 benches/                # Performance benchmarks
 ├── memory_storage.rs   # Memory backend benchmarks
-└── file_storage_std.rs # File backend benchmarks
+├── file_storage_std.rs # File backend benchmarks
+└── batching_baseline.rs # Batching performance benchmarks
 ```
 
 ## Contribution Guidelines
@@ -138,7 +143,7 @@ cargo test --test storage_integration_tests::error_simulation_tests
 cargo run --bin server
 
 # File storage with custom configuration
-cargo run --bin server -- --storage=file --data-dir=./dev-data --sync-mode=periodic --wal-commit-threshold=100
+cargo run --bin server -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
 ```
 
 ## Debugging

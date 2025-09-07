@@ -4,17 +4,29 @@ Quick performance comparison between memory and file storage backends.
 
 ## At a Glance
 
-**Memory Storage** (Fast, Volatile)
-- **Throughput**: 100.6K - 544K records/sec
-- **Latency**: 1.84 ms - 9.94 ms 
-- **Memory**: 6.57 MB - 32.1 MB
-- **Best for**: Real-time processing, temporary queues
+**Memory Storage - Batched** (Recommended for High Volume)
+- **Throughput**: 66.2K - 2.7M records/sec 
+- **Latency**: 370 µs - 15.1 ms
+- **Memory**: 2.69 MB - 28.3 MB
+- **Best for**: Bulk processing, high-throughput analytics
 
-**File Storage - Standard** (Persistent, Stable)
-- **Throughput**: 10.3K - 42.7K records/sec  
-- **Latency**: 23.4 ms - 96.8 ms
-- **Memory**: 12.9 MB - 54.0 MB
-- **Best for**: Durable messaging, audit logs
+**File Storage - Batched** (Recommended for Persistent High Volume)
+- **Throughput**: 50.5K - 393K records/sec
+- **Latency**: 2.41 ms - 19.8 ms  
+- **Memory**: 1.46 MB - 14.3 MB
+- **Best for**: Persistent bulk messaging, high-volume audit logs
+
+**Memory Storage - Single Record** (Fast, Volatile)
+- **Throughput**: 55.5K - 439K records/sec
+- **Latency**: 2.28 ms - 18.0 ms 
+- **Memory**: 13.5 MB - 31.3 MB
+- **Best for**: Real-time processing, individual record handling
+
+**File Storage - Single Record** (Persistent, Stable)
+- **Throughput**: 11.0K - 44.0K records/sec  
+- **Latency**: 22.7 ms - 91.2 ms
+- **Memory**: 7.42 MB - 31.1 MB
+- **Best for**: Durable individual messaging, audit logs
 
 
 > ⚠️ **Note**: We're actively working on optimizing file storage performance in upcoming releases.
@@ -25,8 +37,9 @@ Quick performance comparison between memory and file storage backends.
 
 | Scenario | Memory Storage | File Storage |
 |----------|----------------|--------------|
-| High-frequency trading | ✅ Sub-10ms latency | ❌ 23-97ms latency |
-| Real-time analytics | ✅ 544K records/sec | ❌ 42.7K records/sec |
+| High-volume processing | ✅ 2.7M records/sec (batched) | ✅ 393K records/sec (batched) |
+| High-frequency trading | ✅ Sub-19ms latency | ❌ 23-91ms latency |
+| Real-time analytics | ✅ 439K records/sec (single) | ❌ 44.0K records/sec (single) |
 | Message queues | ⚠️ Data loss risk | ✅ Persistent |
 | Audit logs | ❌ No persistence | ✅ Durable |
 | Development/testing | ✅ Fast iterations | ✅ Production-like |
@@ -35,26 +48,39 @@ Quick performance comparison between memory and file storage backends.
 
 **Test Setup**: 1KB records with keys and headers, 100 iterations each
 
+#### Batched Operations (Recommended)
+| Storage | Operation | Batch Size | Throughput | Latency | Memory |
+|---------|-----------|------------|------------|---------|--------|
+| Memory | Batch write | 1K records | 2.7M/sec | 396 µs | 2.69 MB |
+| Memory | Batch write | 10K records | 66.2K/sec | 15.1 ms | 26.5 MB |
+| Memory | Batch read | 10K records | 51.1K/sec | 19.6 ms | 40.6 MB |
+| File | Batch write | 1K records | 393K/sec | 2.55 ms | 1.46 MB |
+| File | Batch write | 10K records | 50.5K/sec | 19.8 ms | 14.3 MB |
+| File | Batch read | 10K records | 34.1K/sec | 29.3 ms | 38.0 MB |
+
+#### Single Record Operations
 | Storage | Scenario | Throughput | Latency | Memory |
 |---------|----------|------------|---------|--------|
-| Memory | Empty topic read | 143.9K/sec | 6.95 ms | 13.6 MB |
-| Memory | Empty topic write | 544K/sec | 1.84 ms | 6.57 MB |
-| Memory | Large dataset read | 105.3K/sec | 9.50 ms | 27.6 MB |
-| Memory | Large dataset write | 100.6K/sec | 9.94 ms | 27.5 MB |
-| File | Empty topic read | 30.3K/sec | 33.0 ms | 25.4 MB |
-| File | Empty topic write | 42.7K/sec | 23.4 ms | 12.9 MB |
-| File | Large file read | 10.8K/sec | 92.7 ms | 53.9 MB |
-| File | Large file write | 10.3K/sec | 96.8 ms | 54.0 MB |
+| Memory | Empty topic read | 138.4K/sec | 7.22 ms | 20.6 MB |
+| Memory | Empty topic write | 439K/sec | 2.28 ms | 13.5 MB |
+| Memory | Large dataset read | 74.1K/sec | 13.5 ms | 55.3 MB |
+| Memory | Large dataset write | 55.5K/sec | 18.0 ms | 56.6 MB |
+| File | Empty topic read | 32.5K/sec | 30.8 ms | 19.3 MB |
+| File | Empty topic write | 44.0K/sec | 22.7 ms | 7.42 MB |
+| File | Large file read | 11.4K/sec | 87.5 ms | 32.0 MB |
+| File | Large file write | 11.0K/sec | 91.2 ms | 31.1 MB |
 
 ## Quick Comparison
 
-**Memory vs File Storage Performance**:
-- **File Storage**: Memory is 13-53x faster
+**Batched vs Single Record Performance**:
+- **Batched operations**: 1.2-49x faster than single records
+- **File batched**: Achieves 393K-50.5K records/sec (vs 11-44K single)
+- **Memory batched**: Achieves 2.7M-66.2K records/sec (vs 55.5-439K single)
 
-| Backend | Speed vs Memory | Latency | When to Use |
-|---------|----------------|---------|-------------|
-| Memory | Baseline | Sub-10ms | High throughput, temporary data |
-| File | 13-53x slower | 23-97ms | Persistence needed |
+| Operation Type | Memory Performance | File Performance | When to Use |
+|---------------|-------------------|------------------|-------------|
+| Batched (Recommended) | 66.2K - 2.7M/sec | 50.5K - 393K/sec | Bulk processing, high volume |
+| Single Record | 55.5K - 439K/sec | 11K - 44K/sec | Real-time individual records |
 
 ## Production Guidance
 
@@ -68,12 +94,13 @@ Quick performance comparison between memory and file storage backends.
 - Message queues that must survive restarts
 - Audit logs and compliance requirements
 - Long-term data storage
-- When you can accept 23-97ms latencies
+- When you can accept 23-91ms latencies
 
 ### Capacity Planning
-- **Memory**: ~6.6-32.1 MB RAM per 1000 records
-- **File**: ~12.9-54.0 MB RAM + disk space for persistence
+- **Memory**: ~13.5-31.3 MB RAM per 1000 records
+- **File**: ~7.4-32.0 MB RAM + disk space for persistence
 - Both scale predictably with dataset size
+
 
 ---
 

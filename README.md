@@ -8,7 +8,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 
 - Topic-based messaging with keys and headers
 - Consumer groups with offset management  
-- Batch operations (up to 1000 records)
+- Configurable batch operations for high-throughput processing
 - HTTP REST API with JSON
 - Thread-safe concurrent access
 - Kafka-aligned segment-based file storage with crash recovery
@@ -35,11 +35,11 @@ cargo run --bin server 9090      # Custom port
 
 # File storage backend
 cargo run --bin server -- --storage=file --data-dir=./data
-cargo run --bin server 9090 -- --storage=file --sync-mode=always
+cargo run --bin server 9090 -- --storage=file --data-dir=./custom
 
-# File storage with I/O modes (Linux only)
-cargo run --bin server -- --storage=file --io-mode=standard   # Default
-cargo run --bin server -- --storage=file --io-mode=io_uring   # Experimental
+# Configure batch size for performance tuning
+cargo run --bin server -- --batch-bytes=65536      # 64KB batches
+cargo run --bin server -- --storage=file --batch-bytes=131072  # 128KB batches
 ```
 
 **Basic client usage:**

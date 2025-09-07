@@ -1,6 +1,8 @@
 use crate::Record;
 use crate::error::StorageError;
-use crate::storage::file::common::{SyncMode, deserialize_record, serialize_record};
+use crate::storage::file::common::{
+    SyncMode, deserialize_record, serialize_record, serialize_record_into_buffer,
+};
 use crate::storage::file::file_io::FileIo;
 use crate::storage::file::index::{IndexEntry, SparseIndex};
 use std::fs::File;
@@ -115,6 +117,78 @@ impl LogSegment {
         self.update_metadata(offset, serialized.len() as u32);
         self.update_index_if_needed(offset, start_position)?;
         self.sync_files_if_needed()
+    }
+
+    /// Append multiple records in a single I/O operation by coalescing
+    /// serialized bytes into one contiguous buffer and writing once.
+    pub fn append_records_bulk(
+        &mut self,
+        records: &[Record],
+        start_offset: u64,
+    ) -> Result<u64, StorageError> {
+        if records.is_empty() {
+            return Err(StorageError::WriteFailed {
+                context: "append_records_bulk: empty input".to_string(),
+                source: Box::new(crate::error::StorageErrorSource::Custom(
+                    "invalid input: no records".to_string(),
+                )),
+            });
+        }
+
+        // Serialize all records into a single buffer and remember each record's
+        // starting position within the buffer as well as its size.
+        let mut buf: Vec<u8> = Vec::with_capacity(records.len().saturating_mul(64));
+        let mut rel_positions: Vec<u32> = Vec::with_capacity(records.len());
+        let mut sizes: Vec<u32> = Vec::with_capacity(records.len());
+
+        let mut next_offset = start_offset;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        for record in records {
+            let before = buf.len();
+            // Use a single timestamp for the whole batch
+            let rec_size = serialize_record_into_buffer(&mut buf, record, next_offset, &timestamp)?;
+            rel_positions.push(before as u32);
+            sizes.push(rec_size);
+            next_offset += 1;
+        }
+
+        // Single write to the log file; this returns the absolute start position in the file.
+        let start_position_abs =
+            FileIo::append_data_to_end(&mut self.log_file, &buf).map_err(|e| {
+                StorageError::from_io_error(
+                    std::io::Error::other(e.to_string()),
+                    "Failed bulk append",
+                )
+            })? as u32;
+
+        // Update metadata and sparse index incrementally for each record.
+        let mut current_offset = start_offset;
+        for (idx, rec_size) in sizes.iter().enumerate() {
+            let rec_pos_abs = start_position_abs + rel_positions[idx];
+            self.update_metadata(current_offset, *rec_size);
+
+            if self.should_add_index_entry() {
+                let index_entry = IndexEntry {
+                    offset: current_offset,
+                    position: rec_pos_abs,
+                };
+                self.index.add_entry(index_entry.clone());
+                let serialized_entry = self.index.serialize_entry(&index_entry, self.base_offset);
+                self.index_buffer.extend_from_slice(&serialized_entry);
+                if self.index_buffer.len() >= self.indexing_config.index_interval_bytes as usize {
+                    self.flush_index_buffer()?;
+                }
+                self.bytes_since_last_index = 0;
+                self.records_since_last_index = 0;
+            }
+
+            current_offset += 1;
+        }
+
+        // Sync if needed (Immediate mode flushes index and fsyncs files)
+        self.sync_files_if_needed()?;
+
+        Ok(current_offset - 1)
     }
 
     fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {

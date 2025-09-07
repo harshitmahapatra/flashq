@@ -11,12 +11,15 @@ use sysinfo::{ProcessesToUpdate, System};
 
 #[derive(Debug)]
 pub enum StorageBackend {
-    Memory,
+    Memory {
+        batch_bytes: usize,
+    },
     File {
         sync_mode: crate::storage::file::SyncMode,
         data_dir: std::path::PathBuf,
         wal_commit_threshold: usize,
         segment_size_bytes: u64,
+        batch_bytes: usize,
         _directory_lock: File,
     },
 }
@@ -35,7 +38,13 @@ impl Drop for StorageBackend {
 
 impl StorageBackend {
     pub fn new_memory() -> Self {
-        StorageBackend::Memory
+        StorageBackend::Memory {
+            batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
+        }
+    }
+
+    pub fn new_memory_with_batch_bytes(batch_bytes: usize) -> Self {
+        StorageBackend::Memory { batch_bytes }
     }
 
     pub fn new_file(sync_mode: crate::storage::file::SyncMode) -> Result<Self, StorageError> {
@@ -63,6 +72,25 @@ impl StorageBackend {
             data_dir,
             wal_commit_threshold,
             segment_size_bytes,
+            batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
+            _directory_lock: directory_lock,
+        })
+    }
+
+    pub fn new_file_with_path_and_batch_bytes<P: AsRef<Path>>(
+        sync_mode: crate::storage::file::SyncMode,
+        data_dir: P,
+        batch_bytes: usize,
+    ) -> Result<Self, StorageError> {
+        const DEFAULT_SEGMENT_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let directory_lock = acquire_directory_lock(&data_dir)?;
+        Ok(StorageBackend::File {
+            sync_mode,
+            data_dir,
+            wal_commit_threshold: 1000,
+            segment_size_bytes: DEFAULT_SEGMENT_SIZE,
+            batch_bytes,
             _directory_lock: directory_lock,
         })
     }
@@ -72,14 +100,23 @@ impl StorageBackend {
         topic: &str,
     ) -> Result<Arc<RwLock<dyn TopicLog + Send + Sync>>, std::io::Error> {
         match self {
-            StorageBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryTopicLog::new()))),
+            StorageBackend::Memory { batch_bytes } => Ok(Arc::new(RwLock::new(
+                InMemoryTopicLog::new_with_batch_bytes(*batch_bytes),
+            ))),
             StorageBackend::File {
                 sync_mode,
                 data_dir,
                 segment_size_bytes,
+                batch_bytes,
                 ..
             } => {
-                let file_log = FileTopicLog::new(topic, *sync_mode, data_dir, *segment_size_bytes)?;
+                let file_log = FileTopicLog::new_with_batch_bytes(
+                    topic,
+                    *sync_mode,
+                    data_dir,
+                    *segment_size_bytes,
+                    *batch_bytes,
+                )?;
                 Ok(Arc::new(RwLock::new(file_log)))
             }
         }
@@ -90,7 +127,7 @@ impl StorageBackend {
         group_id: &str,
     ) -> Result<Arc<RwLock<dyn ConsumerGroup>>, Box<dyn std::error::Error>> {
         match self {
-            StorageBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryConsumerGroup::new(
+            StorageBackend::Memory { .. } => Ok(Arc::new(RwLock::new(InMemoryConsumerGroup::new(
                 group_id.to_string(),
             )))),
             StorageBackend::File {
@@ -107,7 +144,7 @@ impl StorageBackend {
     /// Discover all existing topics in the storage backend
     pub fn discover_topics(&self) -> Result<Vec<String>, std::io::Error> {
         match self {
-            StorageBackend::Memory => {
+            StorageBackend::Memory { .. } => {
                 // Memory storage doesn't persist topics, so always empty
                 Ok(Vec::new())
             }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
+FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
 
 ## Development Commands
 
@@ -13,8 +13,8 @@ FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, 
 - `cargo run --bin flashq` - Build and run the interactive demo
 - `cargo run --bin server` - Build and run the HTTP server (in-memory storage)
 - `cargo run --bin server -- --storage=file --data-dir=./data` - Run server with file storage
-- `cargo run --bin server -- --storage=file --io-mode=standard` - Standard file I/O (default)
-- `cargo run --bin server -- --storage=file --io-mode=io_uring` - io_uring I/O (Linux, experimental)
+- `cargo run --bin server -- --batch-bytes=65536` - Configure batch size (64KB batches)
+- `cargo run --bin server -- --storage=file --batch-bytes=131072` - File storage with 128KB batches
 - `cargo run --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
 
@@ -37,7 +37,7 @@ FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, 
 cargo bench                              # Run all benchmarks
 cargo bench --bench memory_storage       # Memory storage benchmarks only
 cargo bench --bench file_storage_std     # Standard file I/O benchmarks
-cargo bench --bench file_storage_io_uring # io_uring I/O benchmarks (Linux)
+cargo bench --bench batching_baseline    # Batching performance benchmarks
 ```
 
 
@@ -73,7 +73,8 @@ Following Rust best practices with library and binary crates:
 
 ### Storage Module (`src/storage/`)
 - `StorageBackend` enum - Pluggable storage backend selection (memory/file)
-- `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer
+- `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer with batched operations
+- `batching_heuristics` - Shared utilities for record size estimation and batch optimization
 - `FileTopicLog` - Kafka-aligned segment-based file storage with crash recovery
 - `SegmentManager` - Manages log segment lifecycle and rolling
 - `LogSegment` - Individual segment files with sparse indexing and pluggable I/O
@@ -135,13 +136,15 @@ This provides an excellent way to understand the library API and test functional
 - Error simulation (disk full, permission errors)
 - Consumer group persistence across restarts
 - Segment architecture validation and sparse indexing
+- Batching operations testing with performance validation
 
 ## Architecture Notes
 
 Current implementation features:
+- **Configurable batching**: High-throughput batch operations with configurable batch_bytes (4-44x performance improvement)
 - **Kafka-style messaging**: Records with optional keys and headers for routing/metadata
 - **Topic-based organization**: Records organized by topic strings with separate offset counters
-- **Pluggable storage**: In-memory and file-based storage backends
+- **Pluggable storage**: In-memory and file-based storage backends with batched operations
 - **File storage**: Kafka-aligned segment-based architecture with rolling segments and sparse indexing
 - **Directory locking**: Prevents concurrent access to file storage directories
 - **Error handling**: Comprehensive error types with structured logging
@@ -160,23 +163,23 @@ Current implementation features:
 
 ## Performance Characteristics
 
-**Memory Storage (Fast, Volatile):**
-- Throughput: 100.6K-544K records/sec
-- Latency: 1.84-9.94ms
-- Best for: Real-time processing, temporary queues
+**Memory Storage - Batched (Recommended for High Volume):**
+- Throughput: 144K-2.1M records/sec (batch operations)
+- Single-record: 89.2K-471K records/sec
+- Latency: 475µs-11.2ms
+- Best for: High-throughput processing, bulk operations
 
-**File Storage - Standard (Persistent, Stable):**
-- Throughput: 10.3K-42.7K records/sec  
-- Latency: 23.4-96.8ms
-- Best for: Durable messaging, audit logs
-- Architecture: Kafka-aligned segments with sparse indexing
+**File Storage - Batched (Recommended for Persistent High Volume):**
+- Throughput: 48.1K-374K records/sec (batch operations)
+- Single-record: 11.0K-44.6K records/sec
+- Latency: 2.67ms-90.7ms
+- Best for: Persistent high-volume messaging, audit logs
+- Architecture: Kafka-aligned segments with batched writes
 
-**File Storage - io_uring (Experimental, Linux-only):**
-- Throughput: 797-3.33K records/sec
-- Latency: 300ms-1.26s
-- Status: Not optimized, 68-683x slower than memory storage
-
-Memory storage provides 13-53x performance advantage over standard file storage. The io_uring implementation is currently experimental and significantly slower than standard file I/O, requiring optimization work.
+**Performance Improvements:**
+- Batching provides 4-44x performance improvement over single record operations
+- Memory storage provides 8-43x performance advantage over file storage
+- Configurable batch_bytes allows tuning for optimal throughput vs memory usage
 
 ## Documentation
 
@@ -203,9 +206,9 @@ After building with `cargo build --release`:
 ./target/release/server -- --storage=file --data-dir=./data
 ./target/release/server 9090 -- --storage=file --data-dir=./data
 
-# File storage with I/O mode selection (Linux only)
-./target/release/server -- --storage=file --io-mode=standard   # Recommended
-./target/release/server -- --storage=file --io-mode=io_uring   # Experimental
+# Performance tuning with batch size configuration
+./target/release/server -- --batch-bytes=65536                 # 64KB batches
+./target/release/server -- --storage=file --batch-bytes=131072 # 128KB batches
 ```
 
 **Logging Behavior:**

@@ -46,16 +46,18 @@ graph TD
 **Core Components:**
 - `FlashQ`: Topic-based record storage with pluggable backend support
 - `Record/RecordWithOffset`: Record structures for requests/responses
-- `TopicLog` trait: Storage abstraction for append-only topic logs
+- `TopicLog` trait: Storage abstraction with batched append operations (`append_batch`)
 - `ConsumerGroup` trait: Storage abstraction for offset management
-- `StorageBackend`: Factory with directory locking and backend selection
-- `FileTopicLog`: Kafka-aligned segment-based file storage with crash recovery
-- `SegmentManager`: Manages log segment lifecycle and rolling
-- `LogSegment`: Individual segment files with sparse indexing and pluggable I/O
+- `StorageBackend`: Factory with configurable batch_bytes and backend selection
+- `batching_heuristics`: Shared utilities for record size estimation and batching logic
+- `FileTopicLog`: Kafka-aligned segment-based file storage with batched writes
+- `SegmentManager`: Manages log segment lifecycle and rolling with streaming reads
+- `LogSegment`: Individual segment files with bulk append and sparse indexing
 - `SparseIndex`: Efficient offset-to-position mapping within segments
-- `InMemoryTopicLog`: Fast in-memory storage implementation
+- `InMemoryTopicLog`: Fast in-memory storage with batched operations
 
 **Key Features:**
+- Batched operations with configurable batch_bytes for high-throughput processing
 - Concurrent access with DashMap and reader-writer locks for improved performance
 - Kafka-aligned segment architecture with rolling and sparse indexing
 - Directory locking and crash recovery for data durability
@@ -70,13 +72,24 @@ sequenceDiagram
     participant Q as FlashQ
     participant T as TopicLog
     
-    C->>S: POST /topics/news/records
+    Note over C,T: Batched Write Operation (Recommended)
+    C->>S: POST /topics/news/records (batch)
+    S->>Q: post_records(Vec<Record>)
+    Q->>T: append_batch(records)
+    Note over T: Chunked by batch_bytes config
+    T-->>Q: last_offset
+    Q-->>S: success response
+    S-->>C: {"offset": N}
+    
+    Note over C,T: Single Record (Legacy)
+    C->>S: POST /topics/news/records (single)
     S->>Q: post_record()
     Q->>T: append(record)
     T-->>Q: offset
     Q-->>S: success response
     S-->>C: {"offset": N}
     
+    Note over C,T: Read Operation
     C->>S: GET /topics/news/records
     S->>Q: poll_records()  
     Q->>T: get_records_from_offset()
@@ -89,6 +102,8 @@ sequenceDiagram
 - Sequential offsets with ISO 8601 timestamps
 - Append-only logs ensure FIFO ordering  
 - Non-destructive polling (records persist)
+- Batched operations for high-throughput processing (4-44x performance improvement)
+- Configurable batch_bytes for storage I/O optimization
 - Concurrent access with DashMap and RwLock for improved performance
 - Segment-based storage for scalability and Kafka alignment
 
@@ -118,8 +133,9 @@ data/
 ## Design Decisions
 
 **Architecture Choices:**
+- **Batched operations**: `append_batch` trait method with configurable batch_bytes for performance
 - **Storage abstraction**: Trait-based pluggable backends with memory and file implementations
-- **Segment-based storage**: Kafka-aligned architecture for scalability and industry compatibility
+- **Segment-based storage**: Kafka-aligned architecture with bulk writes for scalability
 - **Directory locking**: Prevents data corruption from concurrent processes
 - **Sparse indexing**: Efficient offset lookup without loading entire segments
 - **Error handling**: Comprehensive error types with context preservation
@@ -130,14 +146,16 @@ data/
 ## Performance Characteristics
 
 **Complexity:**
-- Memory storage: O(n) total records
-- File storage: O(1) append, O(k) for k records read
-- Post: O(1) append operation (with segment indexing)
-- Poll: O(k) for k records
+- Memory storage: O(n) total records, batched append O(b) for b records
+- File storage: O(1) append, O(k) for k records read, batched append O(b) with single I/O
+- Post: O(1) append operation, batched O(b) with chunked writes
+- Poll: O(k) for k records with streaming reads
 - Concurrency: DashMap provides lock-free access, RwLock enables concurrent reads
 
 **Trade-offs:**
-- **Memory vs File**: Speed vs persistence (13-680x performance difference)
+- **Batched vs Single**: 4-44x performance improvement vs operational complexity
+- **Memory vs File**: Speed vs persistence (8-43x performance difference)
+- **Batch size**: Higher throughput vs memory usage (configurable via batch_bytes)
 - **Segment rolling**: Storage efficiency vs lookup complexity
 - **Directory locking**: Safety vs multi-process access
 - **Sparse indexing**: Memory efficiency vs lookup speed
@@ -149,6 +167,7 @@ data/
 **Test Structure**: 1KB records with keys, headers, and payloads
 - Empty topic tests: 500 record batches  
 - Large dataset tests: 100 records with 2K record context
+- Batching tests: 1K and 10K record batches with throughput measurement
 - Memory profiling tracks allocations, deallocations, and peak usage
 
 ## Storage Backend Performance
