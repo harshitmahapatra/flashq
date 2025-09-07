@@ -13,7 +13,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 - Thread-safe concurrent access
 - Kafka-aligned segment-based file storage with crash recovery
 - Error handling with structured logging
-- Pluggable storage backends (in-memory, standard file I/O, experimental io_uring on Linux)
+- Pluggable storage backends (in-memory, file)
 - Performance benchmarking with memory profiling
 
 ## Quick Start
