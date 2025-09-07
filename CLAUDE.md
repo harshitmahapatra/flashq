@@ -286,3 +286,7 @@ The following MCP (Model Context Protocol) servers are currently configured and 
 - **File creation**: NEVER create files unless they're absolutely necessary for achieving your goal.
 - **File editing**: ALWAYS prefer editing an existing file to creating a new one.
 - **Documentation**: NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+- **Code Simplicity**: ALWAYS prefer smaller functions with descriptive names and less comments over long functions. Break down longs functions using private functions with descriptive names.
+- **Test Simplicity**: ALWAYS prefer tests with the following structure 1. Setup 2. Action 3. Expectation.
+- **Test Atomicity**: ALWAYS prefer a test testing only one logic. If more than one logic is tested in a tested in a test, split it into multiple tests testing one logic.
+- **Test Uniqueness**: NEVER allow two tests to test the same logic.

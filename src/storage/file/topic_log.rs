@@ -20,12 +20,13 @@ impl FileTopicLog {
         data_dir: P,
         segment_size_bytes: u64,
     ) -> Result<Self, std::io::Error> {
-        Self::new_with_batch_bytes(
+        Self::new_with_batch_bytes_and_indexing_config(
             topic,
             sync_mode,
             data_dir,
             segment_size_bytes,
             crate::storage::batching_heuristics::default_batch_bytes(),
+            IndexingConfig::default(),
         )
     }
 
@@ -36,12 +37,29 @@ impl FileTopicLog {
         segment_size_bytes: u64,
         batch_bytes: usize,
     ) -> Result<Self, std::io::Error> {
+        Self::new_with_batch_bytes_and_indexing_config(
+            topic,
+            sync_mode,
+            data_dir,
+            segment_size_bytes,
+            batch_bytes,
+            IndexingConfig::default(),
+        )
+    }
+
+    pub fn new_with_batch_bytes_and_indexing_config<P: AsRef<Path>>(
+        topic: &str,
+        sync_mode: SyncMode,
+        data_dir: P,
+        segment_size_bytes: u64,
+        batch_bytes: usize,
+        indexing_config: IndexingConfig,
+    ) -> Result<Self, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
         let base_dir = data_dir.join(topic);
         ensure_directory_exists(&base_dir)?;
-        let indexing_config = IndexingConfig::default();
 
         let segment_manager = SegmentManager::new(
             base_dir.clone(),

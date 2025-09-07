@@ -146,45 +146,16 @@ impl SegmentManager {
             return Ok(Vec::new());
         }
 
-        // Parse the target timestamp to milliseconds since epoch
-        let ts_ms_i64 = match chrono::DateTime::parse_from_rfc3339(ts_rfc3339) {
-            Ok(dt) => dt.timestamp_millis(),
-            Err(e) => {
-                return Err(StorageError::DataCorruption {
-                    context: "parse from_time".to_string(),
-                    details: e.to_string(),
-                });
-            }
-        };
-        let target_ts_ms: u64 = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
-
+        let target_ts_ms = Self::parse_target_ts_ms(ts_rfc3339)?;
         let segments_sorted_by_offset = self.get_segments_sorted_by_offset();
         let mut results: Vec<RecordWithOffset> = Vec::new();
-
-        // Conservative backseek window in bytes (bounded extra scan per segment)
-        const TIME_SEEK_BACK_BYTES: u64 = 16 * 1024; // 16KB default
 
         for segment in &segments_sorted_by_offset {
             if results.len() >= max_records {
                 break;
             }
 
-            // Compute starting position in this segment using time index
-            let pos_time = segment
-                .find_position_for_timestamp(target_ts_ms)
-                .unwrap_or(0) as u64;
-
-            // Backseek by a bounded window to avoid missing equality-run boundaries
-            let back = std::cmp::min(pos_time, TIME_SEEK_BACK_BYTES);
-            let start_guess = pos_time.saturating_sub(back);
-
-            // Round down to previous offset-index anchor (two-step seek)
-            let pos_anchor = segment
-                .find_floor_position_for_file_position(start_guess as u32)
-                .unwrap_or(0) as u64;
-
-            // Start from the earlier of guess and anchor to be conservative
-            let start_pos = std::cmp::min(start_guess, pos_anchor);
+            let start_pos = self.compute_time_seek_start_pos(segment, target_ts_ms);
 
             let mut reader = match create_segment_reader(segment, start_pos) {
                 Ok(r) => r,
@@ -194,24 +165,69 @@ impl SegmentManager {
                 }
             };
 
-            while results.len() < max_records {
-                match deserialize_record(&mut reader) {
-                    Ok(r) => {
-                        // Parse record ts to ms and compare
-                        let rec_ts_ms: u64 = chrono::DateTime::parse_from_rfc3339(&r.timestamp)
-                            .map(|dt| dt.timestamp_millis())
-                            .map(|v| if v < 0 { 0 } else { v as u64 })
-                            .unwrap_or(0);
-                        if rec_ts_ms >= target_ts_ms {
-                            results.push(r);
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
+            self.stream_records_from_pos(&mut reader, target_ts_ms, max_records, &mut results);
         }
 
         Ok(results)
+    }
+
+    #[inline]
+    fn parse_target_ts_ms(ts_rfc3339: &str) -> Result<u64, StorageError> {
+        let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(ts_rfc3339)
+            .map_err(|e| StorageError::DataCorruption {
+                context: "parse from_time".to_string(),
+                details: e.to_string(),
+            })?
+            .timestamp_millis();
+        Ok(if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 })
+    }
+
+    #[inline]
+    fn parse_record_ts_ms(ts: &str) -> u64 {
+        chrono::DateTime::parse_from_rfc3339(ts)
+            .map(|dt| dt.timestamp_millis())
+            .map(|v| if v < 0 { 0 } else { v as u64 })
+            .unwrap_or(0)
+    }
+
+    #[inline]
+    fn compute_time_seek_start_pos(&self, segment: &LogSegment, target_ts_ms: u64) -> u64 {
+        let pos_time = segment
+            .find_position_for_timestamp(target_ts_ms)
+            .unwrap_or(0) as u64;
+        let backseek_cfg = self.indexing_config.time_seek_back_bytes as u64;
+        let backseek = if backseek_cfg == 0 {
+            self.indexing_config.index_interval_bytes as u64
+        } else {
+            backseek_cfg
+        };
+        let back = std::cmp::min(pos_time, backseek);
+        let start_guess = pos_time.saturating_sub(back);
+        let pos_anchor = segment
+            .find_floor_position_for_file_position(start_guess as u32)
+            .unwrap_or(0) as u64;
+        std::cmp::min(start_guess, pos_anchor)
+    }
+
+    #[inline]
+    fn stream_records_from_pos(
+        &self,
+        reader: &mut BufReader<File>,
+        target_ts_ms: u64,
+        max_records: usize,
+        results: &mut Vec<RecordWithOffset>,
+    ) {
+        while results.len() < max_records {
+            match deserialize_record(reader) {
+                Ok(r) => {
+                    let rec_ts_ms = Self::parse_record_ts_ms(&r.timestamp);
+                    if rec_ts_ms >= target_ts_ms {
+                        results.push(r);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
     }
 
     fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
@@ -430,4 +446,90 @@ fn log_read_error(storage_error: &StorageError) {
 fn is_expected_end_of_file_error(error_source: &crate::error::StorageErrorSource) -> bool {
     let error_message = error_source.to_string();
     error_message.contains("UnexpectedEof") || error_message.contains("failed to fill whole buffer")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Record;
+    use std::fs;
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let mut dir = PathBuf::from("target/test_data");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        dir.push(format!("{name}_{nanos}"));
+        dir
+    }
+
+    #[test]
+    fn test_parse_target_ts_ms_and_record_ts_ms() {
+        assert_eq!(
+            SegmentManager::parse_target_ts_ms("1970-01-01T00:00:00Z").unwrap(),
+            0
+        );
+        assert!(SegmentManager::parse_target_ts_ms("not-a-time").is_err());
+        assert_eq!(
+            SegmentManager::parse_record_ts_ms("1970-01-01T00:00:00Z"),
+            0
+        );
+        // pre-epoch clamps to 0
+        assert_eq!(
+            SegmentManager::parse_record_ts_ms("1960-01-01T00:00:00Z"),
+            0
+        );
+    }
+
+    #[test]
+    fn test_compute_time_seek_start_pos_produces_conservative_start() {
+        let base = unique_test_dir("segmgr_compute_start");
+        fs::create_dir_all(&base).unwrap();
+
+        let log_path = base.join("00000000000000000000.log");
+        let index_path = base.join("00000000000000000000.index");
+
+        // Segment index config: frequent entries to stabilize anchors
+        let seg_idx_cfg = IndexingConfig {
+            index_interval_bytes: 64,
+            index_interval_records: 1,
+            time_seek_back_bytes: 64,
+        };
+        let mut segment = LogSegment::new(
+            0,
+            log_path,
+            index_path,
+            SyncMode::Immediate,
+            seg_idx_cfg.clone(),
+        )
+        .unwrap();
+
+        // Append a batch of records to generate some index/time entries
+        let recs: Vec<Record> = (0..20)
+            .map(|i| Record::new(None, format!("v{i}"), None))
+            .collect();
+        let _last = segment.append_records_bulk(&recs, 0).unwrap();
+
+        // Extract the timestamp of the first record
+        let mut reader = super::create_segment_reader(&segment, 0).unwrap();
+        let first = deserialize_record(&mut reader).unwrap();
+        let target_ts_ms = SegmentManager::parse_record_ts_ms(&first.timestamp);
+
+        // Manager config: set a small backseek to test logic
+        let mgr_idx_cfg = IndexingConfig {
+            index_interval_bytes: 128,
+            index_interval_records: 100,
+            time_seek_back_bytes: 32,
+        };
+        let mgr = SegmentManager::new(base.clone(), 1024 * 1024, SyncMode::Immediate, mgr_idx_cfg);
+
+        let pos_time = segment
+            .find_position_for_timestamp(target_ts_ms)
+            .unwrap_or(0) as u64;
+        let start_pos = mgr.compute_time_seek_start_pos(&segment, target_ts_ms);
+
+        // start_pos should never be after pos_time
+        assert!(start_pos <= pos_time);
+    }
 }

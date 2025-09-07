@@ -15,6 +15,7 @@ use std::path::PathBuf;
 pub struct IndexingConfig {
     pub index_interval_bytes: u32,
     pub index_interval_records: u32,
+    pub time_seek_back_bytes: u32,
 }
 
 impl Default for IndexingConfig {
@@ -22,6 +23,7 @@ impl Default for IndexingConfig {
         Self {
             index_interval_bytes: 4096,
             index_interval_records: 100,
+            time_seek_back_bytes: 4096, // sensible default equals interval bytes
         }
     }
 }

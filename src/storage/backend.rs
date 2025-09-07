@@ -20,6 +20,7 @@ pub enum StorageBackend {
         wal_commit_threshold: usize,
         segment_size_bytes: u64,
         batch_bytes: usize,
+        indexing_config: crate::storage::file::IndexingConfig,
         _directory_lock: File,
     },
 }
@@ -73,6 +74,7 @@ impl StorageBackend {
             wal_commit_threshold,
             segment_size_bytes,
             batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
+            indexing_config: crate::storage::file::IndexingConfig::default(),
             _directory_lock: directory_lock,
         })
     }
@@ -91,8 +93,25 @@ impl StorageBackend {
             wal_commit_threshold: 1000,
             segment_size_bytes: DEFAULT_SEGMENT_SIZE,
             batch_bytes,
+            indexing_config: crate::storage::file::IndexingConfig::default(),
             _directory_lock: directory_lock,
         })
+    }
+
+    /// Override time-seek-back-bytes for file backend; no-op for memory backend.
+    pub fn with_time_seek_back_bytes(mut self, bytes: u32) -> Self {
+        if bytes == 0 {
+            return self;
+        }
+        if let StorageBackend::File {
+            indexing_config, ..
+        } = &mut self
+        {
+            let mut cfg = indexing_config.clone();
+            cfg.time_seek_back_bytes = bytes;
+            *indexing_config = cfg;
+        }
+        self
     }
 
     pub fn create(
@@ -108,14 +127,16 @@ impl StorageBackend {
                 data_dir,
                 segment_size_bytes,
                 batch_bytes,
+                indexing_config,
                 ..
             } => {
-                let file_log = FileTopicLog::new_with_batch_bytes(
+                let file_log = FileTopicLog::new_with_batch_bytes_and_indexing_config(
                     topic,
                     *sync_mode,
                     data_dir,
                     *segment_size_bytes,
                     *batch_bytes,
+                    indexing_config.clone(),
                 )?;
                 Ok(Arc::new(RwLock::new(file_log)))
             }

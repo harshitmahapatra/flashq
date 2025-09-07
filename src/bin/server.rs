@@ -18,6 +18,7 @@ async fn main() {
     let mut storage_selection: Option<&str> = None; // "memory" | "file"
     let mut data_dir: Option<PathBuf> = None;
     let mut batch_bytes: Option<usize> = None;
+    let mut time_seek_back_bytes: Option<u32> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -70,6 +71,22 @@ async fn main() {
                     }
                 }
             }
+            "--time-seek-back-bytes" => {
+                i += 1;
+                if i >= args.len() {
+                    log::error!("--time-seek-back-bytes requires a positive integer (bytes)");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                match args[i].parse::<u32>() {
+                    Ok(v) if v > 0 => time_seek_back_bytes = Some(v),
+                    _ => {
+                        log::error!("--time-seek-back-bytes must be > 0 (bytes)");
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
             arg => {
                 if let Ok(p) = arg.parse::<u16>() {
                     port = p;
@@ -85,7 +102,7 @@ async fn main() {
 
     // Build storage backend after parsing all flags
     let use_file = storage_selection == Some("file") || data_dir.is_some();
-    let storage_backend = if use_file {
+    let mut storage_backend = if use_file {
         let dir = data_dir.unwrap_or_else(|| PathBuf::from("./data"));
         match batch_bytes {
             Some(bb) => match flashq::storage::StorageBackend::new_file_with_path_and_batch_bytes(
@@ -117,6 +134,20 @@ async fn main() {
         }
     };
 
+    // Env fallback: FLASHQ_TIME_SEEK_BACK_BYTES if flag not provided
+    if time_seek_back_bytes.is_none() {
+        if let Ok(v) = std::env::var("FLASHQ_TIME_SEEK_BACK_BYTES") {
+            if let Ok(parsed) = v.parse::<u32>() {
+                if parsed > 0 {
+                    time_seek_back_bytes = Some(parsed);
+                }
+            }
+        }
+    }
+    if let Some(bytes) = time_seek_back_bytes {
+        storage_backend = storage_backend.with_time_seek_back_bytes(bytes);
+    }
+
     if let Err(e) = start_server(port, storage_backend).await {
         log::error!("Server error: {e}");
         std::process::exit(1);
@@ -125,7 +156,7 @@ async fn main() {
 
 fn print_usage() {
     log::info!(
-        "Usage: server [port] [--storage <backend>] [--data-dir <path>] [--batch-bytes <n>]"
+        "Usage: server [port] [--storage <backend>] [--data-dir <path>] [--batch-bytes <n>] [--time-seek-back-bytes <n>]"
     );
     log::info!("  port: Port number to bind to (default: 8080)");
     log::info!("  --storage: Storage backend to use");

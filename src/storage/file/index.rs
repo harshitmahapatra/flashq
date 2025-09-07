@@ -293,4 +293,66 @@ mod tests {
         assert_eq!(new_index.entries[0], entry1);
         assert_eq!(new_index.entries[1], entry2);
     }
+
+    #[test]
+    fn test_find_floor_position_for_position_empty() {
+        let index = SparseIndex::new();
+        assert_eq!(index.find_floor_position_for_position(123), Some(0));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_exact() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        assert_eq!(index.find_floor_position_for_position(200), Some(200));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_between() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        index.add_entry(IndexEntry {
+            offset: 30,
+            position: 300,
+        });
+        assert_eq!(index.find_floor_position_for_position(250), Some(200));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_before_first() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        assert_eq!(index.find_floor_position_for_position(50), Some(0));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_after_last() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        assert_eq!(index.find_floor_position_for_position(9999), Some(200));
+    }
 }

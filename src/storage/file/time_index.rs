@@ -221,4 +221,25 @@ mod tests {
         assert_eq!(idx2.find_position_for_timestamp(1500), Some(10)); // previous entry position
         assert_eq!(idx2.find_position_for_timestamp(2000), Some(20));
     }
+
+    #[test]
+    fn test_duplicate_timestamp_keeps_earliest_position() {
+        let mut idx = SparseTimeIndex::new();
+        idx.add_entry(TimeIndexEntry {
+            timestamp_ms: 1000,
+            position: 500,
+        });
+        // Duplicate with later position should not override
+        idx.add_entry(TimeIndexEntry {
+            timestamp_ms: 1000,
+            position: 600,
+        });
+        assert_eq!(idx.find_position_for_timestamp(1000), Some(500));
+        // Duplicate with earlier position should override to earliest
+        idx.add_entry(TimeIndexEntry {
+            timestamp_ms: 1000,
+            position: 450,
+        });
+        assert_eq!(idx.find_position_for_timestamp(1000), Some(450));
+    }
 }
