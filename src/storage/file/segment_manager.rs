@@ -191,7 +191,6 @@ impl SegmentManager {
         Ok(if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 })
     }
 
-
     #[inline]
     fn compute_time_seek_start_pos(&self, segment: &LogSegment, target_ts_ms: u64) -> u64 {
         let pos_time = segment
@@ -523,7 +522,8 @@ mod tests {
         // Extract the timestamp of the first record
         use crate::storage::file::common::read_record_header;
         let mut reader = super::create_segment_reader(&segment, 0).unwrap();
-        let (_payload, _off, target_ts_ms, _tslen, _start) = read_record_header(&mut reader).unwrap();
+        let (_payload, _off, target_ts_ms, _tslen, _start) =
+            read_record_header(&mut reader).unwrap();
 
         // Manager config: set a small backseek to test logic
         let mgr_idx_cfg = IndexingConfig {
