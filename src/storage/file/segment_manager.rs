@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, io::BufReader};
 
 use crate::RecordWithOffset;
 use crate::error::StorageError;
-use crate::storage::file::common::deserialize_record;
+use crate::storage::file::common::{
+    deserialize_record, read_record_header, skip_record_after_header,
+};
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
 use log::warn;
@@ -155,6 +157,13 @@ impl SegmentManager {
                 break;
             }
 
+            // Prune segments that cannot contain the target (max timestamp < target)
+            if let Some(max_ts) = segment.max_ts_ms {
+                if max_ts < target_ts_ms {
+                    continue;
+                }
+            }
+
             let start_pos = self.compute_time_seek_start_pos(segment, target_ts_ms);
 
             let mut reader = match create_segment_reader(segment, start_pos) {
@@ -182,13 +191,6 @@ impl SegmentManager {
         Ok(if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 })
     }
 
-    #[inline]
-    fn parse_record_ts_ms(ts: &str) -> u64 {
-        chrono::DateTime::parse_from_rfc3339(ts)
-            .map(|dt| dt.timestamp_millis())
-            .map(|v| if v < 0 { 0 } else { v as u64 })
-            .unwrap_or(0)
-    }
 
     #[inline]
     fn compute_time_seek_start_pos(&self, segment: &LogSegment, target_ts_ms: u64) -> u64 {
@@ -218,11 +220,27 @@ impl SegmentManager {
         results: &mut Vec<RecordWithOffset>,
     ) {
         while results.len() < max_records {
-            match deserialize_record(reader) {
-                Ok(r) => {
-                    let rec_ts_ms = Self::parse_record_ts_ms(&r.timestamp);
-                    if rec_ts_ms >= target_ts_ms {
-                        results.push(r);
+            match read_record_header(reader) {
+                Ok((payload_size, _off, ts_ms, _ts_len, record_start)) => {
+                    if ts_ms < target_ts_ms {
+                        // Fast skip without JSON parsing
+                        if let Err(e) = skip_record_after_header(reader, payload_size) {
+                            log_read_error(&e);
+                            break;
+                        }
+                        continue;
+                    }
+                    // Need this record fully: rewind and deserialize once
+                    if let Err(e) = reader.seek(SeekFrom::Start(record_start)) {
+                        log_read_error(&StorageError::from_io_error(
+                            e,
+                            "Failed to seek to record start",
+                        ));
+                        break;
+                    }
+                    match deserialize_record(reader) {
+                        Ok(r) => results.push(r),
+                        Err(_) => break,
                     }
                 }
                 Err(_) => break,
@@ -465,21 +483,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_target_ts_ms_and_record_ts_ms() {
+    fn test_parse_target_ts_ms() {
         assert_eq!(
             SegmentManager::parse_target_ts_ms("1970-01-01T00:00:00Z").unwrap(),
             0
         );
         assert!(SegmentManager::parse_target_ts_ms("not-a-time").is_err());
-        assert_eq!(
-            SegmentManager::parse_record_ts_ms("1970-01-01T00:00:00Z"),
-            0
-        );
-        // pre-epoch clamps to 0
-        assert_eq!(
-            SegmentManager::parse_record_ts_ms("1960-01-01T00:00:00Z"),
-            0
-        );
     }
 
     #[test]
@@ -512,9 +521,9 @@ mod tests {
         let _last = segment.append_records_bulk(&recs, 0).unwrap();
 
         // Extract the timestamp of the first record
+        use crate::storage::file::common::read_record_header;
         let mut reader = super::create_segment_reader(&segment, 0).unwrap();
-        let first = deserialize_record(&mut reader).unwrap();
-        let target_ts_ms = SegmentManager::parse_record_ts_ms(&first.timestamp);
+        let (_payload, _off, target_ts_ms, _tslen, _start) = read_record_header(&mut reader).unwrap();
 
         // Manager config: set a small backseek to test logic
         let mgr_idx_cfg = IndexingConfig {

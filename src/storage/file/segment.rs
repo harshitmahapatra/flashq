@@ -46,6 +46,9 @@ pub struct LogSegment {
     records_since_last_index: u32,
     sync_mode: SyncMode,
     indexing_config: IndexingConfig,
+    // Cached timestamp range for pruning during time-based reads
+    pub min_ts_ms: Option<u64>,
+    pub max_ts_ms: Option<u64>,
 }
 
 impl LogSegment {
@@ -100,6 +103,8 @@ impl LogSegment {
             records_since_last_index: 0,
             sync_mode,
             indexing_config,
+            min_ts_ms: None,
+            max_ts_ms: None,
         })
     }
 
@@ -194,6 +199,9 @@ impl LogSegment {
             segment.rebuild_time_index_from_log()?;
         }
 
+        // Initialize max_ts_ms from time index if available (min_ts_ms optional)
+        segment.max_ts_ms = segment.time_index.last_entry().map(|e| e.timestamp_ms);
+
         segment.max_offset = determine_max_offset(&segment.log_path, &segment.index)?;
 
         Ok(segment)
@@ -207,6 +215,10 @@ impl LogSegment {
         // Best-effort timestamp for single append; may differ slightly from serialized value
         let ts_ms = chrono::Utc::now().timestamp_millis();
         let ts_ms = if ts_ms < 0 { 0 } else { ts_ms as u64 };
+
+        // Maintain cached min/max timestamps for pruning
+        self.min_ts_ms = Some(self.min_ts_ms.map_or(ts_ms, |v| v.min(ts_ms)));
+        self.max_ts_ms = Some(self.max_ts_ms.map_or(ts_ms, |v| v.max(ts_ms)));
 
         if self.should_add_index_entry() {
             // Offset index update
@@ -277,6 +289,9 @@ impl LogSegment {
             .map(|dt| dt.timestamp_millis())
             .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
         let ts_ms = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
+        // Maintain cached min/max timestamps for pruning
+        self.min_ts_ms = Some(self.min_ts_ms.map_or(ts_ms, |v| v.min(ts_ms)));
+        self.max_ts_ms = Some(self.max_ts_ms.map_or(ts_ms, |v| v.max(ts_ms)));
         for record in records {
             let before = buf.len();
             // Use a single timestamp for the whole batch
