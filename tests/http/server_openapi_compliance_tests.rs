@@ -101,7 +101,7 @@ async fn test_produce_records_endpoint_compliance() {
     assert_eq!(response.status(), 200);
 
     let response_data: Value = response.json().await.unwrap();
-    let schema = get_response_schema(&spec, "/topics/{topic}/records", "post", "200");
+    let schema = get_response_schema(&spec, "/topic/{topic}/record", "post", "200");
 
     validate_schema(&spec, &schema, &response_data)
         .expect("Produce response does not comply with OpenAPI schema");
@@ -125,7 +125,7 @@ async fn test_consumer_group_create_compliance() {
 }
 
 #[tokio::test]
-async fn test_consumer_fetch_records_compliance() {
+async fn test_consumer_fetch_records_by_offset_compliance() {
     let spec = load_openapi_spec();
     let server = TestServer::start().await.unwrap();
     let helper = TestClient::new(&server);
@@ -144,7 +144,12 @@ async fn test_consumer_fetch_records_compliance() {
     assert_eq!(response.status(), 200);
 
     let response_data: Value = response.json().await.unwrap();
-    let schema = get_response_schema(&spec, "/consumer/{group-id}/topics/{topic}", "get", "200");
+    let schema = get_response_schema(
+        &spec,
+        "/consumer/{group-id}/topic/{topic}/record/offset",
+        "get",
+        "200",
+    );
 
     validate_schema(&spec, &schema, &response_data)
         .expect("Consumer fetch response does not comply with OpenAPI schema");

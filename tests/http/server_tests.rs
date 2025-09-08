@@ -19,7 +19,7 @@ async fn test_server_error_handling() {
 
     let response = helper
         .client
-        .post(format!("{}/topics/test/records", helper.base_url))
+        .post(format!("{}/topic/test/record", helper.base_url))
         .json(&serde_json::json!({"invalid": "request"}))
         .send()
         .await
@@ -36,7 +36,7 @@ async fn test_malformed_requests() {
 
     let response = helper
         .client
-        .post(format!("{}/topics/test/records", helper.base_url))
+        .post(format!("{}/topic/test/record", helper.base_url))
         .body("invalid json")
         .header("content-type", "application/json")
         .send()
@@ -46,7 +46,7 @@ async fn test_malformed_requests() {
 
     let response = helper
         .client
-        .post(format!("{}/topics/test/records", helper.base_url))
+        .post(format!("{}/topic/test/record", helper.base_url))
         .send()
         .await
         .unwrap();

@@ -53,7 +53,7 @@ paths:
                 uptime: "2h 15m 30s"
 
   # Producer APIs
-  /topics/{topic}/records:
+  /topic/{topic}/record:
     post:
       summary: Produce records to a topic
       description: |
@@ -173,15 +173,15 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  # Consumer APIs
-  /consumer/{group-id}/topics/{topic}:
+
+  /consumer/{group-id}/topic/{topic}/record/offset:
     get:
-      summary: Fetch records by offset or time
+      summary: Fetch records by offset
       description: |
-        Fetch records from the topic starting at the consumer group's current offset, from a specific
-        `from_offset`, or from a specific `from_time` (RFC3339). Polling does not advance the group's
-        committed offset; use the offset commit endpoint to advance it.
-      operationId: fetchRecords
+        Fetch records starting at the consumer group's current committed offset, or from a specific
+        `from_offset` if provided. Polling does not advance the group's committed offset; use the offset
+        commit endpoint to advance it.
+      operationId: fetchRecordsByOffset
       tags:
         - Consumer
       parameters:
@@ -205,16 +205,6 @@ paths:
             type: integer
             minimum: 0
           example: 100
-        - name: from_time
-          in: query
-          required: false
-          description: |
-            Seek to the first record whose timestamp is greater than or equal to this RFC3339 time.
-            Mutually exclusive with `from_offset`.
-          schema:
-            type: string
-            format: date-time
-          example: "2025-01-01T00:00:00Z"
         - name: include_headers
           in: query
           required: false
@@ -230,31 +220,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FetchResponse"
-              examples:
-                with-records:
-                  summary: Successful fetch with records
-                  value:
-                    records:
-                      - offset: 142
-                        key: "user123"
-                        value: "User logged in"
-                        timestamp: "2024-01-15T10:30:00.123Z"
-                        headers:
-                          source: "auth-service"
-                      - offset: 143
-                        key: "user456"
-                        value: "User logged out"
-                        timestamp: "2024-01-15T10:30:01.456Z"
-                        headers:
-                          source: "auth-service"
-                    next_offset: 144
-                    high_water_mark: 200
-                empty-fetch:
-                  summary: No new records available
-                  value:
-                    records: []
-                    next_offset: 144
-                    high_water_mark: 144
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -263,14 +228,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "topic_not_found"
-                message: "Topic 'user-events' not found"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /consumer/{group-id}/topic/{topic}/record/time:
+    get:
+      summary: Fetch records by time
+      description: |
+        Fetch records starting at the first record whose timestamp is greater than or equal to the
+        provided `from_time` (RFC3339). Polling does not advance the group's committed offset; use the
+        offset commit endpoint to advance it.
+      operationId: fetchRecordsByTime
+      tags:
+        - Consumer
+      parameters:
+        - $ref: "#/components/parameters/ConsumerGroupId"
+        - $ref: "#/components/parameters/TopicName"
+        - name: from_time
+          in: query
+          required: true
+          description: |
+            Seek to the first record whose timestamp is greater than or equal to this RFC3339 time
+          schema:
+            type: string
+            format: date-time
+          example: "2025-01-01T00:00:00Z"
+        - name: max_records
+          in: query
+          required: false
+          description: "Maximum number of records to return (default: 100)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 100
+          example: 50
+        - name: include_headers
+          in: query
+          required: false
+          description: "Whether to include record headers in the response (default: true)"
+          schema:
+            type: boolean
+            default: true
+          example: true
+      responses:
+        "200":
+          description: Records fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FetchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Consumer group or topic not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
   # Offset Management
-  /consumer/{group-id}/topics/{topic}/offset:
+  /consumer/{group-id}/topic/{topic}/offset:
     post:
       summary: Commit offset
       description: |

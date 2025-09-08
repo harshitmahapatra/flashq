@@ -416,7 +416,7 @@ impl TestClient {
         };
 
         self.client
-            .post(format!("{}/topics/{}/records", self.base_url, topic))
+            .post(format!("{}/topic/{}/record", self.base_url, topic))
             .json(&produce_request)
             .send()
             .await
@@ -430,7 +430,7 @@ impl TestClient {
         let produce_request = ProduceRequest { records };
 
         self.client
-            .post(format!("{}/topics/{}/records", self.base_url, topic))
+            .post(format!("{}/topic/{}/record", self.base_url, topic))
             .json(&produce_request)
             .send()
             .await
@@ -480,7 +480,7 @@ impl TestClient {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .post(format!(
-                "{}/consumer/{}/topics/{}/offset",
+                "{}/consumer/{}/topic/{}/offset",
                 self.base_url, group_id, topic
             ))
             .json(&UpdateConsumerGroupOffsetRequest { offset })
@@ -495,7 +495,7 @@ impl TestClient {
     ) -> reqwest::Result<reqwest::Response> {
         self.client
             .get(format!(
-                "{}/consumer/{}/topics/{}/offset",
+                "{}/consumer/{}/topic/{}/offset",
                 self.base_url, group_id, topic
             ))
             .send()
@@ -515,11 +515,11 @@ impl TestClient {
         topic: &str,
         max_records: Option<usize>,
     ) -> reqwest::Result<reqwest::Response> {
-        self.fetch_records_for_consumer_group_with_options(group_id, topic, None, max_records)
+        self.fetch_records_for_consumer_group_by_offset(group_id, topic, None, max_records)
             .await
     }
 
-    pub async fn fetch_records_for_consumer_group_with_options(
+    pub async fn fetch_records_for_consumer_group_by_offset(
         &self,
         group_id: &str,
         topic: &str,
@@ -536,7 +536,7 @@ impl TestClient {
         }
 
         let mut request = self.client.get(format!(
-            "{}/consumer/{}/topics/{}",
+            "{}/consumer/{}/topic/{}/record/offset",
             self.base_url, group_id, topic
         ));
 
@@ -547,7 +547,7 @@ impl TestClient {
         request.send().await
     }
 
-    pub async fn fetch_records_for_consumer_group_with_time(
+    pub async fn fetch_records_for_consumer_group_by_time(
         &self,
         group_id: &str,
         topic: &str,
@@ -561,7 +561,7 @@ impl TestClient {
 
         self.client
             .get(format!(
-                "{}/consumer/{}/topics/{}",
+                "{}/consumer/{}/topic/{}/record/time",
                 self.base_url, group_id, topic
             ))
             .query(&query)
