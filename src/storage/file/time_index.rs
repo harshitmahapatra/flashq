@@ -88,14 +88,28 @@ impl SparseTimeIndex {
     }
 
     /// Read the time index from file and populate the sparse index.
+    /// An optional `max_entries` bound can be provided to prevent excessive allocations
+    /// in case of a corrupted or unexpectedly large file. If the bound is exceeded,
+    /// returns a DataCorruption error.
     pub fn read_from_file<R: Read>(
         &mut self,
         reader: &mut BufReader<R>,
+        max_entries: Option<usize>,
     ) -> Result<(), StorageError> {
         self.entries.clear();
 
+        let max_allowed = max_entries.unwrap_or(usize::MAX);
+        let mut count: usize = 0;
+
         let mut buffer = [0u8; 12]; // 8 bytes timestamp_ms + 4 bytes position
         while reader.read_exact(&mut buffer).is_ok() {
+            if count >= max_allowed {
+                return Err(StorageError::DataCorruption {
+                    context: "time index read".to_string(),
+                    details: format!("time index entry count exceeded limit: {max_allowed}"),
+                });
+            }
+
             let ts_ms = u64::from_be_bytes([
                 buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6],
                 buffer[7],
@@ -105,6 +119,7 @@ impl SparseTimeIndex {
                 timestamp_ms: ts_ms,
                 position,
             });
+            count += 1;
         }
 
         Ok(())
@@ -214,7 +229,7 @@ mod tests {
 
         let mut reader = BufReader::new(Cursor::new(buf));
         let mut idx2 = SparseTimeIndex::new();
-        idx2.read_from_file(&mut reader).unwrap();
+        idx2.read_from_file(&mut reader, None).unwrap();
 
         assert_eq!(idx2.len(), 2);
         assert_eq!(idx2.last_entry(), Some(&entry2));

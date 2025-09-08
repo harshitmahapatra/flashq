@@ -110,16 +110,30 @@ impl SparseIndex {
     }
 
     /// Read index from file and populate the sparse index
+    /// An optional `max_entries` bound can be provided to prevent excessive allocations
+    /// in case of a corrupted or unexpectedly large file. If the bound is exceeded,
+    /// returns a DataCorruption error.
     pub fn read_from_file<R: Read>(
         &mut self,
         reader: &mut BufReader<R>,
         base_offset: u64,
+        max_entries: Option<usize>,
     ) -> Result<(), StorageError> {
         self.entries.clear();
+
+        let max_allowed = max_entries.unwrap_or(usize::MAX);
+        let mut count: usize = 0;
 
         let mut buffer = [0u8; 8]; // 4 bytes offset + 4 bytes position
 
         while reader.read_exact(&mut buffer).is_ok() {
+            if count >= max_allowed {
+                return Err(StorageError::DataCorruption {
+                    context: "offset index read".to_string(),
+                    details: format!("index entry count exceeded limit: {max_allowed}"),
+                });
+            }
+
             let relative_offset = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
             let position = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
 
@@ -128,6 +142,7 @@ impl SparseIndex {
                 offset: absolute_offset,
                 position,
             });
+            count += 1;
         }
 
         Ok(())
@@ -287,7 +302,9 @@ mod tests {
 
         let mut reader = BufReader::new(Cursor::new(buffer));
         let mut new_index = SparseIndex::new();
-        new_index.read_from_file(&mut reader, base_offset).unwrap();
+        new_index
+            .read_from_file(&mut reader, base_offset, None)
+            .unwrap();
 
         assert_eq!(new_index.entries.len(), 2);
         assert_eq!(new_index.entries[0], entry1);

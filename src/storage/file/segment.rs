@@ -123,9 +123,38 @@ impl LogSegment {
                 StorageError::from_io_error(e, "Failed to open index file for reading")
             })?;
             let mut index_reader = BufReader::new(index_file);
-            segment
+            // Bound the maximum number of entries we accept from an index file to
+            // avoid excessive allocations from corrupted or malformed files. On error,
+            // rebuild the offset index from the log to degrade gracefully.
+            match segment
                 .index
-                .read_from_file(&mut index_reader, base_offset)?;
+                .read_from_file(&mut index_reader, base_offset, Some(1_000_000))
+            {
+                Ok(()) => {}
+                Err(err) => {
+                    warn!(
+                        "Offset index read failed ({}); rebuilding from log {:?}",
+                        err, segment.log_path
+                    );
+                    segment.rebuild_offset_index_from_log()?;
+                }
+            }
+
+            // If offset index appears empty while log has data, rebuild it (treat as corrupt)
+            let log_len = match std::fs::metadata(&segment.log_path) {
+                Ok(m) => m.len(),
+                Err(_) => 0,
+            };
+            if segment.index.last_entry().is_none() && log_len > 0 {
+                warn!(
+                    "Offset index at {:?} appears empty; rebuilding from log {:?}",
+                    segment.index_path, segment.log_path
+                );
+                segment.rebuild_offset_index_from_log()?;
+            }
+        } else {
+            // Missing offset index: build from the log
+            segment.rebuild_offset_index_from_log()?;
         }
 
         if segment.time_index_path.exists() {
@@ -133,7 +162,20 @@ impl LogSegment {
                 StorageError::from_io_error(e, "Failed to open time index file for reading")
             })?;
             let mut time_index_reader = BufReader::new(time_index_file);
-            segment.time_index.read_from_file(&mut time_index_reader)?;
+            // Read with a sane bound; if it fails, rebuild the time index from log.
+            match segment
+                .time_index
+                .read_from_file(&mut time_index_reader, Some(1_000_000))
+            {
+                Ok(()) => {}
+                Err(err) => {
+                    warn!(
+                        "Time index read failed ({}); rebuilding from log {:?}",
+                        err, segment.log_path
+                    );
+                    segment.rebuild_time_index_from_log()?;
+                }
+            }
 
             // If time index appears empty while log has data, rebuild it (treat as corrupt)
             let log_len = match std::fs::metadata(&segment.log_path) {
@@ -525,6 +567,61 @@ impl LogSegment {
         }
 
         self.flush_time_index_buffer()?;
+        Ok(())
+    }
+
+    fn rebuild_offset_index_from_log(&mut self) -> Result<(), StorageError> {
+        self.index = SparseIndex::new();
+        self.index_buffer.clear();
+
+        // Open the log file and iterate records from the beginning
+        let mut log_file = std::fs::File::open(&self.log_path)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to open log for index rebuild"))?;
+        let mut reader = BufReader::new(&mut log_file);
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to seek log for index rebuild"))?;
+
+        let mut bytes_since: u32 = 0;
+        let mut records_since: u32 = 0;
+
+        loop {
+            let start_pos = reader
+                .stream_position()
+                .map_err(|e| StorageError::from_io_error(e, "Failed to get stream position"))?;
+            match deserialize_record(&mut reader) {
+                Ok(r) => {
+                    let end_pos = reader.stream_position().map_err(|e| {
+                        StorageError::from_io_error(e, "Failed to get stream position after read")
+                    })?;
+                    let sz = (end_pos - start_pos) as u32;
+                    bytes_since = bytes_since.saturating_add(sz);
+                    records_since = records_since.saturating_add(1);
+
+                    if bytes_since >= self.indexing_config.index_interval_bytes
+                        || records_since >= self.indexing_config.index_interval_records
+                    {
+                        let entry = IndexEntry {
+                            offset: r.offset,
+                            position: start_pos as u32,
+                        };
+                        self.index.add_entry(entry.clone());
+                        let serialized_entry = self.index.serialize_entry(&entry, self.base_offset);
+                        self.index_buffer.extend_from_slice(&serialized_entry);
+                        if self.index_buffer.len()
+                            >= self.indexing_config.index_interval_bytes as usize
+                        {
+                            self.flush_index_buffer()?;
+                        }
+                        bytes_since = 0;
+                        records_since = 0;
+                    }
+                }
+                Err(_) => break, // EOF or read error; best-effort rebuild
+            }
+        }
+
+        self.flush_index_buffer()?;
         Ok(())
     }
 }

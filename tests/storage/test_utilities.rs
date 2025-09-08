@@ -41,7 +41,7 @@ pub fn unique_test_dir(name: &str) -> PathBuf {
 
 /// Build a large string payload of given length
 pub fn big_val(len: usize) -> String {
-    std::iter::repeat('x').take(len).collect()
+    std::iter::repeat_n('x', len).collect()
 }
 
 /// Common test configuration
