@@ -38,6 +38,20 @@ pub struct ConsumerGroupIdParams {
     pub group_id: String,
 }
 
+#[derive(serde::Deserialize)]
+pub struct PollOffsetQuery {
+    pub from_offset: Option<u64>,
+    pub max_records: Option<usize>,
+    pub include_headers: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct PollTimeQuery {
+    pub from_time: String,
+    pub max_records: Option<usize>,
+    pub include_headers: Option<bool>,
+}
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -338,15 +352,15 @@ pub async fn commit_consumer_group_offset(
     }
 }
 
-pub async fn fetch_records_for_consumer_group(
+pub async fn fetch_records_by_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
-    Query(query): Query<PollQuery>,
+    Query(query): Query<PollOffsetQuery>,
 ) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Validate consumer group ID
     if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
         error!(
-            "GET /consumer/{}/topics/{} group validation failed: {}",
+            "GET /consumer/{}/topics/{} by-offset group validation failed: {}",
             params.group_id, params.topic, error_response.message
         );
         return Err((
@@ -358,7 +372,7 @@ pub async fn fetch_records_for_consumer_group(
     // Validate topic name
     if let Err(error_response) = validate_topic_name(&params.topic) {
         error!(
-            "GET /consumer/{}/topics/{} topic validation failed: {}",
+            "GET /consumer/{}/topics/{} by-offset topic validation failed: {}",
             params.group_id, params.topic, error_response.message
         );
         return Err((
@@ -367,22 +381,24 @@ pub async fn fetch_records_for_consumer_group(
         ));
     }
 
-    // Validate query parameters
-    if let Err(error_response) = validate_poll_query(&query) {
-        error!(
-            "GET /consumer/{}/topics/{} query validation failed: {}",
-            params.group_id, params.topic, error_response.message
-        );
+    // Reuse existing poll validation for max_records only
+    let pq = PollQuery {
+        from_offset: query.from_offset,
+        from_time: None,
+        max_records: query.max_records,
+        include_headers: query.include_headers,
+    };
+    if let Err(error_response) = validate_poll_query(&pq) {
         return Err((
             error_to_status_code(&error_response.error),
             Json(error_response),
         ));
     }
 
-    let limit = query.effective_limit();
-    let include_headers = query.should_include_headers();
+    let limit = pq.effective_limit();
+    let include_headers = pq.should_include_headers();
 
-    let records_result = match query.from_offset {
+    let records_result = match pq.from_offset {
         Some(offset) => app_state.queue.poll_records_for_consumer_group_from_offset(
             &params.group_id,
             &params.topic,
@@ -396,27 +412,14 @@ pub async fn fetch_records_for_consumer_group(
         }
     };
 
-    let create_error_response = |error| {
-        error!(
-            "GET /consumer/{}/topics/{}/offset: {}",
-            params.group_id, params.topic, error
-        );
-        ErrorResponse::from(error)
-    };
-
     match records_result {
         Ok(records) => {
-            let offset_info = match query.from_offset {
-                Some(offset) => format!(" from_offset: {offset}"),
-                None => String::new(),
-            };
-
             trace!(
-                "GET /consumer/{}/topics/{} - max_records: {:?}{} - {} records returned",
+                "GET /consumer/{}/topics/{} by-offset - max_records: {:?} from_offset: {:?} - {} records returned",
                 params.group_id,
                 params.topic,
                 limit,
-                offset_info,
+                pq.from_offset,
                 records.len()
             );
 
@@ -437,38 +440,125 @@ pub async fn fetch_records_for_consumer_group(
                     .collect()
             };
 
-            let offset_response = app_state
+            let next_offset = app_state
                 .queue
-                .get_consumer_group_offset(&params.group_id, &params.topic);
-
-            match offset_response {
-                Ok(next_offset) => {
-                    let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
-                    let response =
-                        FetchResponse::new(record_responses, next_offset, high_water_mark);
-                    Ok(Json(response))
-                }
-                Err(error) => {
-                    error!(
-                        "GET /consumer/{}/topics/{}/offset: {}",
-                        params.group_id, params.topic, error
-                    );
-                    let error_response = create_error_response(error);
-                    Err((
-                        error_to_status_code(&error_response.error),
-                        Json(error_response),
-                    ))
-                }
-            }
+                .get_consumer_group_offset(&params.group_id, &params.topic)
+                .unwrap_or(0);
+            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
+            let response = FetchResponse::new(record_responses, next_offset, high_water_mark);
+            Ok(Json(response))
         }
         Err(error) => {
             error!(
-                "GET /consumer/{}/topics/{} failed: {}",
+                "GET /consumer/{}/topics/{} by-offset failed: {}",
                 params.group_id, params.topic, error
             );
 
-            let error_response = create_error_response(error);
+            let error_response = ErrorResponse::from(error);
+            Err((
+                error_to_status_code(&error_response.error),
+                Json(error_response),
+            ))
+        }
+    }
+}
 
+pub async fn fetch_records_by_time(
+    State(app_state): State<AppState>,
+    Path(params): Path<ConsumerGroupParams>,
+    Query(query): Query<PollTimeQuery>,
+) -> Result<Json<FetchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate consumer group ID
+    if let Err(error_response) = validate_consumer_group_id(&params.group_id) {
+        error!(
+            "GET /consumer/{}/topics/{} by-time group validation failed: {}",
+            params.group_id, params.topic, error_response.message
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Validate topic name
+    if let Err(error_response) = validate_topic_name(&params.topic) {
+        error!(
+            "GET /consumer/{}/topics/{} by-time topic validation failed: {}",
+            params.group_id, params.topic, error_response.message
+        );
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    // Reuse existing poll validation for time format and max_records
+    let pq = PollQuery {
+        from_offset: None,
+        from_time: Some(query.from_time.clone()),
+        max_records: query.max_records,
+        include_headers: query.include_headers,
+    };
+    if let Err(error_response) = validate_poll_query(&pq) {
+        return Err((
+            error_to_status_code(&error_response.error),
+            Json(error_response),
+        ));
+    }
+
+    let limit = pq.effective_limit();
+    let include_headers = pq.should_include_headers();
+
+    let records_result = app_state.queue.poll_records_for_consumer_group_from_time(
+        &params.group_id,
+        &params.topic,
+        pq.from_time.as_ref().unwrap(),
+        limit,
+    );
+
+    match records_result {
+        Ok(records) => {
+            trace!(
+                "GET /consumer/{}/topics/{} by-time - max_records: {:?} from_time: {} - {} records returned",
+                params.group_id,
+                params.topic,
+                limit,
+                pq.from_time.as_ref().unwrap(),
+                records.len()
+            );
+
+            let record_responses: Vec<crate::RecordWithOffset> = if include_headers {
+                records
+            } else {
+                records
+                    .into_iter()
+                    .map(|msg| crate::RecordWithOffset {
+                        record: Record {
+                            key: msg.record.key,
+                            value: msg.record.value,
+                            headers: None,
+                        },
+                        offset: msg.offset,
+                        timestamp: msg.timestamp,
+                    })
+                    .collect()
+            };
+
+            let next_offset = app_state
+                .queue
+                .get_consumer_group_offset(&params.group_id, &params.topic)
+                .unwrap_or(0);
+            let high_water_mark = app_state.queue.get_high_water_mark(&params.topic);
+            let response = FetchResponse::new(record_responses, next_offset, high_water_mark);
+            Ok(Json(response))
+        }
+        Err(error) => {
+            error!(
+                "GET /consumer/{}/topics/{} by-time failed: {}",
+                params.group_id, params.topic, error
+            );
+
+            let error_response = ErrorResponse::from(error);
             Err((
                 error_to_status_code(&error_response.error),
                 Json(error_response),
@@ -484,20 +574,24 @@ pub async fn fetch_records_for_consumer_group(
 /// Creates the Axum router with all routes configured
 pub fn create_router(app_state: AppState) -> Router {
     Router::new()
-        .route("/topics/{topic}/records", post(produce_records))
+        .route("/topic/{topic}/record", post(produce_records))
         .route("/health", get(health_check))
         .route("/consumer/{group_id}", post(create_consumer_group))
         .route("/consumer/{group_id}", delete(leave_consumer_group))
         .route(
-            "/consumer/{group_id}/topics/{topic}",
-            get(fetch_records_for_consumer_group),
+            "/consumer/{group_id}/topic/{topic}/record/offset",
+            get(fetch_records_by_offset),
         )
         .route(
-            "/consumer/{group_id}/topics/{topic}/offset",
+            "/consumer/{group_id}/topic/{topic}/record/time",
+            get(fetch_records_by_time),
+        )
+        .route(
+            "/consumer/{group_id}/topic/{topic}/offset",
             get(get_consumer_group_offset),
         )
         .route(
-            "/consumer/{group_id}/topics/{topic}/offset",
+            "/consumer/{group_id}/topic/{topic}/offset",
             post(commit_consumer_group_offset),
         )
         .with_state(app_state)

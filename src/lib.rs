@@ -142,6 +142,25 @@ impl FlashQ {
         }
     }
 
+    pub fn poll_records_from_time(
+        &self,
+        topic: &str,
+        from_time: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
+        match self.topics.get(topic) {
+            Some(topic_log) => topic_log
+                .value()
+                .read()
+                .unwrap()
+                .get_records_from_timestamp(from_time, count)
+                .map_err(FlashQError::from),
+            None => Err(FlashQError::TopicNotFound {
+                topic: topic.to_string(),
+            }),
+        }
+    }
+
     pub fn create_consumer_group(&self, group_id: String) -> Result<(), FlashQError> {
         match self.consumer_groups.entry(group_id.clone()) {
             Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
@@ -245,6 +264,18 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.get_consumer_group_offset(group_id, topic)?;
         self.poll_records_from_offset(topic, offset, count)
+    }
+
+    pub fn poll_records_for_consumer_group_from_time(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_time: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
+        // Ensure consumer group exists and is tracked for this topic
+        let _ = self.get_consumer_group_offset(group_id, topic)?;
+        self.poll_records_from_time(topic, from_time, count)
     }
 
     pub fn get_high_water_mark(&self, topic: &str) -> u64 {

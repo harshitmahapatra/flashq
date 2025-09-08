@@ -15,11 +15,20 @@
 - Test: `cargo test` (all), `cargo test --test '*'` (integration only).
 - Bench: `cargo bench`. Quick checks: `cargo check`. Lint/format: `cargo clippy`, `cargo fmt`.
 
+### Agent Setup (Serena/Codex CLI)
+- Activate the Serena project before using memories/tools: project name is `message-queue-rs`.
+
 ## Coding Style & Naming Conventions
 - Use Rustfmt defaults; format with `cargo fmt` before committing. All lints must pass (`cargo clippy`).
 - Naming: modules/files `snake_case`; types/traits `CamelCase`; functions/vars `snake_case`; constants `SCREAMING_SNAKE_CASE`.
 - Errors: use `crate::error` types; prefer `Result<T, Error>` with context; log via `log` + `env_logger`.
 - Keep modules small and cohesive; favor trait-led design for backends and I/O.
+
+### Code & Test Style Principles
+- **Code Simplicity**: ALWAYS prefer smaller functions with descriptive names and fewer comments over long functions. Break down long functions using private helpers with descriptive names.
+- **Test Simplicity**: ALWAYS structure tests as: 1) Setup, 2) Action, 3) Expectation.
+- **Test Atomicity**: ALWAYS write tests that validate only one behavior. If more than one behavior is being validated, split into multiple tests, each testing a single behavior.
+- **Test Uniqueness**: NEVER allow two tests to validate the same behavior or logic.
 
 ## Testing Guidelines
 - Integration tests live in `tests/http/` and `tests/storage/`; name files `*_tests.rs`.

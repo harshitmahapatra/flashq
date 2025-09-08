@@ -61,6 +61,8 @@ pub enum ConsumerCommands {
         #[arg(long)]
         from_offset: Option<u64>,
         #[arg(long)]
+        from_time: Option<String>,
+        #[arg(long)]
         include_headers: Option<bool>,
     },
     #[command(subcommand)]
@@ -143,18 +145,40 @@ pub async fn handle_consumer_command(
             topic,
             max_records,
             from_offset,
+            from_time,
             include_headers,
         } => {
-            fetch_consumer_records_command(
-                client,
-                server_url,
-                &group_id,
-                &topic,
-                max_records,
-                from_offset,
-                include_headers,
-            )
-            .await;
+            // Enforce mutual exclusivity when both from_offset and from_time are supplied
+            if from_offset.is_some() && from_time.is_some() {
+                eprintln!(
+                    "Error: --from-offset and --from-time are mutually exclusive. Choose one."
+                );
+                std::process::exit(1);
+            }
+
+            if let Some(ts) = from_time.as_ref() {
+                super::client::fetch_consumer_records_by_time_command(
+                    client,
+                    server_url,
+                    &group_id,
+                    &topic,
+                    ts,
+                    max_records,
+                    include_headers,
+                )
+                .await;
+            } else {
+                super::client::fetch_consumer_records_by_offset_command(
+                    client,
+                    server_url,
+                    &group_id,
+                    &topic,
+                    from_offset,
+                    max_records,
+                    include_headers,
+                )
+                .await;
+            }
         }
         ConsumerCommands::Offset(offset_cmd) => {
             handle_offset_command(client, server_url, offset_cmd).await;

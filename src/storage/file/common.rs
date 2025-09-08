@@ -1,5 +1,5 @@
 use std::{
-    io::{BufReader, Read},
+    io::{BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
 
@@ -29,6 +29,8 @@ pub fn deserialize_record<R: Read>(
 ) -> Result<RecordWithOffset, StorageError> {
     let payload_size = read_u32(reader, "Failed to read payload size")?;
     let offset = read_u64(reader, "Failed to read offset")?;
+    // New header field: timestamp_ms (u64)
+    let _timestamp_ms = read_u64(reader, "Failed to read timestamp_ms")?;
 
     let (timestamp, timestamp_len) = read_timestamp(reader)?;
 
@@ -92,12 +94,21 @@ pub fn serialize_record(record: &Record, offset: u64) -> Result<Vec<u8>, Storage
     let timestamp_bytes = create_timestamp_bytes();
     let timestamp_len = timestamp_bytes.len() as u32;
     let payload_size = json_payload.len() as u32 + 4 + timestamp_len;
+    // Compute timestamp_ms from timestamp string for header
+    let ts_str = String::from_utf8(timestamp_bytes.clone()).map_err(|e| {
+        StorageError::from_serialization_error(e, "Failed to parse timestamp bytes")
+    })?;
+    let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(&ts_str)
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0);
+    let timestamp_ms = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
 
     Ok(assemble_record_buffer(
         payload_size,
         offset,
+        timestamp_ms,
         timestamp_len,
-        &timestamp_bytes,
+        ts_str.as_bytes(),
         &json_payload,
     ))
 }
@@ -117,6 +128,12 @@ pub fn serialize_record_into_buffer(
     // Reserve header + timestamp upfront
     buf.extend_from_slice(&0u32.to_be_bytes()); // payload size placeholder
     buf.extend_from_slice(&offset.to_be_bytes());
+    // New: write timestamp_ms into header
+    let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0);
+    let ts_ms = if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 };
+    buf.extend_from_slice(&ts_ms.to_be_bytes());
     buf.extend_from_slice(&ts_len_u32.to_be_bytes());
     buf.extend_from_slice(ts_bytes);
 
@@ -144,17 +161,46 @@ fn create_timestamp_bytes() -> Vec<u8> {
 fn assemble_record_buffer(
     payload_size: u32,
     offset: u64,
+    timestamp_ms: u64,
     timestamp_len: u32,
     timestamp_bytes: &[u8],
     json_payload: &[u8],
 ) -> Vec<u8> {
-    let mut buffer = Vec::with_capacity(4 + 8 + 4 + timestamp_bytes.len() + json_payload.len());
+    // [4B payload][8B offset][8B timestamp_ms][4B ts_len][ts][json]
+    let mut buffer = Vec::with_capacity(4 + 8 + 8 + 4 + timestamp_bytes.len() + json_payload.len());
     buffer.extend_from_slice(&payload_size.to_be_bytes());
     buffer.extend_from_slice(&offset.to_be_bytes());
+    buffer.extend_from_slice(&timestamp_ms.to_be_bytes());
     buffer.extend_from_slice(&timestamp_len.to_be_bytes());
     buffer.extend_from_slice(timestamp_bytes);
     buffer.extend_from_slice(json_payload);
     buffer
+}
+
+// Fast header peek + skip helpers for time-based scanning
+pub fn read_record_header<R: Read + Seek>(
+    reader: &mut BufReader<R>,
+) -> Result<(u32, u64, u64, u32, u64), StorageError> {
+    let record_start = reader
+        .stream_position()
+        .map_err(|e| StorageError::from_io_error(e, "Failed to get record start pos"))?;
+    let payload_size = read_u32(reader, "Failed to read payload size")?;
+    let offset = read_u64(reader, "Failed to read offset")?;
+    let ts_ms = read_u64(reader, "Failed to read timestamp_ms")?;
+    let ts_len = read_u32(reader, "Failed to read timestamp length")?;
+    Ok((payload_size, offset, ts_ms, ts_len, record_start))
+}
+
+pub fn skip_record_after_header<R: Read + Seek>(
+    reader: &mut BufReader<R>,
+    payload_size: u32,
+) -> Result<(), StorageError> {
+    // After peek, we are positioned just after ts_len; remaining = ts bytes + json
+    let to_skip = (payload_size - 4) as i64;
+    reader
+        .seek(SeekFrom::Current(to_skip))
+        .map_err(|e| StorageError::from_io_error(e, "Failed to skip record"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -167,6 +213,7 @@ mod tests {
     fn test_assemble_record_buffer_structure() {
         let payload_size = 100u32;
         let offset = 12345u64;
+        let timestamp_ms = 1_700_000_000_000u64;
         let timestamp_len = 20u32;
         let timestamp_bytes = vec![0; timestamp_len as usize];
         let json_payload = vec![1; 76];
@@ -174,6 +221,7 @@ mod tests {
         let buffer = assemble_record_buffer(
             payload_size,
             offset,
+            timestamp_ms,
             timestamp_len,
             &timestamp_bytes,
             &json_payload,
@@ -182,6 +230,7 @@ mod tests {
         let mut expected_buffer = Vec::new();
         expected_buffer.extend_from_slice(&payload_size.to_be_bytes());
         expected_buffer.extend_from_slice(&offset.to_be_bytes());
+        expected_buffer.extend_from_slice(&timestamp_ms.to_be_bytes());
         expected_buffer.extend_from_slice(&timestamp_len.to_be_bytes());
         expected_buffer.extend_from_slice(&timestamp_bytes);
         expected_buffer.extend_from_slice(&json_payload);

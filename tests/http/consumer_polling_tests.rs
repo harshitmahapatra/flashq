@@ -80,7 +80,7 @@ async fn test_consumer_group_from_offset_fetching() {
     }
 
     let response = helper
-        .fetch_records_for_consumer_group_with_options(group_id, topic, Some(3), Some(3))
+        .fetch_records_for_consumer_group_by_offset(group_id, topic, Some(3), Some(3))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -91,7 +91,7 @@ async fn test_consumer_group_from_offset_fetching() {
     assert_eq!(fetch_response.records[2].offset, 5);
 
     let response = helper
-        .fetch_records_for_consumer_group_with_options(group_id, topic, Some(10), Some(5))
+        .fetch_records_for_consumer_group_by_offset(group_id, topic, Some(10), Some(5))
         .await
         .unwrap();
     assert_eq!(response.status(), 200);

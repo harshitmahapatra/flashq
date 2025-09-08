@@ -26,6 +26,7 @@ pub struct ProduceResponse {
 #[derive(Serialize, Deserialize)]
 pub struct PollQuery {
     pub from_offset: Option<u64>,
+    pub from_time: Option<String>,
     pub max_records: Option<usize>,
     pub include_headers: Option<bool>,
 }
@@ -335,6 +336,28 @@ pub fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
         }
     }
 
+    // from_offset and from_time are mutually exclusive
+    if query.from_offset.is_some() && query.from_time.is_some() {
+        return Err(ErrorResponse::invalid_parameter(
+            "from_offset,from_time",
+            "from_offset and from_time are mutually exclusive",
+        ));
+    }
+
+    // If from_time provided, it must be a valid RFC3339 timestamp
+    if let Some(ts) = &query.from_time {
+        if let Err(e) = chrono::DateTime::parse_from_rfc3339(ts) {
+            return Err(ErrorResponse::with_details(
+                "validation_error",
+                "from_time must be a valid RFC3339 timestamp",
+                serde_json::json!({
+                    "field": "from_time",
+                    "error": e.to_string()
+                }),
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -588,6 +611,7 @@ mod tests {
         let query = PollQuery {
             max_records: Some(100),
             from_offset: None,
+            from_time: None,
             include_headers: None,
         };
         assert!(validate_poll_query(&query).is_ok());
@@ -598,6 +622,29 @@ mod tests {
         let query = PollQuery {
             max_records: Some(limits::MAX_POLL_RECORDS + 1),
             from_offset: None,
+            from_time: None,
+            include_headers: None,
+        };
+        assert!(validate_poll_query(&query).is_err());
+    }
+
+    #[test]
+    fn test_validate_poll_query_mutually_exclusive() {
+        let query = PollQuery {
+            max_records: Some(10),
+            from_offset: Some(0),
+            from_time: Some("2025-01-01T00:00:00Z".to_string()),
+            include_headers: None,
+        };
+        assert!(validate_poll_query(&query).is_err());
+    }
+
+    #[test]
+    fn test_validate_poll_query_invalid_from_time() {
+        let query = PollQuery {
+            max_records: Some(10),
+            from_offset: None,
+            from_time: Some("not-a-time".to_string()),
             include_headers: None,
         };
         assert!(validate_poll_query(&query).is_err());

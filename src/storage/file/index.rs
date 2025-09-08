@@ -56,6 +56,30 @@ impl SparseIndex {
         }
     }
 
+    /// Find the file position of the closest index entry whose position is <= target_pos.
+    /// This allows rounding down an approximate byte position to a known offset index anchor.
+    /// Returns Some(0) if the index is empty or the target precedes the first entry.
+    pub fn find_floor_position_for_position(&self, target_pos: u32) -> Option<u32> {
+        if self.entries.is_empty() {
+            return Some(0);
+        }
+
+        // Entries are appended in offset order, which is monotonic with file position.
+        match self
+            .entries
+            .binary_search_by_key(&target_pos, |entry| entry.position)
+        {
+            Ok(idx) => Some(self.entries[idx].position),
+            Err(idx) => {
+                if idx == 0 {
+                    Some(0)
+                } else {
+                    Some(self.entries[idx - 1].position)
+                }
+            }
+        }
+    }
+
     pub fn serialize_entry(&self, entry: &IndexEntry, base_offset: u64) -> Vec<u8> {
         let relative_offset = (entry.offset - base_offset) as u32;
         let mut buf = Vec::with_capacity(8);
@@ -86,16 +110,30 @@ impl SparseIndex {
     }
 
     /// Read index from file and populate the sparse index
+    /// An optional `max_entries` bound can be provided to prevent excessive allocations
+    /// in case of a corrupted or unexpectedly large file. If the bound is exceeded,
+    /// returns a DataCorruption error.
     pub fn read_from_file<R: Read>(
         &mut self,
         reader: &mut BufReader<R>,
         base_offset: u64,
+        max_entries: Option<usize>,
     ) -> Result<(), StorageError> {
         self.entries.clear();
+
+        let max_allowed = max_entries.unwrap_or(usize::MAX);
+        let mut count: usize = 0;
 
         let mut buffer = [0u8; 8]; // 4 bytes offset + 4 bytes position
 
         while reader.read_exact(&mut buffer).is_ok() {
+            if count >= max_allowed {
+                return Err(StorageError::DataCorruption {
+                    context: "offset index read".to_string(),
+                    details: format!("index entry count exceeded limit: {max_allowed}"),
+                });
+            }
+
             let relative_offset = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
             let position = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
 
@@ -104,6 +142,7 @@ impl SparseIndex {
                 offset: absolute_offset,
                 position,
             });
+            count += 1;
         }
 
         Ok(())
@@ -263,10 +302,74 @@ mod tests {
 
         let mut reader = BufReader::new(Cursor::new(buffer));
         let mut new_index = SparseIndex::new();
-        new_index.read_from_file(&mut reader, base_offset).unwrap();
+        new_index
+            .read_from_file(&mut reader, base_offset, None)
+            .unwrap();
 
         assert_eq!(new_index.entries.len(), 2);
         assert_eq!(new_index.entries[0], entry1);
         assert_eq!(new_index.entries[1], entry2);
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_empty() {
+        let index = SparseIndex::new();
+        assert_eq!(index.find_floor_position_for_position(123), Some(0));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_exact() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        assert_eq!(index.find_floor_position_for_position(200), Some(200));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_between() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        index.add_entry(IndexEntry {
+            offset: 30,
+            position: 300,
+        });
+        assert_eq!(index.find_floor_position_for_position(250), Some(200));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_before_first() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        assert_eq!(index.find_floor_position_for_position(50), Some(0));
+    }
+
+    #[test]
+    fn test_find_floor_position_for_position_after_last() {
+        let mut index = SparseIndex::new();
+        index.add_entry(IndexEntry {
+            offset: 10,
+            position: 100,
+        });
+        index.add_entry(IndexEntry {
+            offset: 20,
+            position: 200,
+        });
+        assert_eq!(index.find_floor_position_for_position(9999), Some(200));
     }
 }

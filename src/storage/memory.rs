@@ -109,6 +109,39 @@ impl TopicLog for InMemoryTopicLog {
         Ok(limited.to_vec())
     }
 
+    fn get_records_from_timestamp(
+        &self,
+        ts_rfc3339: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        // Parse target timestamp; if parsing fails, return DataCorruption for symmetry with file backend
+        let ts_target = chrono::DateTime::parse_from_rfc3339(ts_rfc3339).map_err(|e| {
+            StorageError::DataCorruption {
+                context: "parse from_time".to_string(),
+                details: e.to_string(),
+            }
+        })?;
+
+        let mut out: Vec<RecordWithOffset> = Vec::new();
+        let max = count.unwrap_or(usize::MAX);
+        if max == 0 {
+            return Ok(out);
+        }
+
+        for rwo in &self.records {
+            if let Ok(ts_rec) = chrono::DateTime::parse_from_rfc3339(&rwo.timestamp) {
+                if ts_rec >= ts_target {
+                    out.push(rwo.clone());
+                    if out.len() >= max {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
     fn len(&self) -> usize {
         self.records.len()
     }

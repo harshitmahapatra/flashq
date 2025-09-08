@@ -43,7 +43,7 @@ pub async fn handle_batch_post(
         Ok(json_content) => match serde_json::from_str::<Vec<Record>>(&json_content) {
             Ok(records) => {
                 let request = ProduceRequest { records };
-                let url = format!("{server_url}/topics/{topic}/records");
+                let url = format!("{server_url}/topic/{topic}/record");
 
                 match client.post(&url).json(&request).send().await {
                     Ok(response) => {
@@ -100,7 +100,7 @@ pub async fn post_records(
         records: vec![record],
     };
 
-    let url = format!("{server_url}/topics/{topic}/records");
+    let url = format!("{server_url}/topic/{topic}/record");
 
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
@@ -164,18 +164,20 @@ pub async fn leave_consumer_group_command(
     }
 }
 
-pub async fn fetch_consumer_records_command(
+// Deprecated fetch via combined endpoint removed; use explicit by-offset or by-time commands instead.
+
+/// Fetch records using the new by-offset endpoint.
+pub async fn fetch_consumer_records_by_offset_command(
     client: &reqwest::Client,
     server_url: &str,
     group_id: &str,
     topic: &str,
-    max_records: Option<usize>,
     from_offset: Option<u64>,
+    max_records: Option<usize>,
     include_headers: Option<bool>,
 ) {
-    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topics/{topic}");
+    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topic/{topic}/record/offset");
     let mut query_params = Vec::new();
-
     if let Some(c) = max_records {
         query_params.push(format!("max_records={c}"));
     }
@@ -185,7 +187,6 @@ pub async fn fetch_consumer_records_command(
     if let Some(headers) = include_headers {
         query_params.push(format!("include_headers={headers}"));
     }
-
     if !query_params.is_empty() {
         fetch_url.push_str(&format!("?{}", query_params.join("&")));
     }
@@ -199,11 +200,9 @@ pub async fn fetch_consumer_records_command(
                         println!(
                             "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
                         );
-
                         for record in fetch_response.records {
                             print_record(&record);
                         }
-
                         println!("Next offset: {}", fetch_response.next_offset);
                         if let Some(lag) = fetch_response.lag {
                             println!("Consumer lag: {lag}");
@@ -214,7 +213,63 @@ pub async fn fetch_consumer_records_command(
             } else {
                 handle_error_response(
                     response,
-                    &format!("fetch records for consumer group '{group_id}' from topic '{topic}'"),
+                    &format!(
+                        "fetch (by-offset) for consumer group '{group_id}' from topic '{topic}'"
+                    ),
+                )
+                .await;
+            }
+        }
+        Err(e) => println!("Failed to connect to server: {e}"),
+    }
+}
+
+/// Fetch records using the new by-time endpoint.
+pub async fn fetch_consumer_records_by_time_command(
+    client: &reqwest::Client,
+    server_url: &str,
+    group_id: &str,
+    topic: &str,
+    from_time: &str,
+    max_records: Option<usize>,
+    include_headers: Option<bool>,
+) {
+    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topic/{topic}/record/time");
+    let mut query_params = Vec::new();
+    query_params.push(format!("from_time={}", urlencoding::encode(from_time)));
+    if let Some(c) = max_records {
+        query_params.push(format!("max_records={c}"));
+    }
+    if let Some(headers) = include_headers {
+        query_params.push(format!("include_headers={headers}"));
+    }
+    fetch_url.push_str(&format!("?{}", query_params.join("&")));
+
+    match client.get(&fetch_url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<FetchResponse>().await {
+                    Ok(fetch_response) => {
+                        let record_count = fetch_response.records.len();
+                        println!(
+                            "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
+                        );
+                        for record in fetch_response.records {
+                            print_record(&record);
+                        }
+                        println!("Next offset: {}", fetch_response.next_offset);
+                        if let Some(lag) = fetch_response.lag {
+                            println!("Consumer lag: {lag}");
+                        }
+                    }
+                    Err(e) => println!("Failed to parse response: {e}"),
+                }
+            } else {
+                handle_error_response(
+                    response,
+                    &format!(
+                        "fetch (by-time) for consumer group '{group_id}' from topic '{topic}'"
+                    ),
                 )
                 .await;
             }
@@ -230,7 +285,7 @@ pub async fn commit_offset_command(
     topic: &str,
     offset: u64,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}/topics/{topic}/offset");
+    let url = format!("{server_url}/consumer/{group_id}/topic/{topic}/offset");
     let request = UpdateConsumerGroupOffsetRequest { offset };
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
@@ -256,7 +311,7 @@ pub async fn get_offset_command(
     group_id: &str,
     topic: &str,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}/topics/{topic}/offset");
+    let url = format!("{server_url}/consumer/{group_id}/topic/{topic}/offset");
     match client.get(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {

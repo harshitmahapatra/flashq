@@ -404,7 +404,7 @@ async fn test_record_structure_edge_cases() {
     // Test minimal record using new batch format
     let response = helper
         .client
-        .post(format!("{}/topics/{}/records", helper.base_url, topic))
+        .post(format!("{}/topic/{}/record", helper.base_url, topic))
         .json(&serde_json::json!({
             "records": [{
                 "value": "Minimal record"
@@ -418,7 +418,7 @@ async fn test_record_structure_edge_cases() {
     // Test record with explicit nulls using new batch format
     let response = helper
         .client
-        .post(format!("{}/topics/{}/records", helper.base_url, topic))
+        .post(format!("{}/topic/{}/record", helper.base_url, topic))
         .json(&serde_json::json!({
             "records": [{
                 "key": null,

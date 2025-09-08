@@ -6,17 +6,17 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/topics/{topic}/records` | Post records to topic |
-| `GET` | `/topics/{topic}/records` | Poll records from topic |
-| `POST` | `/consumer/{group_id}` | Create consumer group |
-| `DELETE` | `/consumer/{group_id}` | Delete consumer group |
-| `GET/POST` | `/consumer/{group_id}/topics/{topic}/offset` | Get/set consumer group offset |
-| `GET` | `/consumer/{group_id}/topics/{topic}` | Poll records for consumer group |
+| `POST` | `/topic/{topic}/record` | Post records to topic |
+| `POST` | `/consumer/{group-id}` | Create consumer group |
+| `DELETE` | `/consumer/{group-id}` | Delete consumer group |
+| `GET` | `/consumer/{group-id}/topic/{topic}/record/offset` | Poll records by offset |
+| `GET` | `/consumer/{group-id}/topic/{topic}/record/time` | Poll records by time |
+| `GET/POST` | `/consumer/{group-id}/topic/{topic}/offset` | Get/set consumer group offset |
 | `GET` | `/health` | Health check |
 
 ## POST Records
 
-**Endpoint:** `POST /topics/{topic}/records`
+**Endpoint:** `POST /topic/{topic}/record`
 
 **Request:**
 ```json
@@ -48,13 +48,41 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 }
 ```
 
-## Poll Records
+## Poll Records by Offset
 
-**Endpoint:** `GET /topics/{topic}/records`
+**Endpoint:** `GET /consumer/{group-id}/topic/{topic}/record/offset`
 
 **Query Parameters:**
-- `max_records`: Maximum records to return
-- `from_offset`: Start from specific offset (replay)
+- `max_records`: Maximum records to return (default: 100, max: 10000)
+- `from_offset`: Start from specific offset (overrides current offset)
+- `include_headers`: Include record headers (default: true)
+
+**Response (200):**
+```json
+{
+  "records": [
+    {
+      "key": "user123",
+      "value": "Hello, World!",
+      "headers": {"priority": "high"},
+      "offset": 0,
+      "timestamp": "2024-01-15T10:30:45Z"
+    }
+  ],
+  "next_offset": 1,
+  "high_water_mark": 5,
+  "lag": 4
+}
+```
+
+## Poll Records by Time
+
+**Endpoint:** `GET /consumer/{group-id}/topic/{topic}/record/time`
+
+**Query Parameters:**
+- `from_time`: RFC3339 timestamp to start from (required) (e.g., `2025-01-01T00:00:00Z`)
+- `max_records`: Maximum records to return (default: 100, max: 10000)
+- `include_headers`: Include record headers (default: true)
 
 **Response (200):**
 ```json
@@ -76,11 +104,12 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 
 ## Consumer Groups
 
-**Create:** `POST /consumer/{group_id}` with `{"group_id": "my-group"}`  
-**Delete:** `DELETE /consumer/{group_id}` → 204 No Content  
-**Get Offset:** `GET /consumer/{group_id}/topics/{topic}/offset`  
-**Set Offset:** `POST /consumer/{group_id}/topics/{topic}/offset` with `{"offset": 10}`  
-**Poll:** `GET /consumer/{group_id}/topics/{topic}?max_records=5&from_offset=10`
+**Create:** `POST /consumer/{group-id}` → `{"group_id": "analytics-processors"}`  
+**Delete:** `DELETE /consumer/{group-id}` → 204 No Content  
+**Get Offset:** `GET /consumer/{group-id}/topic/{topic}/offset`  
+**Set Offset:** `POST /consumer/{group-id}/topic/{topic}/offset` with `{"offset": 10, "metadata": "Processed batch #42"}`  
+**Poll by Offset:** `GET /consumer/{group-id}/topic/{topic}/record/offset?max_records=5&from_offset=10`  
+**Poll by Time:** `GET /consumer/{group-id}/topic/{topic}/record/time?from_time=2025-01-01T00:00:00Z&max_records=5`
 
 ## Health Check
 

@@ -327,3 +327,107 @@ fn test_serialization_error_conversion() {
         Ok(_) => panic!("Expected JSON parsing to fail"),
     }
 }
+
+#[test]
+fn test_time_index_oversize_triggers_rebuild() {
+    // Setup: create topic and write a few records
+    let config = TestConfig::new("time_index_oversize");
+    let topic = &config.topic_name;
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .expect("create file topic log");
+
+    let _ = log
+        .append(Record::new(None, "a".to_string(), None))
+        .unwrap();
+    let _ = log
+        .append(Record::new(None, "b".to_string(), None))
+        .unwrap();
+    log.sync().unwrap();
+
+    // Craft an oversized time index file (> 1_000_000 entries) so bounded read fails
+    let time_index_path = config
+        .temp_dir_path()
+        .join(topic)
+        .join("00000000000000000000.timeindex");
+    let oversized_entries = 1_000_001usize; // reader bound is 1_000_000
+    let bytes = vec![0u8; oversized_entries * 12]; // 12 bytes per entry
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&time_index_path)
+        .expect("open time index for oversize write");
+    f.write_all(&bytes).expect("write oversize time index");
+    f.sync_all().ok();
+
+    // Reopen the topic; recovery should detect the error and rebuild from log
+    drop(log);
+    let log2 = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .expect("reopen after oversize time index");
+
+    // Verify time-based read still works after rebuild
+    let all = log2.get_records_from_offset(0, None).unwrap();
+    assert!(all.len() >= 2);
+    let ts0 = all[0].timestamp.clone();
+    let from_ts = log2.get_records_from_timestamp(&ts0, None).unwrap();
+    assert!(!from_ts.is_empty());
+}
+
+#[test]
+fn test_offset_index_oversize_triggers_rebuild() {
+    // Setup: create topic and write a record to generate segment files
+    let config = TestConfig::new("offset_index_oversize");
+    let topic = &config.topic_name;
+    let mut log = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .expect("create file topic log");
+
+    let _ = log
+        .append(Record::new(None, "x".to_string(), None))
+        .unwrap();
+    log.sync().unwrap();
+
+    // Craft an oversized offset index file (> 1_000_000 entries) so bounded read fails
+    let index_path = config
+        .temp_dir_path()
+        .join(topic)
+        .join("00000000000000000000.index");
+    let oversized_entries = 1_000_001usize; // reader bound is 1_000_000
+    let bytes = vec![0u8; oversized_entries * 8]; // 8 bytes per entry
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&index_path)
+        .expect("open offset index for oversize write");
+    f.write_all(&bytes).expect("write oversize offset index");
+    f.sync_all().ok();
+
+    // Reopen the topic; offset index read error should trigger index rebuild and succeed
+    drop(log);
+    let log2 = FileTopicLog::new(
+        topic,
+        SyncMode::Immediate,
+        config.temp_dir_path(),
+        config.segment_size,
+    )
+    .expect("reopen after oversize offset index");
+
+    // Verify offset-based read still works after rebuild
+    let recs = log2.get_records_from_offset(0, None).unwrap();
+    assert!(!recs.is_empty());
+}

@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, io::BufReader};
 
 use crate::RecordWithOffset;
 use crate::error::StorageError;
-use crate::storage::file::common::deserialize_record;
+use crate::storage::file::common::{
+    deserialize_record, read_record_header, skip_record_after_header,
+};
 use crate::storage::file::{IndexingConfig, LogSegment, SyncMode};
 
 use log::warn;
@@ -132,6 +134,117 @@ impl SegmentManager {
         }
 
         Ok(results)
+    }
+
+    /// Streaming read starting from the first record whose timestamp is >= `ts_rfc3339`.
+    /// Uses each segment's sparse time index to compute a near position and then streams forward.
+    pub fn read_records_from_timestamp(
+        &self,
+        ts_rfc3339: &str,
+        count: Option<usize>,
+    ) -> Result<Vec<RecordWithOffset>, StorageError> {
+        let max_records = count.unwrap_or(usize::MAX);
+        if max_records == 0 {
+            return Ok(Vec::new());
+        }
+
+        let target_ts_ms = Self::parse_target_ts_ms(ts_rfc3339)?;
+        let segments_sorted_by_offset = self.get_segments_sorted_by_offset();
+        let mut results: Vec<RecordWithOffset> = Vec::new();
+
+        for segment in &segments_sorted_by_offset {
+            if results.len() >= max_records {
+                break;
+            }
+
+            // Prune segments that cannot contain the target (max timestamp < target)
+            if let Some(max_ts) = segment.max_ts_ms {
+                if max_ts < target_ts_ms {
+                    continue;
+                }
+            }
+
+            let start_pos = self.compute_time_seek_start_pos(segment, target_ts_ms);
+
+            let mut reader = match create_segment_reader(segment, start_pos) {
+                Ok(r) => r,
+                Err(e) => {
+                    log_read_error(&e);
+                    continue;
+                }
+            };
+
+            self.stream_records_from_pos(&mut reader, target_ts_ms, max_records, &mut results);
+        }
+
+        Ok(results)
+    }
+
+    #[inline]
+    fn parse_target_ts_ms(ts_rfc3339: &str) -> Result<u64, StorageError> {
+        let ts_ms_i64 = chrono::DateTime::parse_from_rfc3339(ts_rfc3339)
+            .map_err(|e| StorageError::DataCorruption {
+                context: "parse from_time".to_string(),
+                details: e.to_string(),
+            })?
+            .timestamp_millis();
+        Ok(if ts_ms_i64 < 0 { 0 } else { ts_ms_i64 as u64 })
+    }
+
+    #[inline]
+    fn compute_time_seek_start_pos(&self, segment: &LogSegment, target_ts_ms: u64) -> u64 {
+        let pos_time = segment
+            .find_position_for_timestamp(target_ts_ms)
+            .unwrap_or(0) as u64;
+        let backseek_cfg = self.indexing_config.time_seek_back_bytes as u64;
+        let backseek = if backseek_cfg == 0 {
+            self.indexing_config.index_interval_bytes as u64
+        } else {
+            backseek_cfg
+        };
+        let back = std::cmp::min(pos_time, backseek);
+        let start_guess = pos_time.saturating_sub(back);
+        let pos_anchor = segment
+            .find_floor_position_for_file_position(start_guess as u32)
+            .unwrap_or(0) as u64;
+        std::cmp::min(start_guess, pos_anchor)
+    }
+
+    #[inline]
+    fn stream_records_from_pos(
+        &self,
+        reader: &mut BufReader<File>,
+        target_ts_ms: u64,
+        max_records: usize,
+        results: &mut Vec<RecordWithOffset>,
+    ) {
+        while results.len() < max_records {
+            match read_record_header(reader) {
+                Ok((payload_size, _off, ts_ms, _ts_len, record_start)) => {
+                    if ts_ms < target_ts_ms {
+                        // Fast skip without JSON parsing
+                        if let Err(e) = skip_record_after_header(reader, payload_size) {
+                            log_read_error(&e);
+                            break;
+                        }
+                        continue;
+                    }
+                    // Need this record fully: rewind and deserialize once
+                    if let Err(e) = reader.seek(SeekFrom::Start(record_start)) {
+                        log_read_error(&StorageError::from_io_error(
+                            e,
+                            "Failed to seek to record start",
+                        ));
+                        break;
+                    }
+                    match deserialize_record(reader) {
+                        Ok(r) => results.push(r),
+                        Err(_) => break,
+                    }
+                }
+                Err(_) => break,
+            }
+        }
     }
 
     fn get_segments_sorted_by_offset(&self) -> Vec<&LogSegment> {
@@ -350,4 +463,82 @@ fn log_read_error(storage_error: &StorageError) {
 fn is_expected_end_of_file_error(error_source: &crate::error::StorageErrorSource) -> bool {
     let error_message = error_source.to_string();
     error_message.contains("UnexpectedEof") || error_message.contains("failed to fill whole buffer")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Record;
+    use std::fs;
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let mut dir = PathBuf::from("target/test_data");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        dir.push(format!("{name}_{nanos}"));
+        dir
+    }
+
+    #[test]
+    fn test_parse_target_ts_ms() {
+        assert_eq!(
+            SegmentManager::parse_target_ts_ms("1970-01-01T00:00:00Z").unwrap(),
+            0
+        );
+        assert!(SegmentManager::parse_target_ts_ms("not-a-time").is_err());
+    }
+
+    #[test]
+    fn test_compute_time_seek_start_pos_produces_conservative_start() {
+        let base = unique_test_dir("segmgr_compute_start");
+        fs::create_dir_all(&base).unwrap();
+
+        let log_path = base.join("00000000000000000000.log");
+        let index_path = base.join("00000000000000000000.index");
+
+        // Segment index config: frequent entries to stabilize anchors
+        let seg_idx_cfg = IndexingConfig {
+            index_interval_bytes: 64,
+            index_interval_records: 1,
+            time_seek_back_bytes: 64,
+        };
+        let mut segment = LogSegment::new(
+            0,
+            log_path,
+            index_path,
+            SyncMode::Immediate,
+            seg_idx_cfg.clone(),
+        )
+        .unwrap();
+
+        // Append a batch of records to generate some index/time entries
+        let recs: Vec<Record> = (0..20)
+            .map(|i| Record::new(None, format!("v{i}"), None))
+            .collect();
+        let _last = segment.append_records_bulk(&recs, 0).unwrap();
+
+        // Extract the timestamp of the first record
+        use crate::storage::file::common::read_record_header;
+        let mut reader = super::create_segment_reader(&segment, 0).unwrap();
+        let (_payload, _off, target_ts_ms, _tslen, _start) =
+            read_record_header(&mut reader).unwrap();
+
+        // Manager config: set a small backseek to test logic
+        let mgr_idx_cfg = IndexingConfig {
+            index_interval_bytes: 128,
+            index_interval_records: 100,
+            time_seek_back_bytes: 32,
+        };
+        let mgr = SegmentManager::new(base.clone(), 1024 * 1024, SyncMode::Immediate, mgr_idx_cfg);
+
+        let pos_time = segment
+            .find_position_for_timestamp(target_ts_ms)
+            .unwrap_or(0) as u64;
+        let start_pos = mgr.compute_time_seek_start_pos(&segment, target_ts_ms);
+
+        // start_pos should never be after pos_time
+        assert!(start_pos <= pos_time);
+    }
 }

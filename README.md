@@ -8,6 +8,7 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 
 - Topic-based messaging with keys and headers
 - Consumer groups with offset management  
+- Time-based polling for historical data queries
 - Configurable batch operations for high-throughput processing
 - HTTP REST API with JSON
 - Thread-safe concurrent access
