@@ -1,7 +1,7 @@
 //! HTTP producer client functions for FlashQ
 
-use super::common::*;
 use crate::Record;
+use crate::http::common::*;
 use std::collections::HashMap;
 
 // =============================================================================
@@ -35,7 +35,7 @@ pub async fn handle_batch_post(
                                 Err(e) => println!("Failed to parse response: {e}"),
                             }
                         } else {
-                            super::error::handle_error_response(
+                            crate::http::error::handle_error_response(
                                 response,
                                 &format!("post batch to topic '{topic}'"),
                             )
@@ -90,8 +90,11 @@ pub async fn post_records(
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                super::error::handle_error_response(response, &format!("post to topic '{topic}'"))
-                    .await;
+                crate::http::error::handle_error_response(
+                    response,
+                    &format!("post to topic '{topic}'"),
+                )
+                .await;
             }
         }
         Err(e) => println!("Failed to connect to broker: {e}"),

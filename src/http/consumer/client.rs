@@ -1,6 +1,6 @@
 //! HTTP consumer client functions for FlashQ
 
-use super::common::*;
+use crate::http::common::*;
 
 // =============================================================================
 // CONSUMER GROUP COMMANDS
@@ -17,7 +17,7 @@ pub async fn create_consumer_group_command(
             if response.status().is_success() {
                 println!("Created consumer group '{group_id}'");
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!("create consumer group '{group_id}'"),
                 )
@@ -39,7 +39,7 @@ pub async fn leave_consumer_group_command(
             if response.status().is_success() {
                 println!("Left consumer group '{group_id}'");
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!("leave consumer group '{group_id}'"),
                 )
@@ -85,7 +85,7 @@ pub async fn fetch_consumer_records_by_offset_command(
                             "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
                         );
                         for record in fetch_response.records {
-                            super::common::print_record(&record);
+                            crate::http::common::print_record(&record);
                         }
                         println!("Next offset: {}", fetch_response.next_offset);
                         if let Some(lag) = fetch_response.lag {
@@ -95,7 +95,7 @@ pub async fn fetch_consumer_records_by_offset_command(
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!(
                         "fetch (by-offset) for consumer group '{group_id}' from topic '{topic}'"
@@ -139,7 +139,7 @@ pub async fn fetch_consumer_records_by_time_command(
                             "Got {record_count} records for consumer group '{group_id}' from topic '{topic}'"
                         );
                         for record in fetch_response.records {
-                            super::common::print_record(&record);
+                            crate::http::common::print_record(&record);
                         }
                         println!("Next offset: {}", fetch_response.next_offset);
                         if let Some(lag) = fetch_response.lag {
@@ -149,7 +149,7 @@ pub async fn fetch_consumer_records_by_time_command(
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!(
                         "fetch (by-time) for consumer group '{group_id}' from topic '{topic}'"
@@ -178,7 +178,7 @@ pub async fn commit_offset_command(
                     "Committed offset {offset} for consumer group '{group_id}' and topic '{topic}'"
                 );
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!("commit offset for consumer group '{group_id}' and topic '{topic}'"),
                 )
@@ -209,7 +209,7 @@ pub async fn get_offset_command(
                     Err(e) => println!("Failed to parse response: {e}"),
                 }
             } else {
-                super::error::handle_error_response(
+                crate::http::error::handle_error_response(
                     response,
                     &format!("get offset for consumer group '{group_id}' and topic '{topic}'"),
                 )

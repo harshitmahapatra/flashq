@@ -4,7 +4,7 @@
 //! All core client and CLI logic is implemented in src/http/ modules.
 
 use clap::Parser;
-use flashq::http::cli::{Cli, handle_cli_command};
+use flashq::http::combined_cli::{Cli, handle_cli_command};
 
 #[tokio::main]
 async fn main() {

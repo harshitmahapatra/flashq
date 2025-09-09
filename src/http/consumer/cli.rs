@@ -1,49 +1,11 @@
-//! CLI interface implementation for FlashQ HTTP client
+//! Consumer CLI interface implementation
 
-use super::{common::parse_headers, consumer::*, metadata::*, producer::*};
-use clap::{Parser, Subcommand};
+use super::client::*;
+use clap::Subcommand;
 
 // =============================================================================
-// CLI CONFIGURATION STRUCTS
+// CONSUMER CLI COMMANDS
 // =============================================================================
-
-#[derive(Parser)]
-#[command(name = "client")]
-#[command(about = "FlashQ Client")]
-#[command(version)]
-pub struct Cli {
-    #[arg(short, long, default_value = "8080")]
-    pub port: u16,
-
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    Health,
-
-    #[command(subcommand)]
-    Producer(ProducerCommands),
-
-    #[command(subcommand)]
-    Consumer(ConsumerCommands),
-}
-
-#[derive(Subcommand)]
-pub enum ProducerCommands {
-    Records {
-        topic: String,
-        #[arg(required_unless_present = "batch")]
-        message: Option<String>,
-        #[arg(short, long)]
-        key: Option<String>,
-        #[arg(long, value_name = "KEY=VALUE", action = clap::ArgAction::Append)]
-        header: Option<Vec<String>>,
-        #[arg(short, long)]
-        batch: Option<String>,
-    },
-}
 
 #[derive(Subcommand)]
 pub enum ConsumerCommands {
@@ -85,48 +47,8 @@ pub enum OffsetCommands {
 }
 
 // =============================================================================
-// COMMAND DISPATCHERS
+// CONSUMER COMMAND HANDLERS
 // =============================================================================
-
-pub async fn handle_cli_command(client: &reqwest::Client, broker_url: &str, command: Commands) {
-    match command {
-        Commands::Health => {
-            handle_health_command(client, broker_url).await;
-        }
-        Commands::Producer(producer_cmd) => {
-            handle_producer_command(client, broker_url, producer_cmd).await;
-        }
-        Commands::Consumer(consumer_cmd) => {
-            handle_consumer_command(client, broker_url, consumer_cmd).await;
-        }
-    }
-}
-
-pub async fn handle_producer_command(
-    client: &reqwest::Client,
-    broker_url: &str,
-    producer_cmd: ProducerCommands,
-) {
-    match producer_cmd {
-        ProducerCommands::Records {
-            topic,
-            message,
-            key,
-            header,
-            batch,
-        } => {
-            if let Some(batch_file) = batch {
-                handle_batch_post(client, broker_url, &topic, &batch_file).await;
-            } else if let Some(message) = message {
-                let headers = parse_headers(header);
-                post_records(client, broker_url, &topic, key, &message, headers).await;
-            } else {
-                println!("Error: Either provide a message or use --batch with a JSON file");
-                std::process::exit(1);
-            }
-        }
-    }
-}
 
 pub async fn handle_consumer_command(
     client: &reqwest::Client,
@@ -215,26 +137,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_struct_creation() {
-        let cli = Cli {
-            port: 9090,
-            command: Commands::Health,
+    fn test_consumer_commands_enum_variants() {
+        let _create = ConsumerCommands::Create {
+            group_id: "group".to_string(),
         };
-        assert_eq!(cli.port, 9090);
+        let _fetch = ConsumerCommands::Fetch {
+            group_id: "group".to_string(),
+            topic: "topic".to_string(),
+            max_records: None,
+            from_offset: None,
+            from_time: None,
+            include_headers: None,
+        };
     }
 
     #[test]
-    fn test_commands_enum_variants() {
-        let _health = Commands::Health;
-        let _producer = Commands::Producer(ProducerCommands::Records {
-            topic: "test".to_string(),
-            message: Some("value".to_string()),
-            key: None,
-            header: None,
-            batch: None,
-        });
-        let _consumer = Commands::Consumer(ConsumerCommands::Create {
+    fn test_offset_commands_enum_variants() {
+        let _commit = OffsetCommands::Commit {
             group_id: "group".to_string(),
-        });
+            topic: "topic".to_string(),
+            offset: 42,
+            metadata: None,
+        };
+        let _get = OffsetCommands::Get {
+            group_id: "group".to_string(),
+            topic: "topic".to_string(),
+        };
     }
 }

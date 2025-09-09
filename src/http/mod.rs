@@ -6,7 +6,7 @@
 //! - Broker implementation utilities
 
 pub mod broker;
-pub mod cli;
+pub mod combined_cli;
 pub mod common;
 pub mod consumer;
 pub mod error;
