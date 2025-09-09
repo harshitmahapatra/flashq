@@ -396,20 +396,34 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 name = "flashq"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "dashmap",
+ "divan",
+ "fs4",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sysinfo",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
+name = "flashq-http"
+version = "0.1.0"
+dependencies = [
  "axum",
  "chrono",
  "clap",
- "dashmap",
- "divan",
  "env_logger",
- "fs4",
- "libc",
+ "flashq",
  "log",
  "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
- "sysinfo",
  "tempfile",
  "tokio",
  "urlencoding",

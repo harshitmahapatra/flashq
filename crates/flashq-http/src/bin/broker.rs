@@ -1,25 +1,17 @@
 //! FlashQ HTTP Broker Binary
-//!
-//! Lightweight binary that instantiates and starts the FlashQ HTTP broker.
-//! All core broker logic is implemented in src/http/broker.
 
-use flashq::http::broker::start_broker;
 use flashq::storage::file::SyncMode;
-use std::env;
-use std::path::PathBuf;
+use flashq_http::broker::start_broker;
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-
-    let args: Vec<String> = env::args().collect();
-
+    let args: Vec<String> = std::env::args().collect();
     let mut port: u16 = 8080;
-    let mut storage_selection: Option<&str> = None; // "memory" | "file"
-    let mut data_dir: Option<PathBuf> = None;
+    let mut storage_selection: Option<&str> = None;
+    let mut data_dir: Option<std::path::PathBuf> = None;
     let mut batch_bytes: Option<usize> = None;
     let mut time_seek_back_bytes: Option<u32> = None;
-
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -53,7 +45,7 @@ async fn main() {
                     print_usage();
                     std::process::exit(1);
                 }
-                data_dir = Some(PathBuf::from(&args[i]));
+                data_dir = Some(std::path::PathBuf::from(&args[i]));
             }
             "--batch-bytes" => {
                 i += 1;
@@ -99,11 +91,9 @@ async fn main() {
         }
         i += 1;
     }
-
-    // Build storage backend after parsing all flags
     let use_file = storage_selection == Some("file") || data_dir.is_some();
     let mut storage_backend = if use_file {
-        let dir = data_dir.unwrap_or_else(|| PathBuf::from("./data"));
+        let dir = data_dir.unwrap_or_else(|| std::path::PathBuf::from("./data"));
         match batch_bytes {
             Some(bb) => match flashq::storage::StorageBackend::new_file_with_path_and_batch_bytes(
                 SyncMode::Immediate,
@@ -133,8 +123,6 @@ async fn main() {
             None => flashq::storage::StorageBackend::new_memory(),
         }
     };
-
-    // Env fallback: FLASHQ_TIME_SEEK_BACK_BYTES if flag not provided
     if time_seek_back_bytes.is_none() {
         if let Ok(v) = std::env::var("FLASHQ_TIME_SEEK_BACK_BYTES") {
             if let Ok(parsed) = v.parse::<u32>() {
@@ -147,7 +135,6 @@ async fn main() {
     if let Some(bytes) = time_seek_back_bytes {
         storage_backend = storage_backend.with_time_seek_back_bytes(bytes);
     }
-
     if let Err(e) = start_broker(port, storage_backend).await {
         log::error!("Broker error: {e}");
         std::process::exit(1);

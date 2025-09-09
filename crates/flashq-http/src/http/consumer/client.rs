@@ -2,10 +2,6 @@
 
 use crate::http::common::*;
 
-// =============================================================================
-// CONSUMER GROUP COMMANDS
-// =============================================================================
-
 pub async fn create_consumer_group_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -50,7 +46,6 @@ pub async fn leave_consumer_group_command(
     }
 }
 
-/// Fetch records using the new by-offset endpoint.
 pub async fn fetch_consumer_records_by_offset_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -108,7 +103,6 @@ pub async fn fetch_consumer_records_by_offset_command(
     }
 }
 
-/// Fetch records using the new by-time endpoint.
 pub async fn fetch_consumer_records_by_time_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -128,7 +122,6 @@ pub async fn fetch_consumer_records_by_time_command(
         query_params.push(format!("include_headers={headers}"));
     }
     fetch_url.push_str(&format!("?{}", query_params.join("&")));
-
     match client.get(&fetch_url).send().await {
         Ok(response) => {
             if response.status().is_success() {

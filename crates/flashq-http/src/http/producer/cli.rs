@@ -4,10 +4,6 @@ use super::client::*;
 use crate::http::common::parse_headers;
 use clap::Subcommand;
 
-// =============================================================================
-// PRODUCER CLI COMMANDS
-// =============================================================================
-
 #[derive(Subcommand)]
 pub enum ProducerCommands {
     Records {
@@ -22,10 +18,6 @@ pub enum ProducerCommands {
         batch: Option<String>,
     },
 }
-
-// =============================================================================
-// PRODUCER COMMAND HANDLERS
-// =============================================================================
 
 pub async fn handle_producer_command(
     client: &reqwest::Client,
@@ -53,14 +45,9 @@ pub async fn handle_producer_command(
     }
 }
 
-// =============================================================================
-// UNIT TESTS
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_producer_commands_enum_variants() {
         let _records = ProducerCommands::Records {

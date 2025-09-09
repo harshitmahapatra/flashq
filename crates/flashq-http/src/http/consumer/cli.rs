@@ -3,10 +3,6 @@
 use super::client::*;
 use clap::Subcommand;
 
-// =============================================================================
-// CONSUMER CLI COMMANDS
-// =============================================================================
-
 #[derive(Subcommand)]
 pub enum ConsumerCommands {
     Create {
@@ -46,10 +42,6 @@ pub enum OffsetCommands {
     },
 }
 
-// =============================================================================
-// CONSUMER COMMAND HANDLERS
-// =============================================================================
-
 pub async fn handle_consumer_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -70,14 +62,12 @@ pub async fn handle_consumer_command(
             from_time,
             include_headers,
         } => {
-            // Enforce mutual exclusivity when both from_offset and from_time are supplied
             if from_offset.is_some() && from_time.is_some() {
                 eprintln!(
                     "Error: --from-offset and --from-time are mutually exclusive. Choose one."
                 );
                 std::process::exit(1);
             }
-
             if let Some(ts) = from_time.as_ref() {
                 fetch_consumer_records_by_time_command(
                     client,
@@ -128,14 +118,9 @@ pub async fn handle_offset_command(
     }
 }
 
-// =============================================================================
-// UNIT TESTS
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_consumer_commands_enum_variants() {
         let _create = ConsumerCommands::Create {
@@ -150,7 +135,6 @@ mod tests {
             include_headers: None,
         };
     }
-
     #[test]
     fn test_offset_commands_enum_variants() {
         let _commit = OffsetCommands::Commit {

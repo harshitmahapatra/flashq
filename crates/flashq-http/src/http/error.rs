@@ -2,13 +2,8 @@
 
 use super::common::ErrorResponse;
 
-// =============================================================================
-// ERROR HANDLING FUNCTIONS
-// =============================================================================
-
 pub async fn handle_error_response(response: reqwest::Response, operation: &str) {
     let status = response.status();
-
     match response.text().await {
         Ok(body) => match serde_json::from_str::<ErrorResponse>(&body) {
             Ok(error_response) => {

@@ -1,12 +1,8 @@
 //! HTTP producer client functions for FlashQ
 
-use crate::Record;
 use crate::http::common::*;
+use flashq::Record;
 use std::collections::HashMap;
-
-// =============================================================================
-// PRODUCER COMMANDS
-// =============================================================================
 
 pub async fn handle_batch_post(
     client: &reqwest::Client,
@@ -19,7 +15,6 @@ pub async fn handle_batch_post(
             Ok(records) => {
                 let request = ProduceRequest { records };
                 let url = format!("{broker_url}/topic/{topic}/record");
-
                 match client.post(&url).json(&request).send().await {
                     Ok(response) => {
                         if response.status().is_success() {
@@ -70,13 +65,10 @@ pub async fn post_records(
         value: message.to_string(),
         headers,
     };
-
     let request = ProduceRequest {
         records: vec![record],
     };
-
     let url = format!("{broker_url}/topic/{topic}/record");
-
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
             if response.status().is_success() {

@@ -2,10 +2,6 @@
 
 use super::common::*;
 
-// =============================================================================
-// HEALTH CHECK COMMANDS
-// =============================================================================
-
 pub async fn handle_health_command(client: &reqwest::Client, broker_url: &str) {
     let url = format!("{broker_url}/health");
     match client.get(&url).send().await {
@@ -26,10 +22,6 @@ pub async fn handle_health_command(client: &reqwest::Client, broker_url: &str) {
         Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
-
-// =============================================================================
-// TOPICS COMMANDS
-// =============================================================================
 
 pub async fn handle_get_topics_command(client: &reqwest::Client, broker_url: &str) {
     let url = format!("{broker_url}/topics");

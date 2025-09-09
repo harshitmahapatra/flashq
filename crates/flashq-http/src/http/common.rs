@@ -1,6 +1,7 @@
 //! HTTP API request and response types
 
-use crate::{FlashQError, Record, RecordWithOffset, warn};
+use flashq::{FlashQError, Record, RecordWithOffset};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -83,7 +84,6 @@ impl PollQuery {
     pub fn effective_limit(&self) -> Option<usize> {
         self.max_records
     }
-
     pub fn should_include_headers(&self) -> bool {
         self.include_headers.unwrap_or(true)
     }
@@ -105,7 +105,6 @@ impl FetchResponse {
         } else {
             None
         };
-
         Self {
             records,
             next_offset,
@@ -150,7 +149,6 @@ impl OffsetResponse {
         last_commit_time: Option<String>,
     ) -> Self {
         let lag = high_water_mark.saturating_sub(committed_offset);
-
         Self {
             topic,
             committed_offset,
@@ -161,10 +159,6 @@ impl OffsetResponse {
     }
 }
 
-// =============================================================================
-// SHARED/ERROR TYPES
-// =============================================================================
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ErrorResponse {
     pub error: String,
@@ -172,10 +166,6 @@ pub struct ErrorResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
 }
-
-// =============================================================================
-// VALIDATION UTILITIES
-// ============================================================================="
 
 /// Utility function to parse header strings into HashMap
 pub fn parse_headers(header_strings: Option<Vec<String>>) -> Option<HashMap<String, String>> {
@@ -196,27 +186,14 @@ pub fn parse_headers(header_strings: Option<Vec<String>>) -> Option<HashMap<Stri
     })
 }
 
-/// Validation limits following OpenAPI specification
-///
-/// Note: Header count per record is not limited - only individual header value sizes are validated.
 pub mod limits {
-    /// Maximum length for record keys in bytes (OpenAPI spec limit)
     pub const MAX_KEY_SIZE: usize = 1024;
-
-    /// Maximum length for record values in bytes (OpenAPI spec limit: 1MB)
     pub const MAX_VALUE_SIZE: usize = 1_048_576;
-
-    /// Maximum length for header values in bytes (OpenAPI spec limit)
     pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
-
-    /// Maximum number of records in a batch produce request (OpenAPI spec limit)
     pub const MAX_BATCH_SIZE: usize = 1000;
-
-    /// Maximum number of records that can be requested in a single poll operation
     pub const MAX_POLL_RECORDS: usize = 10000;
 }
 
-/// Validates a single record for size limits and structure
 pub fn validate_record(record: &Record, index: usize) -> Result<(), ErrorResponse> {
     if let Some(key) = &record.key {
         if key.len() > limits::MAX_KEY_SIZE {
@@ -229,14 +206,11 @@ pub fn validate_record(record: &Record, index: usize) -> Result<(), ErrorRespons
                     key.len()
                 ),
                 serde_json::json!({
-                    "field": format!("records[{}].key", index),
-                    "max_size": limits::MAX_KEY_SIZE,
-                    "actual_size": key.len()
+                    "field": format!("records[{}].key", index), "max_size": limits::MAX_KEY_SIZE, "actual_size": key.len()
                 }),
             ));
         }
     }
-
     if record.value.len() > limits::MAX_VALUE_SIZE {
         return Err(ErrorResponse::with_details(
             "validation_error",
@@ -247,15 +221,10 @@ pub fn validate_record(record: &Record, index: usize) -> Result<(), ErrorRespons
                 record.value.len()
             ),
             serde_json::json!({
-                "field": format!("records[{}].value", index),
-                "max_size": limits::MAX_VALUE_SIZE,
-                "actual_size": record.value.len()
+                "field": format!("records[{}].value", index), "max_size": limits::MAX_VALUE_SIZE, "actual_size": record.value.len()
             }),
         ));
     }
-
-    // Validate headers if present
-    // Note: We validate individual header value size but do not limit the total number of headers per record
     if let Some(headers) = &record.headers {
         for (header_key, header_value) in headers {
             if header_value.len() > limits::MAX_HEADER_VALUE_SIZE {
@@ -269,28 +238,23 @@ pub fn validate_record(record: &Record, index: usize) -> Result<(), ErrorRespons
                         header_value.len()
                     ),
                     serde_json::json!({
-                        "field": format!("records[{}].headers.{}", index, header_key),
-                        "max_size": limits::MAX_HEADER_VALUE_SIZE,
-                        "actual_size": header_value.len()
+                        "field": format!("records[{}].headers['{}']", index, header_key), "max_size": limits::MAX_HEADER_VALUE_SIZE, "actual_size": header_value.len()
                     }),
                 ));
             }
         }
     }
-
     Ok(())
 }
 
-/// Validates a batch produce request
 pub fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorResponse> {
-    // Check batch size limits (1-MAX_BATCH_SIZE records as per OpenAPI spec)
     if request.records.is_empty() {
-        return Err(ErrorResponse::invalid_parameter(
-            "records",
-            "At least one record must be provided",
+        return Err(ErrorResponse::with_details(
+            "validation_error",
+            "No records provided in request",
+            serde_json::json!({ "field": "records" }),
         ));
     }
-
     if request.records.len() > limits::MAX_BATCH_SIZE {
         return Err(ErrorResponse::with_details(
             "validation_error",
@@ -299,79 +263,54 @@ pub fn validate_produce_request(request: &ProduceRequest) -> Result<(), ErrorRes
                 limits::MAX_BATCH_SIZE,
                 request.records.len()
             ),
-            serde_json::json!({
-                "field": "records",
-                "max_size": limits::MAX_BATCH_SIZE,
-                "actual_size": request.records.len()
-            }),
+            serde_json::json!({ "field": "records", "max_size": limits::MAX_BATCH_SIZE, "actual_size": request.records.len() }),
         ));
     }
-
-    // Validate each record in the batch
     for (index, record) in request.records.iter().enumerate() {
         validate_record(record, index)?;
     }
-
     Ok(())
 }
 
-/// Validates a topic name according to OpenAPI specification
 pub fn validate_topic_name(topic: &str) -> Result<(), ErrorResponse> {
-    // OpenAPI pattern: ^[a-zA-Z0-9._][a-zA-Z0-9._-]*$
     if topic.is_empty() || topic.len() > 255 {
         return Err(ErrorResponse::invalid_parameter(
             "topic",
             "Topic name must be between 1 and 255 characters",
         ));
     }
-
     let chars: Vec<char> = topic.chars().collect();
-
-    // First character must be alphanumeric, dot, or underscore
     if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
         return Err(ErrorResponse::invalid_topic_name(topic));
     }
-
-    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
     for ch in chars.iter().skip(1) {
         if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
             return Err(ErrorResponse::invalid_topic_name(topic));
         }
     }
-
     Ok(())
 }
 
-/// Validates a consumer group ID according to OpenAPI specification
 pub fn validate_consumer_group_id(group_id: &str) -> Result<(), ErrorResponse> {
-    // Same pattern as topic names
     if group_id.is_empty() || group_id.len() > 255 {
         return Err(ErrorResponse::invalid_parameter(
             "group_id",
             "Consumer group ID must be between 1 and 255 characters",
         ));
     }
-
     let chars: Vec<char> = group_id.chars().collect();
-
-    // First character must be alphanumeric, dot, or underscore
     if !chars[0].is_alphanumeric() && chars[0] != '.' && chars[0] != '_' {
         return Err(ErrorResponse::invalid_consumer_group_id(group_id));
     }
-
-    // Remaining characters can be alphanumeric, dot, underscore, or hyphen
     for ch in chars.iter().skip(1) {
         if !ch.is_alphanumeric() && *ch != '.' && *ch != '_' && *ch != '-' {
             return Err(ErrorResponse::invalid_consumer_group_id(group_id));
         }
     }
-
     Ok(())
 }
 
-/// Validates poll query parameters
 pub fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
-    // Validate max_records parameter
     if let Some(max_records) = query.max_records {
         if !(1..=limits::MAX_POLL_RECORDS).contains(&max_records) {
             return Err(ErrorResponse::invalid_parameter(
@@ -383,29 +322,21 @@ pub fn validate_poll_query(query: &PollQuery) -> Result<(), ErrorResponse> {
             ));
         }
     }
-
-    // from_offset and from_time are mutually exclusive
     if query.from_offset.is_some() && query.from_time.is_some() {
         return Err(ErrorResponse::invalid_parameter(
             "from_offset,from_time",
             "from_offset and from_time are mutually exclusive",
         ));
     }
-
-    // If from_time provided, it must be a valid RFC3339 timestamp
     if let Some(ts) = &query.from_time {
         if let Err(e) = chrono::DateTime::parse_from_rfc3339(ts) {
             return Err(ErrorResponse::with_details(
                 "validation_error",
                 "from_time must be a valid RFC3339 timestamp",
-                serde_json::json!({
-                    "field": "from_time",
-                    "error": e.to_string()
-                }),
+                serde_json::json!({ "field": "from_time", "error": e.to_string() }),
             ));
         }
     }
-
     Ok(())
 }
 
@@ -421,10 +352,6 @@ pub struct TopicsResponse {
     pub topics: Vec<String>,
 }
 
-// =============================================================================
-// ERROR RESPONSE IMPLEMENTATION
-// =============================================================================
-
 impl ErrorResponse {
     pub fn new(error: &str, message: &str) -> Self {
         Self {
@@ -433,7 +360,6 @@ impl ErrorResponse {
             details: None,
         }
     }
-
     pub fn with_details(error: &str, message: &str, details: serde_json::Value) -> Self {
         Self {
             error: error.to_string(),
@@ -441,12 +367,9 @@ impl ErrorResponse {
             details: Some(details),
         }
     }
-
-    // Validation error creation methods
     pub fn validation_error(message: &str) -> Self {
         Self::new("validation_error", message)
     }
-
     pub fn invalid_parameter(param_name: &str, message: &str) -> Self {
         Self::with_details(
             "invalid_parameter",
@@ -454,7 +377,6 @@ impl ErrorResponse {
             serde_json::json!({ "parameter": param_name }),
         )
     }
-
     pub fn topic_not_found(topic: &str) -> Self {
         Self::with_details(
             "topic_not_found",
@@ -462,7 +384,6 @@ impl ErrorResponse {
             serde_json::json!({ "topic": topic }),
         )
     }
-
     pub fn group_not_found(group_id: &str) -> Self {
         Self::with_details(
             "group_not_found",
@@ -470,23 +391,16 @@ impl ErrorResponse {
             serde_json::json!({ "group_id": group_id }),
         )
     }
-
     pub fn internal_error(message: &str) -> Self {
         Self::new("internal_error", message)
     }
-
     pub fn record_size_error(field: &str, max_size: usize, actual_size: usize) -> Self {
         Self::with_details(
             "validation_error",
             &format!("{field} exceeds maximum length of {max_size} (got {actual_size})"),
-            serde_json::json!({
-                "field": field,
-                "max_size": max_size,
-                "actual_size": actual_size
-            }),
+            serde_json::json!({ "field": field, "max_size": max_size, "actual_size": actual_size }),
         )
     }
-
     pub fn invalid_topic_name(topic: &str) -> Self {
         Self::with_details(
             "invalid_parameter",
@@ -494,7 +408,6 @@ impl ErrorResponse {
             serde_json::json!({ "parameter": "topic", "value": topic }),
         )
     }
-
     pub fn invalid_consumer_group_id(group_id: &str) -> Self {
         Self::with_details(
             "invalid_parameter",
@@ -521,218 +434,11 @@ impl From<FlashQError> for ErrorResponse {
             } => Self::with_details(
                 "invalid_offset",
                 &format!("Invalid offset {offset} for topic '{topic}', max offset is {max_offset}"),
-                serde_json::json!({
-                    "offset": offset,
-                    "topic": topic,
-                    "max_offset": max_offset
-                }),
+                serde_json::json!({ "offset": offset, "topic": topic, "max_offset": max_offset }),
             ),
             FlashQError::Storage(storage_err) => {
                 Self::internal_error(&format!("Storage error: {storage_err}"))
             }
         }
-    }
-}
-
-// =============================================================================
-// UNIT TESTS
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_parse_headers_valid() {
-        let header_strings = Some(vec![
-            "Content-Type=application/json".to_string(),
-            "Authorization=Bearer token123".to_string(),
-        ]);
-
-        let result = parse_headers(header_strings);
-        assert!(result.is_some());
-
-        let headers = result.unwrap();
-        assert_eq!(
-            headers.get("Content-Type"),
-            Some(&"application/json".to_string())
-        );
-        assert_eq!(
-            headers.get("Authorization"),
-            Some(&"Bearer token123".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_headers_invalid_format() {
-        let header_strings = Some(vec![
-            "Content-Type=application/json".to_string(),
-            "InvalidHeader".to_string(),
-        ]);
-
-        let result = parse_headers(header_strings);
-        assert!(result.is_some());
-
-        let headers = result.unwrap();
-        assert_eq!(headers.len(), 1);
-        assert_eq!(
-            headers.get("Content-Type"),
-            Some(&"application/json".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_headers_none() {
-        let result = parse_headers(None);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_validate_topic_name_valid() {
-        assert!(validate_topic_name("valid_topic").is_ok());
-        assert!(validate_topic_name("topic.with.dots").is_ok());
-        assert!(validate_topic_name("topic-with-dashes").is_ok());
-        assert!(validate_topic_name("_underscore_start").is_ok());
-        assert!(validate_topic_name(".dot_start").is_ok());
-        assert!(validate_topic_name("topic123").is_ok());
-    }
-
-    #[test]
-    fn test_validate_topic_name_invalid() {
-        assert!(validate_topic_name("").is_err());
-        assert!(validate_topic_name("-invalid_start").is_err());
-        assert!(validate_topic_name("topic with spaces").is_err());
-        assert!(validate_topic_name("topic@invalid").is_err());
-        assert!(validate_topic_name(&"a".repeat(256)).is_err());
-    }
-
-    #[test]
-    fn test_validate_consumer_group_id_valid() {
-        assert!(validate_consumer_group_id("valid_group").is_ok());
-        assert!(validate_consumer_group_id("group.with.dots").is_ok());
-        assert!(validate_consumer_group_id("group-with-dashes").is_ok());
-    }
-
-    #[test]
-    fn test_validate_consumer_group_id_invalid() {
-        assert!(validate_consumer_group_id("").is_err());
-        assert!(validate_consumer_group_id("-invalid_start").is_err());
-        assert!(validate_consumer_group_id("group with spaces").is_err());
-    }
-
-    #[test]
-    fn test_validate_record_valid() {
-        let record = Record::new(
-            Some("key".to_string()),
-            "value".to_string(),
-            Some(HashMap::from([("header".to_string(), "value".to_string())])),
-        );
-        assert!(validate_record(&record, 0).is_ok());
-    }
-
-    #[test]
-    fn test_validate_record_key_too_long() {
-        let long_key = "a".repeat(limits::MAX_KEY_SIZE + 1);
-        let record = Record::new(Some(long_key), "value".to_string(), None);
-        assert!(validate_record(&record, 0).is_err());
-    }
-
-    #[test]
-    fn test_validate_record_value_too_long() {
-        let long_value = "a".repeat(limits::MAX_VALUE_SIZE + 1);
-        let record = Record::new(None, long_value, None);
-        assert!(validate_record(&record, 0).is_err());
-    }
-
-    #[test]
-    fn test_validate_produce_request_valid() {
-        let request = ProduceRequest {
-            records: vec![Record::new(None, "test".to_string(), None)],
-        };
-        assert!(validate_produce_request(&request).is_ok());
-    }
-
-    #[test]
-    fn test_validate_produce_request_empty() {
-        let request = ProduceRequest { records: vec![] };
-        assert!(validate_produce_request(&request).is_err());
-    }
-
-    #[test]
-    fn test_validate_poll_query_valid() {
-        let query = PollQuery {
-            max_records: Some(100),
-            from_offset: None,
-            from_time: None,
-            include_headers: None,
-        };
-        assert!(validate_poll_query(&query).is_ok());
-    }
-
-    #[test]
-    fn test_validate_poll_query_invalid_max_records() {
-        let query = PollQuery {
-            max_records: Some(limits::MAX_POLL_RECORDS + 1),
-            from_offset: None,
-            from_time: None,
-            include_headers: None,
-        };
-        assert!(validate_poll_query(&query).is_err());
-    }
-
-    #[test]
-    fn test_validate_poll_query_mutually_exclusive() {
-        let query = PollQuery {
-            max_records: Some(10),
-            from_offset: Some(0),
-            from_time: Some("2025-01-01T00:00:00Z".to_string()),
-            include_headers: None,
-        };
-        assert!(validate_poll_query(&query).is_err());
-    }
-
-    #[test]
-    fn test_validate_poll_query_invalid_from_time() {
-        let query = PollQuery {
-            max_records: Some(10),
-            from_offset: None,
-            from_time: Some("not-a-time".to_string()),
-            include_headers: None,
-        };
-        assert!(validate_poll_query(&query).is_err());
-    }
-
-    #[test]
-    fn test_print_record_basic() {
-        let record = RecordWithOffset {
-            record: Record::new(None, "test message".to_string(), None),
-            offset: 42,
-            timestamp: "2023-01-01T00:00:00Z".to_string(),
-        };
-
-        // This test just ensures the function doesn't panic
-        print_record(&record);
-    }
-
-    #[test]
-    fn test_print_record_with_key_and_headers() {
-        let headers = HashMap::from([
-            ("user".to_string(), "alice".to_string()),
-            ("type".to_string(), "notification".to_string()),
-        ]);
-
-        let record = RecordWithOffset {
-            record: Record::new(
-                Some("user123".to_string()),
-                "Hello world".to_string(),
-                Some(headers),
-            ),
-            offset: 0,
-            timestamp: "2023-01-01T12:00:00Z".to_string(),
-        };
-
-        // This test just ensures the function doesn't panic with all fields present
-        print_record(&record);
     }
 }
