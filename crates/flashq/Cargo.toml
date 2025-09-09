@@ -29,14 +29,15 @@ divan = "0.1"
 [[bench]]
 name = "memory_storage"
 harness = false
-path = "../../benches/memory_storage.rs"
+path = "benches/memory_storage.rs"
 
 [[bench]]
 name = "file_storage"
 harness = false
-path = "../../benches/file_storage.rs"
+path = "benches/file_storage.rs"
 
 [[bench]]
 name = "batching_baseline"
 harness = false
-path = "../../benches/batching_baseline.rs"
+path = "benches/batching_baseline.rs"
+
