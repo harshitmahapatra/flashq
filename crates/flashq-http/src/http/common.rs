@@ -427,6 +427,11 @@ impl From<FlashQError> for ErrorResponse {
                 &format!("Consumer group '{group_id}' already exists"),
                 serde_json::json!({ "group_id": group_id }),
             ),
+            FlashQError::ConsumerGroupCreationFailed { group_id, reason } => Self::with_details(
+                "consumer_group_creation_failed",
+                &format!("Failed to create consumer group '{group_id}': {reason}"),
+                serde_json::json!({ "group_id": group_id, "reason": reason }),
+            ),
             FlashQError::InvalidOffset {
                 offset,
                 topic,

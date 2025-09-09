@@ -166,8 +166,9 @@ impl FlashQ {
                 let consumer_group = self
                     .storage_backend
                     .create_consumer_group(&group_id)
-                    .map_err(|e| FlashQError::ConsumerGroupAlreadyExists {
-                        group_id: format!("Failed to create consumer group: {e}"),
+                    .map_err(|e| FlashQError::ConsumerGroupCreationFailed {
+                        group_id: group_id.clone(),
+                        reason: e.to_string(),
                     })?;
                 entry.insert(consumer_group);
                 Ok(())

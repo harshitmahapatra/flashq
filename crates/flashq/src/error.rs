@@ -11,6 +11,10 @@ pub enum FlashQError {
     ConsumerGroupAlreadyExists {
         group_id: String,
     },
+    ConsumerGroupCreationFailed {
+        group_id: String,
+        reason: String,
+    },
     InvalidOffset {
         offset: u64,
         topic: String,
@@ -73,6 +77,9 @@ impl fmt::Display for FlashQError {
             }
             FlashQError::ConsumerGroupAlreadyExists { group_id } => {
                 write!(f, "Consumer group '{group_id}' already exists")
+            }
+            FlashQError::ConsumerGroupCreationFailed { group_id, reason } => {
+                write!(f, "Failed to create consumer group '{group_id}': {reason}")
             }
             FlashQError::InvalidOffset {
                 offset,
@@ -165,6 +172,7 @@ impl FlashQError {
             FlashQError::TopicNotFound { .. }
                 | FlashQError::ConsumerGroupNotFound { .. }
                 | FlashQError::ConsumerGroupAlreadyExists { .. }
+                | FlashQError::ConsumerGroupCreationFailed { .. }
                 | FlashQError::InvalidOffset { .. }
         )
     }
