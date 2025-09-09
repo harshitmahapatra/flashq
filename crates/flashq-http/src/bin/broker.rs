@@ -1,0 +1,156 @@
+//! FlashQ HTTP Broker Binary
+
+use flashq::storage::file::SyncMode;
+use flashq_http::broker::start_broker;
+
+#[tokio::main]
+async fn main() {
+    env_logger::init();
+    let args: Vec<String> = std::env::args().collect();
+    let mut port: u16 = 8080;
+    let mut storage_selection: Option<&str> = None;
+    let mut data_dir: Option<std::path::PathBuf> = None;
+    let mut batch_bytes: Option<usize> = None;
+    let mut time_seek_back_bytes: Option<u32> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--" => {
+                i += 1;
+                continue;
+            }
+            "--storage" => {
+                i += 1;
+                if i >= args.len() {
+                    log::error!("--storage requires a value (memory|file)");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                match args[i].as_str() {
+                    "memory" | "file" => storage_selection = Some(args[i].as_str()),
+                    _ => {
+                        log::error!(
+                            "Invalid storage backend '{}'. Valid options: memory, file",
+                            args[i]
+                        );
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "--data-dir" => {
+                i += 1;
+                if i >= args.len() {
+                    log::error!("--data-dir requires a path");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                data_dir = Some(std::path::PathBuf::from(&args[i]));
+            }
+            "--batch-bytes" => {
+                i += 1;
+                if i >= args.len() {
+                    log::error!("--batch-bytes requires a positive integer (bytes)");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                match args[i].parse::<usize>() {
+                    Ok(v) if v > 0 && v <= 16 * 1024 * 1024 => batch_bytes = Some(v),
+                    _ => {
+                        log::error!("--batch-bytes must be between 1 and 16 MiB (bytes)");
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "--time-seek-back-bytes" => {
+                i += 1;
+                if i >= args.len() {
+                    log::error!("--time-seek-back-bytes requires a positive integer (bytes)");
+                    print_usage();
+                    std::process::exit(1);
+                }
+                match args[i].parse::<u32>() {
+                    Ok(v) if v > 0 => time_seek_back_bytes = Some(v),
+                    _ => {
+                        log::error!("--time-seek-back-bytes must be > 0 (bytes)");
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
+            arg => {
+                if let Ok(p) = arg.parse::<u16>() {
+                    port = p;
+                } else {
+                    log::error!("Invalid argument '{arg}'");
+                    print_usage();
+                    std::process::exit(1);
+                }
+            }
+        }
+        i += 1;
+    }
+    let use_file = storage_selection == Some("file") || data_dir.is_some();
+    let mut storage_backend = if use_file {
+        let dir = data_dir.unwrap_or_else(|| std::path::PathBuf::from("./data"));
+        match batch_bytes {
+            Some(bb) => match flashq::storage::StorageBackend::new_file_with_path_and_batch_bytes(
+                SyncMode::Immediate,
+                dir,
+                bb,
+            ) {
+                Ok(backend) => backend,
+                Err(e) => {
+                    log::error!("Failed to initialize file storage: {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                match flashq::storage::StorageBackend::new_file_with_path(SyncMode::Immediate, dir)
+                {
+                    Ok(backend) => backend,
+                    Err(e) => {
+                        log::error!("Failed to initialize file storage: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    } else {
+        match batch_bytes {
+            Some(bb) => flashq::storage::StorageBackend::new_memory_with_batch_bytes(bb),
+            None => flashq::storage::StorageBackend::new_memory(),
+        }
+    };
+    if time_seek_back_bytes.is_none() {
+        if let Ok(v) = std::env::var("FLASHQ_TIME_SEEK_BACK_BYTES") {
+            if let Ok(parsed) = v.parse::<u32>() {
+                if parsed > 0 {
+                    time_seek_back_bytes = Some(parsed);
+                }
+            }
+        }
+    }
+    if let Some(bytes) = time_seek_back_bytes {
+        storage_backend = storage_backend.with_time_seek_back_bytes(bytes);
+    }
+    if let Err(e) = start_broker(port, storage_backend).await {
+        log::error!("Broker error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn print_usage() {
+    log::info!(
+        "Usage: broker [port] [--storage <backend>] [--data-dir <path>] [--batch-bytes <n>] [--time-seek-back-bytes <n>]"
+    );
+    log::info!("  port: Port number to bind to (default: 8080)");
+    log::info!("  --storage: Storage backend to use");
+    log::info!("    memory: In-memory storage (default, data lost on restart)");
+    log::info!("    file: File-based storage (data persisted to ./data directory)");
+    log::info!("  --data-dir: Custom data directory for file storage (overrides --storage file)");
+    log::info!(
+        "  --batch-bytes: Target maximum bytes per storage I/O batch (1..=16 MiB; default OS-aware ~128 KiB)"
+    );
+}

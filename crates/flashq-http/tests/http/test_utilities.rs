@@ -1,0 +1,700 @@
+use flashq::Record;
+use flashq_http::*;
+use log::{debug, error, info};
+use std::env;
+use std::io::Read;
+use std::net::TcpListener;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, Once};
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use tokio::time::sleep;
+
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
+
+static BROKER_INIT: Once = Once::new();
+static CLIENT_INIT: Once = Once::new();
+static BROKER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static CLIENT_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
+    // Bind to port 0 to let the OS choose an available port
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    Ok(addr.port())
+}
+
+pub fn ensure_broker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Prefer Cargo-provided binary path when available
+    if let Some(p) = option_env!("CARGO_BIN_EXE_broker") {
+        return Ok(PathBuf::from(p));
+    }
+    BROKER_INIT.call_once(|| {
+        let _ = env_logger::try_init();
+        info!("Building broker binary for integration tests...");
+        let output = Command::new("cargo")
+            .args(["build", "-p", "flashq-http", "--bin", "broker"])
+            .output()
+            .expect("Failed to build broker binary");
+
+        if !output.status.success() {
+            panic!(
+                "Failed to build broker binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let binary_path = PathBuf::from("target/debug/broker");
+        *BROKER_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        info!("Broker binary built successfully");
+    });
+
+    let binary_path = BROKER_BINARY_PATH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("Broker binary path should be set")
+        .clone();
+
+    Ok(binary_path)
+}
+
+pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(p) = option_env!("CARGO_BIN_EXE_client") {
+        return Ok(PathBuf::from(p));
+    }
+    CLIENT_INIT.call_once(|| {
+        info!("Building client binary for integration tests...");
+        let output = Command::new("cargo")
+            .args(["build", "-p", "flashq-http", "--bin", "client"])
+            .output()
+            .expect("Failed to build client binary");
+
+        if !output.status.success() {
+            panic!(
+                "Failed to build client binary: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let binary_path = PathBuf::from("target/debug/client");
+        *CLIENT_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        info!("Client binary built successfully");
+    });
+
+    let binary_path = CLIENT_BINARY_PATH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("Client binary path should be set")
+        .clone();
+
+    Ok(binary_path)
+}
+
+pub fn get_timeout_config() -> (u32, u64) {
+    // Returns (max_attempts, sleep_ms)
+    if env::var("CI").is_ok() {
+        info!("Running in CI environment - using extended timeouts");
+        (60, 500) // 30 seconds total in CI
+    } else {
+        (30, 500) // 15 seconds locally
+    }
+}
+
+// ============================================================================
+// TEST INFRASTRUCTURE
+// ============================================================================
+
+pub struct TestBroker {
+    process: Child,
+    pub port: u16,
+    temp_dir: Option<tempfile::TempDir>,
+}
+
+impl TestBroker {
+    pub async fn start() -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let broker_binary = ensure_broker_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        info!("Starting broker on port {port} using binary: {broker_binary:?}");
+
+        let mut process = Command::new(&broker_binary)
+            .args([&port.to_string()])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        // Wait for broker to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                error!("Broker process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Broker stderr: {buf}");
+                }
+                return Err("Broker process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    info!(
+                        "Broker started successfully on port {} after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestBroker {
+                        process,
+                        port,
+                        temp_dir: None,
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        error!("Broker failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Broker failed to start within timeout".into())
+    }
+
+    pub async fn start_with_storage(storage: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let broker_binary = ensure_broker_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        info!(
+            "Starting broker on port {port} with {storage} storage using binary: {broker_binary:?}"
+        );
+
+        let mut cmd = Command::new(&broker_binary);
+        cmd.args([&port.to_string()]);
+
+        // For file storage, create a temporary directory for each test
+        let temp_dir = if storage == "file" {
+            let temp_dir = tempfile::Builder::new()
+                .prefix("flashq_http_test_")
+                .tempdir()
+                .expect("Failed to create temporary directory");
+
+            cmd.args(["--data-dir", temp_dir.path().to_str().unwrap()]);
+            Some(temp_dir)
+        } else {
+            cmd.args(["--storage", storage]);
+            None
+        };
+
+        let mut process = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        // Wait for broker to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                error!("Broker process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Broker stderr: {buf}");
+                }
+                return Err("Broker process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    info!(
+                        "Broker started successfully on port {} with {storage} storage after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestBroker {
+                        process,
+                        port,
+                        temp_dir,
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        error!("Broker failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Broker failed to start within timeout".into())
+    }
+
+    async fn try_health_check(
+        client: &reqwest::Client,
+        health_url: &str,
+        attempt: u32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        // Exponential backoff for network retries within each attempt
+        for retry in 0..3 {
+            let backoff_ms = 100 * (2_u64.pow(retry));
+            if retry > 0 {
+                sleep(Duration::from_millis(backoff_ms)).await;
+            }
+
+            match client.get(health_url).send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(true);
+                    } else {
+                        debug!(
+                            "Health check attempt {}.{}: HTTP {}",
+                            attempt,
+                            retry + 1,
+                            response.status()
+                        );
+                    }
+                }
+                Err(e) if retry < 2 => {
+                    debug!(
+                        "Health check attempt {}.{} failed, retrying: {}",
+                        attempt,
+                        retry + 1,
+                        e
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Ok(false) // All retries failed
+    }
+
+    /// Get the temporary data directory (for file storage tests)
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.temp_dir.as_ref().map(|t| t.path())
+    }
+
+    /// Start broker with a specific data directory (for persistence testing)
+    pub async fn start_with_data_dir<P: AsRef<std::path::Path>>(
+        data_dir: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let port = find_available_port()?;
+        let broker_binary = ensure_broker_binary()?;
+        let (max_attempts, sleep_ms) = get_timeout_config();
+
+        let data_dir_path = data_dir.as_ref();
+        info!("Starting broker on port {port} with file storage using data dir: {data_dir_path:?}");
+
+        let mut process = Command::new(&broker_binary)
+            .args([
+                &port.to_string(),
+                "--data-dir",
+                data_dir_path.to_str().unwrap(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        // Wait for broker to start and verify it's responding
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let health_url = format!("http://127.0.0.1:{port}/health");
+
+        for attempt in 0..max_attempts {
+            sleep(Duration::from_millis(sleep_ms)).await;
+
+            // Check if process is still running
+            if let Ok(Some(exit_status)) = process.try_wait() {
+                error!("Broker process exited with status: {exit_status}");
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut buf = String::new();
+                    stderr.read_to_string(&mut buf).unwrap();
+                    error!("Broker stderr: {buf}");
+                }
+                return Err("Broker process exited".into());
+            }
+
+            // Try to connect to health endpoint with retry logic
+            match Self::try_health_check(&client, &health_url, attempt + 1).await {
+                Ok(true) => {
+                    info!(
+                        "Broker started successfully on port {} with custom data dir after {} attempts",
+                        port,
+                        attempt + 1
+                    );
+                    return Ok(TestBroker {
+                        process,
+                        port,
+                        temp_dir: None, // External directory - no cleanup
+                    });
+                }
+                Ok(false) => continue, // Retry
+                Err(e) => {
+                    debug!("Health check attempt {} failed: {}", attempt + 1, e);
+                    continue;
+                }
+            }
+        }
+
+        error!("Broker failed to start within {max_attempts} attempts");
+        let _ = process.kill();
+        Err("Broker failed to start within timeout".into())
+    }
+}
+
+impl Drop for TestBroker {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+        // TempDir automatically cleans up when dropped if present
+    }
+}
+
+pub struct TestClient {
+    pub client: reqwest::Client,
+    pub base_url: String,
+}
+
+#[allow(dead_code)]
+impl TestClient {
+    pub fn new(broker: &TestBroker) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: format!("http://127.0.0.1:{}", broker.port),
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // HTTP API Operations
+    // ------------------------------------------------------------------------
+    pub async fn post_record(
+        &self,
+        topic: &str,
+        content: &str,
+    ) -> reqwest::Result<reqwest::Response> {
+        self.post_record_with_record(topic, None, content, None)
+            .await
+    }
+
+    pub async fn post_record_with_record(
+        &self,
+        topic: &str,
+        key: Option<String>,
+        value: &str,
+        headers: Option<std::collections::HashMap<String, String>>,
+    ) -> reqwest::Result<reqwest::Response> {
+        // Convert single record to batch format
+        let record = Record {
+            key,
+            value: value.to_string(),
+            headers,
+        };
+
+        let produce_request = ProduceRequest {
+            records: vec![record],
+        };
+
+        self.client
+            .post(format!("{}/topic/{}/record", self.base_url, topic))
+            .json(&produce_request)
+            .send()
+            .await
+    }
+
+    pub async fn post_batch_records(
+        &self,
+        topic: &str,
+        records: Vec<Record>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let produce_request = ProduceRequest { records };
+
+        self.client
+            .post(format!("{}/topic/{}/record", self.base_url, topic))
+            .json(&produce_request)
+            .send()
+            .await
+    }
+
+    // Basic polling for testing - creates temporary consumer group
+    pub async fn poll_records_for_testing(
+        &self,
+        topic: &str,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
+
+        // Create consumer group
+        let _ = self.create_consumer_group(&temp_group_id).await;
+
+        // Fetch records
+        let response = self
+            .fetch_records_for_consumer_group(&temp_group_id, topic, max_records)
+            .await;
+
+        // Clean up consumer group
+        let _ = self.leave_consumer_group(&temp_group_id).await;
+
+        response
+    }
+
+    // ------------------------------------------------------------------------
+    // Consumer Group Operations
+    // ------------------------------------------------------------------------
+    pub async fn create_consumer_group(
+        &self,
+        group_id: &str,
+    ) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .post(format!("{}/consumer/{}", self.base_url, group_id))
+            .send()
+            .await
+    }
+
+    pub async fn update_consumer_group_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+        offset: u64,
+    ) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .post(format!(
+                "{}/consumer/{}/topic/{}/offset",
+                self.base_url, group_id, topic
+            ))
+            .json(&UpdateConsumerGroupOffsetRequest { offset })
+            .send()
+            .await
+    }
+
+    pub async fn get_consumer_group_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+    ) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .get(format!(
+                "{}/consumer/{}/topic/{}/offset",
+                self.base_url, group_id, topic
+            ))
+            .send()
+            .await
+    }
+
+    pub async fn leave_consumer_group(&self, group_id: &str) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .delete(format!("{}/consumer/{}", self.base_url, group_id))
+            .send()
+            .await
+    }
+
+    pub async fn fetch_records_for_consumer_group(
+        &self,
+        group_id: &str,
+        topic: &str,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        self.fetch_records_for_consumer_group_by_offset(group_id, topic, None, max_records)
+            .await
+    }
+
+    pub async fn fetch_records_for_consumer_group_by_offset(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_offset: Option<u64>,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut query = Vec::new();
+
+        if let Some(offset) = from_offset {
+            query.push(("from_offset", offset.to_string()));
+        }
+        if let Some(c) = max_records {
+            query.push(("max_records", c.to_string()));
+        }
+
+        let mut request = self.client.get(format!(
+            "{}/consumer/{}/topic/{}/record/offset",
+            self.base_url, group_id, topic
+        ));
+
+        if !query.is_empty() {
+            request = request.query(&query);
+        }
+
+        request.send().await
+    }
+
+    pub async fn fetch_records_for_consumer_group_by_time(
+        &self,
+        group_id: &str,
+        topic: &str,
+        from_time: &str,
+        max_records: Option<usize>,
+    ) -> reqwest::Result<reqwest::Response> {
+        let mut query = vec![("from_time", from_time.to_string())];
+        if let Some(c) = max_records {
+            query.push(("max_records", c.to_string()));
+        }
+
+        self.client
+            .get(format!(
+                "{}/consumer/{}/topic/{}/record/time",
+                self.base_url, group_id, topic
+            ))
+            .query(&query)
+            .send()
+            .await
+    }
+
+    pub async fn assert_poll_response(
+        &self,
+        response: reqwest::Response,
+        expected_count: usize,
+        expected_values: Option<&[&str]>,
+    ) -> FetchResponse {
+        assert_eq!(response.status(), 200);
+        let poll_data: FetchResponse = response.json().await.unwrap();
+        assert_eq!(poll_data.records.len(), expected_count);
+
+        // Verify high-water mark is reasonable (should be >= next_offset)
+        assert!(poll_data.high_water_mark >= poll_data.next_offset);
+
+        // Verify lag calculation if present
+        if let Some(lag) = poll_data.lag {
+            assert_eq!(lag, poll_data.high_water_mark - poll_data.next_offset);
+        }
+
+        if let Some(expected) = expected_values {
+            for (i, expected_value) in expected.iter().enumerate() {
+                assert_eq!(poll_data.records[i].record.value, *expected_value);
+                // Verify timestamp is in ISO 8601 format
+                assert!(poll_data.records[i].timestamp.contains("T"));
+                // Verify offset sequence
+                assert_eq!(poll_data.records[i].offset, i as u64);
+            }
+        }
+
+        poll_data
+    }
+
+    // ------------------------------------------------------------------------
+    // CLI Client Operations
+    // ------------------------------------------------------------------------
+
+    pub async fn health_check(&self) -> reqwest::Result<reqwest::Response> {
+        self.client
+            .get(format!("{}/health", self.base_url))
+            .send()
+            .await
+    }
+
+    pub async fn post_record_with_client(
+        &self,
+        topic: &str,
+        message: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').next_back().unwrap();
+
+        let output = TokioCommand::new(&client_binary)
+            .args(["--port", port, "producer", "records", topic, message])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Client post failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn poll_records_with_client(
+        &self,
+        topic: &str,
+        max_records: Option<usize>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let client_binary = ensure_client_binary()?;
+        let port = self.base_url.split(':').next_back().unwrap();
+
+        // Create a unique temporary consumer group for this poll operation
+        let temp_group_id = format!("test_poll_{}", std::process::id());
+
+        // Create consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "create", &temp_group_id])
+            .output()
+            .await?;
+
+        // Fetch records
+        let mut args = vec![
+            "--port".to_string(),
+            port.to_string(),
+            "consumer".to_string(),
+            "fetch".to_string(),
+            temp_group_id.clone(),
+            topic.to_string(),
+        ];
+        if let Some(c) = max_records {
+            args.push("--max-records".to_string());
+            args.push(c.to_string());
+        }
+
+        let output = TokioCommand::new(&client_binary)
+            .args(&args)
+            .output()
+            .await?;
+
+        let result = if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            Err(format!(
+                "Client poll failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into())
+        };
+
+        // Clean up consumer group
+        let _ = TokioCommand::new(&client_binary)
+            .args(["--port", port, "consumer", "leave", &temp_group_id])
+            .output()
+            .await;
+
+        result
+    }
+}

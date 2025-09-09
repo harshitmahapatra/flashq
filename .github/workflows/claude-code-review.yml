@@ -49,17 +49,17 @@ jobs:
 
           # Triggered by @claude mention in PR comments
           direct_prompt: |
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
+            Please review this pull request for the FlashQ Kafka-inspired message queue system and provide feedback on:
+            - Code quality and Rust best practices
             - Potential bugs or issues
             - Performance considerations
             - Security concerns
             - Test coverage
+            - Workspace structure (flashq core library, flashq-http broker/client)
             
             Be constructive and helpful in your feedback.
-            Please avoid ex exaggerating but have a positive tone.
-            Please have a consistent PR review output structure, always check for previous PR reviews in the same PR and keep the exact structure.
-            Keep the PR review concise with actionable suggestions.
+            Please avoid exaggerating but have a positive tone.
+            **ALWAYS** Keep the PR review CONCISE with ACTIONABLE suggestions.
             Always have a final recommendation regarding merging the PR.
 
           # Optional: Use sticky comments to make Claude reuse the same comment on subsequent pushes to the same PR
@@ -80,7 +80,7 @@ jobs:
           #   'Please provide a thorough code review focusing on our coding standards and best practices.' }}
           
           # Optional: Add specific tools for running tests or linting
-          # allowed_tools: "Bash(npm run test),Bash(npm run lint),Bash(npm run typecheck)"
+          # allowed_tools: "Bash(cargo test),Bash(cargo clippy),Bash(cargo fmt -- --check)"
           
           # Optional: Skip review for certain conditions
           # if: |

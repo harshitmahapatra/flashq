@@ -6,12 +6,23 @@ Internal architecture and design overview of FlashQ.
 
 ```mermaid
 graph TD
-    A[CLI Client] -->|HTTP| B[HTTP Server]
-    C[Interactive Demo] --> D[FlashQ Core]
+    A[CLI Client] -->|HTTP| B[HTTP Broker]
+    C[Interactive Demo] --> D[FlashQ Core Library]
     B --> D
     
-    D --> E[DashMap Topics]
-    D --> F[DashMap Consumer Groups]
+    subgraph "flashq-http crate"
+        B
+        A
+    end
+    
+    subgraph "flashq crate"
+        D
+        E[DashMap Topics]
+        F[DashMap Consumer Groups]
+    end
+    
+    D --> E
+    D --> F
     
     E --> G[Arc RwLock TopicLog]
     F --> H[Arc RwLock ConsumerGroup]
@@ -71,35 +82,35 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant S as Server  
+    participant B as Broker  
     participant Q as FlashQ
     participant T as TopicLog
     
     Note over C,T: Write Operation (Batched)
-    C->>S: POST /topic/news/record (batch)
-    S->>Q: post_records(Vec<Record>)
+    C->>B: POST /topic/news/record (batch)
+    B->>Q: post_records(Vec<Record>)
     Q->>T: append_batch(records)
     Note over T: Chunked by batch_bytes config
     T-->>Q: last_offset
-    Q-->>S: success response
-    S-->>C: {"offset": N, "timestamp": "..."}
+    Q-->>B: success response
+    B-->>C: {"offset": N, "timestamp": "..."}
     
     Note over C,T: Read Operation (Offset-Based)
-    C->>S: GET /consumer/group/topic/news/record/offset
-    S->>Q: poll_records_from_offset()  
+    C->>B: GET /consumer/group/topic/news/record/offset
+    B->>Q: poll_records_from_offset()  
     Q->>T: get_records_from_offset()
     T-->>Q: Vec<RecordWithOffset>
-    Q-->>S: records array
-    S-->>C: {"records": [...]}
+    Q-->>B: records array
+    B-->>C: {"records": [...]}
     
     Note over C,T: Read Operation (Time-Based)
-    C->>S: GET /consumer/group/topic/news/record/time?from_time=2025-01-01T00:00:00Z
-    S->>Q: poll_records_from_time()
+    C->>B: GET /consumer/group/topic/news/record/time?from_time=2025-01-01T00:00:00Z
+    B->>Q: poll_records_from_time()
     Q->>T: get_records_from_timestamp()
     Note over T: Uses SparseTimeIndex for lookup
     T-->>Q: Vec<RecordWithOffset>
-    Q-->>S: records array
-    S-->>C: {"records": [...]}
+    Q-->>B: records array
+    B-->>C: {"records": [...]}
 ```
 
 **Key Principles:**

@@ -32,6 +32,7 @@ CLAUDE.local.md
 
 # Data dir for integration tests
 /data
+/test_data
 
 # Logs
 /logs

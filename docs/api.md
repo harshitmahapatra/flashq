@@ -12,6 +12,7 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 | `GET` | `/consumer/{group-id}/topic/{topic}/record/offset` | Poll records by offset |
 | `GET` | `/consumer/{group-id}/topic/{topic}/record/time` | Poll records by time |
 | `GET/POST` | `/consumer/{group-id}/topic/{topic}/offset` | Get/set consumer group offset |
+| `GET` | `/topics` | Get list of all topics |
 | `GET` | `/health` | Health check |
 
 ## POST Records
@@ -110,6 +111,17 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 **Set Offset:** `POST /consumer/{group-id}/topic/{topic}/offset` with `{"offset": 10, "metadata": "Processed batch #42"}`  
 **Poll by Offset:** `GET /consumer/{group-id}/topic/{topic}/record/offset?max_records=5&from_offset=10`  
 **Poll by Time:** `GET /consumer/{group-id}/topic/{topic}/record/time?from_time=2025-01-01T00:00:00Z&max_records=5`
+
+## Get Topics
+
+**Endpoint:** `GET /topics`
+
+**Response (200):**
+```json
+{
+  "topics": ["news", "orders", "analytics"]
+}
+```
 
 ## Health Check
 

@@ -4,29 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
+FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with two crates:
+
+- **`flashq`** - Core library with storage backends and queue management  
+- **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
+
+The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
 
 ## Development Commands
 
 ### Building and Running
-- `cargo build` - Build the project (debug mode)
-- `cargo run --bin flashq` - Build and run the interactive demo
-- `cargo run --bin server` - Build and run the HTTP server (in-memory storage)
-- `cargo run --bin server -- --storage=file --data-dir=./data` - Run server with file storage
-- `cargo run --bin server -- --batch-bytes=65536` - Configure batch size (64KB batches)
-- `cargo run --bin server -- --storage=file --batch-bytes=131072` - File storage with 128KB batches
-- `cargo run --bin client` - Build and run the CLI client
+- `cargo build` - Build the project workspace (debug mode)
+- `cargo run -p flashq --bin flashq` - Build and run the interactive demo
+- `cargo run -p flashq-http --bin broker` - Build and run the HTTP broker (in-memory storage)
+- `cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./data` - Run broker with file storage
+- `cargo run -p flashq-http --bin broker -- --batch-bytes=65536` - Configure batch size (64KB batches)
+- `cargo run -p flashq-http --bin broker -- --storage=file --batch-bytes=131072` - File storage with 128KB batches
+- `cargo run -p flashq-http --bin client` - Build and run the CLI client
 - `cargo build --release` - Build optimized release version
 
 ### Production Binary Building
-- `cargo build --release --bin server` - Build optimized server binary
-- `cargo build --release --bin client` - Build optimized client binary
+- `cargo build --release -p flashq-http --bin broker` - Build optimized broker binary
+- `cargo build --release -p flashq-http --bin client` - Build optimized client binary
 - `cargo build --release` - Build all optimized binaries
 - Binaries located in `target/release/` directory
 
 ### Testing and Quality
-- `cargo test` - Run all tests (unit + integration)
+- `cargo test` - Run all tests (workspace: unit + integration)
 - `cargo test --test '*'` - Run only integration tests
+- `cargo test -p flashq --test storage_integration_tests` - Run storage tests
+- `cargo test -p flashq-http --test http_integration_tests` - Run HTTP tests
 - `cargo test <test_name>` - Run a specific test
 - `cargo clippy` - Run Rust linter for code quality checks
 - `cargo fmt` - Format code according to Rust style guidelines
@@ -50,18 +57,29 @@ cargo bench --bench batching_baseline    # Batching performance benchmarks
 
 ## Project Structure
 
-Following Rust best practices with library and binary crates:
+Following Rust best practices with a workspace containing two library and binary crates:
+
+### Workspace Structure
+- `Cargo.toml` - Workspace configuration using Rust 2024 edition
+- `crates/flashq/` - Core library crate with storage backends
+- `crates/flashq-http/` - HTTP broker, producer, consumer, and client crate
+
+### Core Library Crate (`crates/flashq/`)
 - `src/lib.rs` - Library crate containing core record queue functionality
 - `src/main.rs` - Lightweight binary entry point (delegates to demo module)
 - `src/demo.rs` - Interactive demo module with CLI functionality  
-- `src/bin/server.rs` - HTTP server implementation with REST API
-- `src/bin/client.rs` - CLI client for interacting with the server
 - `src/error.rs` - Comprehensive error handling with structured error types
 - `src/storage/` - Storage backend implementations (memory and file-based)
-- `tests/` - Comprehensive test suite organized by component (HTTP and storage)
-- `Cargo.toml` - Project configuration using Rust 2024 edition
+- `tests/storage/` - Storage integration test suite
 
-### Library Crate (`src/lib.rs`)
+### HTTP Crate (`crates/flashq-http/`)
+- `src/lib.rs` - HTTP library exports and common types
+- `src/bin/broker.rs` - HTTP broker implementation with REST API
+- `src/bin/client.rs` - CLI client for interacting with the broker
+- `src/http/` - HTTP components (broker, client, common types)
+- `tests/http/` - HTTP integration test suite
+
+### Core Library Components
 - `Record` struct - Record payload with optional key and headers
 - `RecordWithOffset` struct - Record with offset and ISO 8601 timestamp
 - `FlashQ` struct - Main queue implementation with pluggable storage backends
@@ -87,12 +105,12 @@ Following Rust best practices with library and binary crates:
 - Comprehensive error handling and recovery capabilities
 
 ### Binary Crates
-- **`src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
-- **`src/demo.rs`** - Interactive CLI demo module with user-friendly menu system
-- **`src/bin/server.rs`** - HTTP REST API server with endpoints for posting/polling records
-- **`src/bin/client.rs`** - Command-line client for interacting with the HTTP server
+- **`crates/flashq/src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
+- **`crates/flashq/src/demo.rs`** - Interactive CLI demo module with user-friendly menu system
+- **`crates/flashq-http/src/bin/broker.rs`** - HTTP REST API broker with endpoints for posting/polling records
+- **`crates/flashq-http/src/bin/client.rs`** - Command-line client for interacting with the HTTP broker
 
-### Interactive Demo (`src/demo.rs`)
+### Interactive Demo (`crates/flashq/src/demo.rs`)
 The demo module provides an educational interactive demonstration of the record queue library:
 
 **Features:**
@@ -107,7 +125,7 @@ The demo module provides an educational interactive demonstration of the record 
 **Usage:**
 ```bash
 # Run the interactive demo
-cargo run --bin flashq
+cargo run -p flashq --bin flashq
 
 # Or after building
 ./target/debug/flashq
@@ -120,17 +138,17 @@ cargo run --bin flashq
 4. Run quick demo - Automated demonstration of core functionality
 5. Exit - Clean program termination
 
-This provides an excellent way to understand the library API and test functionality without requiring HTTP server setup or external clients.
+This provides an excellent way to understand the library API and test functionality without requiring HTTP broker setup or external clients.
 
-### Test Suite (`tests/`)
-**HTTP Integration Tests (`tests/http/`):**
+### Test Suite
+**HTTP Integration Tests (`crates/flashq-http/tests/http/`):**
 - End-to-end workflow testing with multi-topic scenarios
 - Consumer group operations and offset management
 - FIFO ordering verification and replay functionality
 - Record size validation and error handling
 - Health check and OpenAPI compliance testing
 
-**Storage Integration Tests (`tests/storage/`):**
+**Storage Integration Tests (`crates/flashq/tests/storage/`):**
 - Segment-based file storage testing with crash recovery
 - Directory locking and concurrent access prevention  
 - Error simulation (disk full, permission errors)
@@ -196,24 +214,24 @@ Comprehensive documentation is available in the `docs/` directory:
 
 After building with `cargo build --release`:
 
-**Server:**
+**Broker:**
 ```bash
 # In-memory storage (default)
-./target/release/server                    # Port 8080
-./target/release/server 9090              # Custom port
+./target/release/broker                    # Port 8080
+./target/release/broker 9090              # Custom port
 
 # Segment-based file storage backend
-./target/release/server -- --storage=file --data-dir=./data
-./target/release/server 9090 -- --storage=file --data-dir=./data
+./target/release/broker -- --storage=file --data-dir=./data
+./target/release/broker 9090 -- --storage=file --data-dir=./data
 
 # Performance tuning with batch size configuration
-./target/release/server -- --batch-bytes=65536                 # 64KB batches
-./target/release/server -- --storage=file --batch-bytes=131072 # 128KB batches
+./target/release/broker -- --batch-bytes=65536                 # 64KB batches
+./target/release/broker -- --storage=file --batch-bytes=131072 # 128KB batches
 ```
 
 **Logging Behavior:**
-- **Debug builds** (`cargo run --bin server`): TRACE-level logging (verbose request/response details)
-- **Release builds** (`./target/release/server`): INFO-level logging (production-appropriate output)
+- **Debug builds** (`cargo run -p flashq-http --bin broker`): TRACE-level logging (verbose request/response details)
+- **Release builds** (`./target/release/broker`): INFO-level logging (production-appropriate output)
 - Automatic detection based on compilation flags - no manual configuration needed
 
 **Client:**
@@ -224,7 +242,7 @@ After building with `cargo build --release`:
 # Poll records
 ./target/release/client poll news
 
-# Custom server port
+# Custom broker port
 ./target/release/client --port=9090 post news "Custom port record"
 ```
 
@@ -233,20 +251,24 @@ After building with `cargo build --release`:
 **System-wide installation:**
 ```bash
 # Install to ~/.cargo/bin (ensure it's in PATH)
-cargo install --path . --bin server
-cargo install --path . --bin client
+cargo install --path crates/flashq --bin flashq          # Interactive demo
+cargo install --path crates/flashq-http --bin broker     # HTTP broker
+cargo install --path crates/flashq-http --bin client     # CLI client
 
 # Run from anywhere
-server 8080
-client post news "Installed binary record"
+flashq                                    # Interactive demo
+broker 8080                              # HTTP broker
+client producer records news "Installed binary record"   # CLI client
 ```
 
 **Manual deployment:**
 ```bash
 # Copy binaries to deployment location
-cp target/release/server /usr/local/bin/
+cp target/release/flashq /usr/local/bin/
+cp target/release/broker /usr/local/bin/
 cp target/release/client /usr/local/bin/
-chmod +x /usr/local/bin/server
+chmod +x /usr/local/bin/flashq
+chmod +x /usr/local/bin/broker
 chmod +x /usr/local/bin/client
 ```
 
