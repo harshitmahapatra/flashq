@@ -1,5 +1,5 @@
 use super::test_utilities::{TestBroker, TestClient};
-use flashq::http::*;
+use flashq_http::*;
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]

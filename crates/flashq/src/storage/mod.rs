@@ -8,4 +8,3 @@ pub mod r#trait;
 pub use backend::StorageBackend;
 pub use memory::{InMemoryConsumerGroup, InMemoryTopicLog};
 pub use r#trait::{ConsumerGroup, TopicLog};
-

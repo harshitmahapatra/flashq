@@ -67,7 +67,12 @@ fn post_record_interactive(queue: &FlashQ, topics_created: &mut HashMap<String, 
         return;
     }
 
-    let record = Record { key: None, value: content.clone(), headers: None };
+    let record = Record {
+        key: None,
+        value: content.clone(),
+        headers: None,
+    };
+
     match queue.post_records(topic.clone(), vec![record]) {
         Ok(record_id) => {
             *topics_created.entry(topic.clone()).or_insert(0) += 1;
@@ -103,7 +108,17 @@ fn poll_records_interactive(queue: &FlashQ) {
         return;
     }
 
-    let count = if count_str.trim().is_empty() { None } else { match count_str.trim().parse::<usize>() { Ok(n) if n > 0 => Some(n), _ => { println!("❌ Invalid count! Using unlimited."); None } } };
+    let count = if count_str.trim().is_empty() {
+        None
+    } else {
+        match count_str.trim().parse::<usize>() {
+            Ok(n) if n > 0 => Some(n),
+            _ => {
+                println!("❌ Invalid count! Using unlimited.");
+                None
+            }
+        }
+    };
 
     match queue.poll_records(&topic, count) {
         Ok(records) => {
@@ -115,11 +130,28 @@ fn poll_records_interactive(queue: &FlashQ) {
                 for (i, record) in records.iter().enumerate() {
                     println!("Record {} of {}:", i + 1, records.len());
                     println!("  🏷️  Offset: {}", record.offset);
-                    if let Some(ref key) = record.record.key { println!("  🔑 Key: \"{key}\""); }
+
+                    // Display key if present
+                    if let Some(ref key) = record.record.key {
+                        println!("  🔑 Key: \"{key}\"");
+                    }
+
                     println!("  📄 Value: \"{}\"", record.record.value);
-                    if let Some(ref headers) = record.record.headers && !headers.is_empty() { println!("  🏷️  Headers:"); for (hk, hv) in headers { println!("    {hk}: \"{hv}\""); } }
+
+                    // Display headers if present
+                    if let Some(ref headers) = record.record.headers
+                        && !headers.is_empty()
+                    {
+                        println!("  🏷️  Headers:");
+                        for (header_key, header_value) in headers {
+                            println!("    {header_key}: \"{header_value}\"");
+                        }
+                    }
+
                     println!("  ⏰ Timestamp: {}", record.timestamp);
-                    if i < records.len() - 1 { println!(); }
+                    if i < records.len() - 1 {
+                        println!();
+                    }
                 }
                 println!("─────────────────────────────────────");
             }
@@ -136,7 +168,12 @@ fn view_topics(topics_created: &HashMap<String, usize>) {
         println!("📋 Topics created in this session:");
         println!("─────────────────────────────────────");
         for (topic, count) in topics_created {
-            println!("  📌 {} ({} record{})", topic, count, if *count == 1 { "" } else { "s" });
+            println!(
+                "  📌 {} ({} record{})",
+                topic,
+                count,
+                if *count == 1 { "" } else { "s" }
+            );
         }
         println!("─────────────────────────────────────");
         println!("💡 Tip: Use option 2 to poll records from any topic!");
@@ -148,10 +185,24 @@ fn run_demo(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
     println!("─────────────────────────────────────");
 
     let demo_topic = "demo".to_string();
-    let demo_records = ["Hello, World!", "This is the second record", "FlashQ is working great!"];
-    println!("📝 Posting {} demo records to topic '{}'வுகளை...", demo_records.len(), demo_topic);
+    let demo_records = [
+        "Hello, World!",
+        "This is the second record",
+        "FlashQ is working great!",
+    ];
+
+    println!(
+        "📝 Posting {} demo records to topic '{}'வுகளை...",
+        demo_records.len(),
+        demo_topic
+    );
+
     for (i, content) in demo_records.iter().enumerate() {
-        let record = Record { key: None, value: content.to_string(), headers: None };
+        let record = Record {
+            key: None,
+            value: content.to_string(),
+            headers: None,
+        };
         match queue.post_records(demo_topic.clone(), vec![record]) {
             Ok(record_id) => {
                 println!("  ✅ Record {} posted (ID: {})", i + 1, record_id);
@@ -166,12 +217,18 @@ fn run_demo(queue: &FlashQ, topics_created: &mut HashMap<String, usize>) {
         Ok(records) => {
             println!("📋 Retrieved {} record(s):", records.len());
             for (i, record) in records.iter().enumerate() {
-                println!("  {}. \"{}\" (Offset: {}, Time: {})", i + 1, record.record.value, record.offset, record.timestamp);
+                println!(
+                    "  {}. \"{}\" (Offset: {}, Time: {})",
+                    i + 1,
+                    record.record.value,
+                    record.offset,
+                    record.timestamp
+                );
             }
         }
         Err(e) => println!("❌ Failed to poll records: {e}"),
     }
+
     println!("─────────────────────────────────────");
     println!("🎉 Demo completed! You can now explore the menu options.");
 }
-

@@ -2,7 +2,10 @@ use super::test_utilities::{TestBroker, TestClient};
 use serde_json::Value;
 
 fn load_openapi_spec() -> Value {
-    let content = std::fs::read_to_string("docs/openapi.yaml").unwrap();
+    // Resolve path relative to workspace root
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = std::path::Path::new(manifest_dir).join("../../docs/openapi.yaml");
+    let content = std::fs::read_to_string(path).unwrap();
     serde_yaml::from_str(&content).unwrap()
 }
 

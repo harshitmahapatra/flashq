@@ -1,6 +1,6 @@
 use super::test_utilities::{TestBroker, TestClient};
 use flashq::Record;
-use flashq::http::*;
+use flashq_http::*;
 
 #[tokio::test]
 async fn test_post_record_integration() {

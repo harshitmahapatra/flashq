@@ -1,5 +1,6 @@
-use flashq::http::*;
-use flashq::{Record, debug, error, info};
+use flashq::Record;
+use flashq_http::*;
+use log::{debug, error, info};
 use std::env;
 use std::io::Read;
 use std::net::TcpListener;
@@ -31,11 +32,15 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
 }
 
 pub fn ensure_broker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Prefer Cargo-provided binary path when available
+    if let Some(p) = option_env!("CARGO_BIN_EXE_broker") {
+        return Ok(PathBuf::from(p));
+    }
     BROKER_INIT.call_once(|| {
         let _ = env_logger::try_init();
         info!("Building broker binary for integration tests...");
         let output = Command::new("cargo")
-            .args(["build", "--bin", "broker"])
+            .args(["build", "-p", "flashq-http", "--bin", "broker"])
             .output()
             .expect("Failed to build broker binary");
 
@@ -62,10 +67,13 @@ pub fn ensure_broker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 pub fn ensure_client_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(p) = option_env!("CARGO_BIN_EXE_client") {
+        return Ok(PathBuf::from(p));
+    }
     CLIENT_INIT.call_once(|| {
         info!("Building client binary for integration tests...");
         let output = Command::new("cargo")
-            .args(["build", "--bin", "client"])
+            .args(["build", "-p", "flashq-http", "--bin", "client"])
             .output()
             .expect("Failed to build client binary");
 

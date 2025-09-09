@@ -399,6 +399,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "divan",
+ "env_logger",
  "fs4",
  "libc",
  "log",

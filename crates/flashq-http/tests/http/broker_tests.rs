@@ -1,6 +1,5 @@
 use super::test_utilities::{TestBroker, TestClient};
-use flashq::http::common::TopicsResponse;
-
+use flashq_http::TopicsResponse;
 // Health test moved to health_tests.rs
 
 #[tokio::test]

@@ -9,18 +9,8 @@ pub mod topic_log;
 
 pub use common::SyncMode;
 pub use consumer_group::FileConsumerGroup;
+pub use file_io::FileIo;
+pub use index::{IndexEntry, SparseIndex};
+pub use segment::{IndexingConfig, LogSegment};
+pub use segment_manager::SegmentManager;
 pub use topic_log::FileTopicLog;
-
-#[derive(Debug, Clone)]
-pub struct IndexingConfig {
-    pub time_seek_back_bytes: u32,
-}
-
-impl Default for IndexingConfig {
-    fn default() -> Self {
-        Self {
-            time_seek_back_bytes: 1 * 1024 * 1024, // 1 MiB by default
-        }
-    }
-}
-

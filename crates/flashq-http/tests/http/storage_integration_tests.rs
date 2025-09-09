@@ -1,5 +1,5 @@
 use super::test_utilities::{TestBroker, TestClient};
-use flashq::http::*;
+use flashq_http::*;
 use uuid::Uuid;
 
 // Helper functions for generating unique test identifiers

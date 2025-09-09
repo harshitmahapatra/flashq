@@ -1,13 +1,10 @@
 // Storage Integration Tests
-//
-// This module organizes all storage-related integration tests into logical groups.
-// Each module focuses on a specific aspect of storage functionality with clear
-// setup-action-expectation test structure.
+// Aggregates all storage-related integration tests under a single target.
 
 mod storage {
+    pub mod batching_tests;
     pub mod consumer_group_tests;
     pub mod directory_locking_tests;
-    #[cfg(target_os = "linux")]
     pub mod error_simulation_tests;
     pub mod file_io_integration_tests;
     pub mod file_topic_log_tests;

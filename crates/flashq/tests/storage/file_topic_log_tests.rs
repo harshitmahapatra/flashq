@@ -207,8 +207,6 @@ fn test_flashq_large_file_benchmark_scenario() {
     use flashq::storage::{StorageBackend, file::SyncMode};
     use std::collections::HashMap;
 
-    let _ = env_logger::try_init();
-
     // Setup: Create FlashQ with file storage and helper function
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let storage_backend = StorageBackend::new_file_with_path(SyncMode::None, temp_dir.path())
