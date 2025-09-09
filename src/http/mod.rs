@@ -7,7 +7,10 @@
 
 pub mod broker;
 pub mod cli;
-pub mod client;
 pub mod common;
+pub mod consumer;
+pub mod error;
+pub mod metadata;
+pub mod producer;
 
 pub use common::*;

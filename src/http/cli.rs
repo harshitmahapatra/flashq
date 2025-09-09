@@ -1,6 +1,6 @@
 //! CLI interface implementation for FlashQ HTTP client
 
-use super::{client::*, common::parse_headers};
+use super::{common::parse_headers, consumer::*, metadata::*, producer::*};
 use clap::{Parser, Subcommand};
 
 // =============================================================================
@@ -157,7 +157,7 @@ pub async fn handle_consumer_command(
             }
 
             if let Some(ts) = from_time.as_ref() {
-                super::client::fetch_consumer_records_by_time_command(
+                fetch_consumer_records_by_time_command(
                     client,
                     broker_url,
                     &group_id,
@@ -168,7 +168,7 @@ pub async fn handle_consumer_command(
                 )
                 .await;
             } else {
-                super::client::fetch_consumer_records_by_offset_command(
+                fetch_consumer_records_by_offset_command(
                     client,
                     broker_url,
                     &group_id,

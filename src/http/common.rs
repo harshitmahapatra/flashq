@@ -5,6 +5,29 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+pub fn print_record(record: &RecordWithOffset) {
+    print!(
+        "{} [{}] {}",
+        record.timestamp, record.offset, record.record.value
+    );
+
+    if let Some(ref key) = record.record.key {
+        print!(" (key: {key})");
+    }
+
+    if let Some(ref headers) = record.record.headers {
+        if !headers.is_empty() {
+            print!(" (headers: {headers:?})");
+        }
+    }
+
+    println!();
+}
+
+// =============================================================================
 // PRODUCER API TYPES
 // =============================================================================
 
@@ -678,5 +701,38 @@ mod tests {
             include_headers: None,
         };
         assert!(validate_poll_query(&query).is_err());
+    }
+
+    #[test]
+    fn test_print_record_basic() {
+        let record = RecordWithOffset {
+            record: Record::new(None, "test message".to_string(), None),
+            offset: 42,
+            timestamp: "2023-01-01T00:00:00Z".to_string(),
+        };
+
+        // This test just ensures the function doesn't panic
+        print_record(&record);
+    }
+
+    #[test]
+    fn test_print_record_with_key_and_headers() {
+        let headers = HashMap::from([
+            ("user".to_string(), "alice".to_string()),
+            ("type".to_string(), "notification".to_string()),
+        ]);
+
+        let record = RecordWithOffset {
+            record: Record::new(
+                Some("user123".to_string()),
+                "Hello world".to_string(),
+                Some(headers),
+            ),
+            offset: 0,
+            timestamp: "2023-01-01T12:00:00Z".to_string(),
+        };
+
+        // This test just ensures the function doesn't panic with all fields present
+        print_record(&record);
     }
 }
