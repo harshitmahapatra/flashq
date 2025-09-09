@@ -6,35 +6,37 @@ Development setup, testing, and contribution guidelines for FlashQ.
 
 ```bash
 git clone <repository-url> && cd flashq
-cargo build && cargo test  # Verify setup
+cargo build && cargo test  # Verify setup (workspace)
 ```
 
 ## Building
 
 ```bash
-cargo build                    # Debug build
+cargo build                    # Debug build (workspace)
 cargo build --release          # Release build (target/release/)
-cargo build --bin server       # Specific binary
+cargo build -p flashq-http --bin broker    # HTTP broker binary
+cargo build -p flashq --bin flashq        # Demo binary
 ```
 
 ## Testing
 
 ### Test Types
 
-- **Unit** (`src/lib.rs`): Core functionality and data structures
-- **HTTP Integration** (`tests/http/`): REST API endpoints and client functionality
-- **Storage Integration** (`tests/storage/`): File backend, persistence, and crash recovery
+- **Unit** (`crates/*/src/lib.rs`): Core functionality and data structures
+- **HTTP Integration** (`crates/flashq-http/tests/http/`): REST API endpoints and client functionality
+- **Storage Integration** (`crates/flashq/tests/storage/`): File backend, persistence, and crash recovery
 - **Benchmarks** (`benches/`): Performance testing with memory profiling
-- **Utilities** (`tests/*/test_utilities.rs`): Shared test infrastructure
+- **Utilities** (`crates/*/tests/*/test_utilities.rs`): Shared test infrastructure
 
 ### Running Tests
 
 ```bash
-cargo test                              # All tests (unit + integration)
-cargo test --lib                        # Unit tests only
+cargo test                              # All tests (workspace)
+cargo test -p flashq --lib              # Core library unit tests
+cargo test -p flashq-http --lib         # HTTP library unit tests
 cargo test --test '*'                   # All integration tests
-cargo test --test http_integration_tests # HTTP integration tests
-cargo test --test storage_integration_tests # Storage integration tests
+cargo test -p flashq-http --test http_integration_tests # HTTP integration tests
+cargo test -p flashq --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
 ```
@@ -67,50 +69,51 @@ cargo check                     # Fast compile check
 ## Running During Development
 
 ```bash
-cargo run --bin flashq                           # Interactive demo
-cargo run --bin server                           # HTTP server (in-memory, TRACE logging)
-cargo run --bin server -- --storage=file         # File storage backend
-cargo run --bin server -- --batch-bytes=65536    # Custom batch size (64KB)
-cargo run --bin server 9090 -- --storage=file --data-dir=./test-data  # Custom config
-./target/release/server 8080                     # Production (INFO logging)
-cargo run --bin client -- health                 # CLI client
+cargo run -p flashq --bin flashq                           # Interactive demo
+cargo run -p flashq-http --bin broker                      # HTTP broker (in-memory, TRACE logging)
+cargo run -p flashq-http --bin broker -- --storage=file    # File storage backend
+cargo run -p flashq-http --bin broker -- --batch-bytes=65536    # Custom batch size (64KB)
+cargo run -p flashq-http --bin broker 9090 -- --storage=file --data-dir=./test-data  # Custom config
+./target/release/broker 8080                               # Production (INFO logging)
+cargo run -p flashq-http --bin client -- health            # CLI client
 ```
 
 ## Project Structure
 
 ```
-src/lib.rs              # Core FlashQ + Record types
-src/main.rs             # Entry point 
-src/demo.rs             # Interactive demo
-src/error.rs            # Comprehensive error handling
-src/storage/            # Storage abstraction layer
-├── mod.rs              # Public exports and documentation
-├── trait.rs            # TopicLog and ConsumerGroup traits
-├── backend.rs          # StorageBackend factory with directory locking
-├── batching_heuristics.rs # Shared batching utilities and size estimation
-├── memory.rs           # InMemoryTopicLog implementation
-└── file/               # Segment-based file storage
-    ├── mod.rs          # File storage module exports
-    ├── common.rs       # Shared serialization utilities
-    ├── topic_log.rs    # FileTopicLog implementation
-    ├── consumer_group.rs # File-based consumer groups
-    ├── segment.rs      # LogSegment implementation
-    ├── segment_manager.rs # Segment lifecycle management
-    ├── index.rs        # Sparse indexing for segments
-    └── file_io.rs      # File I/O operations
-src/http/               # HTTP components
-├── mod.rs              # HTTP types and validation
-├── server.rs           # HTTP server implementation
-├── client.rs           # HTTP client utilities
-├── cli.rs              # CLI command structures
-└── common.rs           # Shared validation logic
-src/bin/server.rs       # HTTP server binary with storage backend selection
-src/bin/client.rs       # CLI client binary
-tests/                  # Integration test suite
-├── http_integration_tests.rs # Main HTTP integration test runner
-├── storage_integration_tests.rs # Main storage integration test runner
-├── http/               # HTTP integration tests (API endpoints, client functionality)
-└── storage/            # Storage integration tests (persistence, crash recovery)
+Cargo.toml              # Workspace configuration
+crates/
+├── flashq/             # Core library crate
+│   ├── src/lib.rs      # Core FlashQ + Record types  
+│   ├── src/main.rs     # Entry point for demo binary
+│   ├── src/demo.rs     # Interactive demo
+│   ├── src/error.rs    # Comprehensive error handling
+│   ├── src/storage/    # Storage abstraction layer
+│   │   ├── mod.rs      # Public exports and documentation
+│   │   ├── trait.rs    # TopicLog and ConsumerGroup traits
+│   │   ├── backend.rs  # StorageBackend factory with directory locking
+│   │   ├── batching_heuristics.rs # Shared batching utilities
+│   │   ├── memory.rs   # InMemoryTopicLog implementation
+│   │   └── file/       # Segment-based file storage
+│   │       ├── mod.rs  # File storage module exports
+│   │       ├── common.rs # Shared serialization utilities
+│   │       ├── topic_log.rs # FileTopicLog implementation
+│   │       ├── consumer_group.rs # File-based consumer groups
+│   │       ├── segment.rs # LogSegment implementation
+│   │       ├── segment_manager.rs # Segment lifecycle management
+│   │       ├── index.rs # Sparse indexing for segments
+│   │       └── file_io.rs # File I/O operations
+│   └── tests/storage/  # Storage integration tests
+└── flashq-http/        # HTTP broker crate
+    ├── src/lib.rs      # HTTP library exports
+    ├── src/bin/server.rs # HTTP server binary
+    ├── src/bin/client.rs # CLI client binary
+    ├── src/http/       # HTTP components
+    │   ├── mod.rs      # HTTP types and validation
+    │   ├── broker/     # Server-side HTTP handlers
+    │   ├── client.rs   # Client utilities
+    │   └── common.rs   # Shared validation logic
+    └── tests/http/     # HTTP integration tests
 benches/                # Performance benchmarks
 ├── memory_storage.rs   # Memory backend benchmarks
 ├── file_storage_std.rs # File backend benchmarks
@@ -129,21 +132,21 @@ benches/                # Performance benchmarks
 
 ```bash
 # Test file storage with temporary directories
-cargo test --test storage_integration_tests
+cargo test -p flashq --test storage_integration_tests
 
 # Test specific storage components  
-cargo test --test storage_integration_tests::file_topic_log_tests
-cargo test --test storage_integration_tests::error_simulation_tests
+cargo test -p flashq --test storage_integration_tests::file_topic_log_tests
+cargo test -p flashq --test storage_integration_tests::error_simulation_tests
 ```
 
 ### Storage Backend Selection
 
 ```bash
 # In-memory (default)
-cargo run --bin server
+cargo run -p flashq-http --bin broker
 
 # File storage with custom configuration
-cargo run --bin server -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
+cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
 ```
 
 ## Debugging

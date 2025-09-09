@@ -1,6 +1,9 @@
 # ⚡ FlashQ
 
-A Kafka-inspired record queue system built in Rust with HTTP REST API.
+A Kafka-inspired record queue system built in Rust with HTTP REST API. The project consists of two crates in a Cargo workspace:
+
+- **`flashq`** - Core library with storage backends and queue management  
+- **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
 
 **Note: This is a hobby project for learning Rust - not for production use.**
 
@@ -23,34 +26,34 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API.
 Explore the flashq with a user-friendly menu interface:
 
 ```bash
-cargo run --bin flashq
+cargo run -p flashq --bin flashq
 ```
 
-### HTTP Server & Client
+### HTTP Broker & Client
 
-**Start server:**
+**Start broker:**
 ```bash
 # In-memory storage (default)
-cargo run --bin server           # Debug mode (port 8080)
-cargo run --bin server 9090      # Custom port
+cargo run -p flashq-http --bin broker           # Debug mode (port 8080)
+cargo run -p flashq-http --bin broker 9090      # Custom port
 
 # File storage backend
-cargo run --bin server -- --storage=file --data-dir=./data
-cargo run --bin server 9090 -- --storage=file --data-dir=./custom
+cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./data
+cargo run -p flashq-http --bin broker 9090 -- --storage=file --data-dir=./custom
 
 # Configure batch size for performance tuning
-cargo run --bin server -- --batch-bytes=65536      # 64KB batches
-cargo run --bin server -- --storage=file --batch-bytes=131072  # 128KB batches
+cargo run -p flashq-http --bin broker -- --batch-bytes=65536      # 64KB batches
+cargo run -p flashq-http --bin broker -- --storage=file --batch-bytes=131072  # 128KB batches
 ```
 
 **Basic client usage:**
 ```bash
 # Post record
-cargo run --bin client -- producer records news "Hello, World!"
+cargo run -p flashq-http --bin client -- producer records news "Hello, World!"
 
 # Create and use consumer group
-cargo run --bin client -- consumer create my-group
-cargo run --bin client -- consumer fetch my-group news
+cargo run -p flashq-http --bin client -- consumer create my-group
+cargo run -p flashq-http --bin client -- consumer fetch my-group news
 ```
 
 **HTTP API examples:**
@@ -67,7 +70,7 @@ curl http://127.0.0.1:8080/topics/news/records
 ## Development
 
 ```bash
-cargo build && cargo test     # Build and run all tests
+cargo build && cargo test     # Build and run all tests (workspace)
 cargo test --test '*'         # Integration tests only
 cargo bench                   # Run performance benchmarks
 cargo clippy && cargo fmt     # Code quality and formatting
