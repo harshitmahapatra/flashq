@@ -91,9 +91,9 @@ jobs:
     - name: Build all binaries (debug)
       if: github.event_name != 'release'
       run: |
-        cargo build --bin server
-        cargo build --bin client
-        cargo build --bin flashq
+        cargo build -p flashq-http --bin broker
+        cargo build -p flashq-http --bin client
+        cargo build -p flashq --bin flashq
 
     - name: Build release (on release only)
       if: github.event_name == 'release'
@@ -102,9 +102,9 @@ jobs:
     - name: Build all binaries (release)
       if: github.event_name == 'release'
       run: |
-        cargo build --release --bin server
-        cargo build --release --bin client
-        cargo build --release --bin flashq
+        cargo build --release -p flashq-http --bin broker
+        cargo build --release -p flashq-http --bin client
+        cargo build --release -p flashq --bin flashq
 
   security:
     name: Security Audit
