@@ -1,13 +1,13 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::Record;
 use flashq::http::*;
 
 #[tokio::test]
 async fn test_post_record_integration() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .post_record_with_record("test", None, "Integration test record", None)
@@ -46,10 +46,10 @@ async fn test_post_record_integration() {
 
 #[tokio::test]
 async fn test_record_size_and_validation_limits() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "validation_test_topic";
 
     let max_key = "x".repeat(1024);
@@ -157,10 +157,10 @@ async fn test_record_size_and_validation_limits() {
 
 #[tokio::test]
 async fn test_client_binary_integration() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "client_test_topic";
 
     // Test posting with client binary
@@ -184,15 +184,15 @@ async fn test_client_binary_integration() {
 
 #[tokio::test]
 async fn test_concurrent_record_posting() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "concurrent_posting_topic";
 
     let post_handles: Vec<_> = (0..20)
         .map(|i| {
-            let helper = TestClient::new(&server);
+            let helper = TestClient::new(&broker);
             tokio::spawn(async move {
                 let key = if i % 2 == 0 {
                     Some(format!("key_{i}"))
@@ -257,7 +257,7 @@ async fn test_concurrent_record_posting() {
 
     let multi_topic_handles: Vec<_> = (0..15)
         .map(|i| {
-            let helper = TestClient::new(&server);
+            let helper = TestClient::new(&broker);
             let topic_name = format!("concurrent_topic_{}", i % 3);
             tokio::spawn(async move {
                 let response = helper
@@ -292,10 +292,10 @@ async fn test_concurrent_record_posting() {
 
 #[tokio::test]
 async fn test_batch_record_posting() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "batch_test_topic";
 
     // Test single record batch
@@ -357,10 +357,10 @@ async fn test_batch_record_posting() {
 
 #[tokio::test]
 async fn test_record_structure_edge_cases() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "edge_case_topic";
 
     let response = helper

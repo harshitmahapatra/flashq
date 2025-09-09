@@ -237,14 +237,15 @@ impl FlashQ {
         }
     }
 
-    pub fn poll_records_for_consumer_group(
+    pub fn poll_records_for_consumer_group_from_offset(
         &self,
         group_id: &str,
         topic: &str,
+        offset: u64,
         count: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         let current_offset = self.get_consumer_group_offset(group_id, topic)?;
-        let records = self.poll_records_from_offset(topic, current_offset, count)?;
+        let records = self.poll_records_from_offset(topic, offset, count)?;
 
         // Record that this consumer group has accessed this topic (with offset 0 if first time)
         // This ensures the topic appears in the consumer group's JSON file
@@ -253,17 +254,6 @@ impl FlashQ {
         }
 
         Ok(records)
-    }
-
-    pub fn poll_records_for_consumer_group_from_offset(
-        &self,
-        group_id: &str,
-        topic: &str,
-        offset: u64,
-        count: Option<usize>,
-    ) -> Result<Vec<RecordWithOffset>, FlashQError> {
-        self.get_consumer_group_offset(group_id, topic)?;
-        self.poll_records_from_offset(topic, offset, count)
     }
 
     pub fn poll_records_for_consumer_group_from_time(
@@ -283,6 +273,13 @@ impl FlashQ {
             Some(topic_log) => topic_log.value().read().unwrap().next_offset(),
             None => 0,
         }
+    }
+
+    pub fn get_topics(&self) -> Vec<String> {
+        self.topics
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Recover existing topics from disk for file storage backends
@@ -667,8 +664,9 @@ mod tests {
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
 
         // Poll records - offset should remain 0 (polling doesn't advance offset)
+        let current_offset = queue.get_consumer_group_offset(group_id, topic).unwrap();
         let records = queue
-            .poll_records_for_consumer_group(group_id, topic, Some(2))
+            .poll_records_for_consumer_group_from_offset(group_id, topic, current_offset, Some(2))
             .unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "msg1");
@@ -676,8 +674,9 @@ mod tests {
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 0);
 
         // Poll again - should return same records since offset hasn't advanced
+        let current_offset = queue.get_consumer_group_offset(group_id, topic).unwrap();
         let records = queue
-            .poll_records_for_consumer_group(group_id, topic, Some(2))
+            .poll_records_for_consumer_group_from_offset(group_id, topic, current_offset, Some(2))
             .unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record.value, "msg1");
@@ -691,8 +690,9 @@ mod tests {
         assert_eq!(queue.get_consumer_group_offset(group_id, topic).unwrap(), 2);
 
         // Poll again - should now return the remaining record
+        let current_offset = queue.get_consumer_group_offset(group_id, topic).unwrap();
         let records = queue
-            .poll_records_for_consumer_group(group_id, topic, None)
+            .poll_records_for_consumer_group_from_offset(group_id, topic, current_offset, None)
             .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record.value, "msg3");

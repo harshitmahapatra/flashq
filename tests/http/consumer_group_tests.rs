@@ -1,12 +1,12 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::http::*;
 
 #[tokio::test]
 async fn test_consumer_group_operations() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "test_group";
 
     let response = helper.create_consumer_group(group_id).await.unwrap();
@@ -23,10 +23,10 @@ async fn test_consumer_group_operations() {
 
 #[tokio::test]
 async fn test_multiple_consumer_groups() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     // Create multiple consumer groups
     let group1 = "group_1";
@@ -52,10 +52,10 @@ async fn test_multiple_consumer_groups() {
 
 #[tokio::test]
 async fn test_consumer_group_error_cases() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     // Test invalid group operations
     let invalid_group = "non_existent_group";

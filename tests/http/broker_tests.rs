@@ -1,13 +1,13 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 
 // Health test moved to health_tests.rs
 
 #[tokio::test]
-async fn test_server_error_handling() {
-    let server = TestServer::start()
+async fn test_broker_error_handling() {
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .client
@@ -29,10 +29,10 @@ async fn test_server_error_handling() {
 
 #[tokio::test]
 async fn test_malformed_requests() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .client

@@ -88,23 +88,23 @@ pub enum OffsetCommands {
 // COMMAND DISPATCHERS
 // =============================================================================
 
-pub async fn handle_cli_command(client: &reqwest::Client, server_url: &str, command: Commands) {
+pub async fn handle_cli_command(client: &reqwest::Client, broker_url: &str, command: Commands) {
     match command {
         Commands::Health => {
-            handle_health_command(client, server_url).await;
+            handle_health_command(client, broker_url).await;
         }
         Commands::Producer(producer_cmd) => {
-            handle_producer_command(client, server_url, producer_cmd).await;
+            handle_producer_command(client, broker_url, producer_cmd).await;
         }
         Commands::Consumer(consumer_cmd) => {
-            handle_consumer_command(client, server_url, consumer_cmd).await;
+            handle_consumer_command(client, broker_url, consumer_cmd).await;
         }
     }
 }
 
 pub async fn handle_producer_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     producer_cmd: ProducerCommands,
 ) {
     match producer_cmd {
@@ -116,10 +116,10 @@ pub async fn handle_producer_command(
             batch,
         } => {
             if let Some(batch_file) = batch {
-                handle_batch_post(client, server_url, &topic, &batch_file).await;
+                handle_batch_post(client, broker_url, &topic, &batch_file).await;
             } else if let Some(message) = message {
                 let headers = parse_headers(header);
-                post_records(client, server_url, &topic, key, &message, headers).await;
+                post_records(client, broker_url, &topic, key, &message, headers).await;
             } else {
                 println!("Error: Either provide a message or use --batch with a JSON file");
                 std::process::exit(1);
@@ -130,15 +130,15 @@ pub async fn handle_producer_command(
 
 pub async fn handle_consumer_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     consumer_cmd: ConsumerCommands,
 ) {
     match consumer_cmd {
         ConsumerCommands::Create { group_id } => {
-            create_consumer_group_command(client, server_url, &group_id).await;
+            create_consumer_group_command(client, broker_url, &group_id).await;
         }
         ConsumerCommands::Leave { group_id } => {
-            leave_consumer_group_command(client, server_url, &group_id).await;
+            leave_consumer_group_command(client, broker_url, &group_id).await;
         }
         ConsumerCommands::Fetch {
             group_id,
@@ -159,7 +159,7 @@ pub async fn handle_consumer_command(
             if let Some(ts) = from_time.as_ref() {
                 super::client::fetch_consumer_records_by_time_command(
                     client,
-                    server_url,
+                    broker_url,
                     &group_id,
                     &topic,
                     ts,
@@ -170,7 +170,7 @@ pub async fn handle_consumer_command(
             } else {
                 super::client::fetch_consumer_records_by_offset_command(
                     client,
-                    server_url,
+                    broker_url,
                     &group_id,
                     &topic,
                     from_offset,
@@ -181,14 +181,14 @@ pub async fn handle_consumer_command(
             }
         }
         ConsumerCommands::Offset(offset_cmd) => {
-            handle_offset_command(client, server_url, offset_cmd).await;
+            handle_offset_command(client, broker_url, offset_cmd).await;
         }
     }
 }
 
 pub async fn handle_offset_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     offset_cmd: OffsetCommands,
 ) {
     match offset_cmd {
@@ -198,10 +198,10 @@ pub async fn handle_offset_command(
             offset,
             metadata: _,
         } => {
-            commit_offset_command(client, server_url, &group_id, &topic, offset).await;
+            commit_offset_command(client, broker_url, &group_id, &topic, offset).await;
         }
         OffsetCommands::Get { group_id, topic } => {
-            get_offset_command(client, server_url, &group_id, &topic).await;
+            get_offset_command(client, broker_url, &group_id, &topic).await;
         }
     }
 }

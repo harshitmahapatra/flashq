@@ -1,11 +1,11 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 
 #[tokio::test]
 async fn test_health_check() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
 
     let response = helper.health_check().await.unwrap();
     assert_eq!(response.status(), 200);

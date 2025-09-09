@@ -1,4 +1,4 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::http::*;
 use uuid::Uuid;
 
@@ -15,10 +15,10 @@ fn unique_topic() -> String {
 
 #[tokio::test]
 async fn test_memory_backend_basic_operations() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let client = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let client = TestClient::new(&broker);
     let topic = unique_topic();
 
     // Test basic post and poll operations with memory backend (default)
@@ -40,10 +40,10 @@ async fn test_memory_backend_basic_operations() {
 
 #[tokio::test]
 async fn test_file_backend_basic_operations() {
-    let server = TestServer::start_with_storage("file")
+    let broker = TestBroker::start_with_storage("file")
         .await
-        .expect("Failed to start test server with file backend");
-    let client = TestClient::new(&server);
+        .expect("Failed to start test broker with file backend");
+    let client = TestClient::new(&broker);
     let topic = unique_topic();
 
     // Test basic post and poll operations with file backend
@@ -63,7 +63,7 @@ async fn test_file_backend_basic_operations() {
     assert_eq!(poll_data.records.len(), 1);
 
     // Verify data directory was created
-    if let Some(data_dir) = server.data_dir() {
+    if let Some(data_dir) = broker.data_dir() {
         assert!(data_dir.exists());
         assert!(data_dir.is_dir());
     }
@@ -79,11 +79,11 @@ async fn test_file_backend_persistence_across_restarts() {
         .tempdir()
         .expect("Failed to create temporary directory");
 
-    // Start server with file backend
-    let server = TestServer::start_with_data_dir(temp_dir.path())
+    // Start broker with file backend
+    let broker = TestBroker::start_with_data_dir(temp_dir.path())
         .await
-        .expect("Failed to start test server");
-    let client = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let client = TestClient::new(&broker);
 
     // Post records
     for i in 0..5 {
@@ -98,15 +98,15 @@ async fn test_file_backend_persistence_across_restarts() {
     let poll_data = client.assert_poll_response(response, 5, None).await;
     assert_eq!(poll_data.high_water_mark, 5);
 
-    // Stop the server (drop it)
-    drop(server);
+    // Stop the broker (drop it)
+    drop(broker);
     drop(client);
 
-    // Start a new server with the same data directory
-    let server2 = TestServer::start_with_data_dir(temp_dir.path())
+    // Start a new broker with the same data directory
+    let broker2 = TestBroker::start_with_data_dir(temp_dir.path())
         .await
-        .expect("Failed to restart test server");
-    let client2 = TestClient::new(&server2);
+        .expect("Failed to restart test broker");
+    let client2 = TestClient::new(&broker2);
 
     // Verify records persisted across restart
     let response = client2
@@ -119,7 +119,7 @@ async fn test_file_backend_persistence_across_restarts() {
     assert_eq!(poll_data.records[4].record.value, "Persistent record 4");
 
     // Clean up
-    drop(server2);
+    drop(broker2);
     // TempDir automatically cleans up when dropped
 }
 
@@ -134,11 +134,11 @@ async fn test_consumer_group_persistence_across_restarts() {
         .tempdir()
         .expect("Failed to create temporary directory");
 
-    // Start server with file backend
-    let server = TestServer::start_with_data_dir(temp_dir.path())
+    // Start broker with file backend
+    let broker = TestBroker::start_with_data_dir(temp_dir.path())
         .await
-        .expect("Failed to start test server");
-    let client = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let client = TestClient::new(&broker);
 
     // Create consumer group and post records
     client.create_consumer_group(&group_id).await.unwrap();
@@ -164,15 +164,15 @@ async fn test_consumer_group_persistence_across_restarts() {
     let offset_response: OffsetResponse = response.json().await.unwrap();
     assert_eq!(offset_response.committed_offset, 2);
 
-    // Stop the server
-    drop(server);
+    // Stop the broker
+    drop(broker);
     drop(client);
 
-    // Start a new server with the same data directory
-    let server2 = TestServer::start_with_data_dir(temp_dir.path())
+    // Start a new broker with the same data directory
+    let broker2 = TestBroker::start_with_data_dir(temp_dir.path())
         .await
-        .expect("Failed to restart test server");
-    let client2 = TestClient::new(&server2);
+        .expect("Failed to restart test broker");
+    let client2 = TestClient::new(&broker2);
 
     // Verify consumer group and offset persisted
     let response = client2
@@ -185,7 +185,7 @@ async fn test_consumer_group_persistence_across_restarts() {
     assert_eq!(offset_response.high_water_mark, 3);
 
     // Clean up
-    drop(server2);
+    drop(broker2);
     // TempDir automatically cleans up when dropped
 }
 
@@ -194,16 +194,16 @@ async fn test_memory_vs_file_backend_consistency() {
     let topic = unique_topic();
 
     // Test with memory backend
-    let memory_server = TestServer::start()
+    let memory_broker = TestBroker::start()
         .await
-        .expect("Failed to start memory server");
-    let memory_client = TestClient::new(&memory_server);
+        .expect("Failed to start memory broker");
+    let memory_client = TestClient::new(&memory_broker);
 
     // Test with file backend
-    let file_server = TestServer::start_with_storage("file")
+    let file_broker = TestBroker::start_with_storage("file")
         .await
-        .expect("Failed to start file server");
-    let file_client = TestClient::new(&file_server);
+        .expect("Failed to start file broker");
+    let file_client = TestClient::new(&file_broker);
 
     // Post same records to both backends
     let test_records = vec!["Record A", "Record B", "Record C"];
@@ -243,10 +243,10 @@ async fn test_memory_vs_file_backend_consistency() {
 
 #[tokio::test]
 async fn test_file_backend_creates_data_directory() {
-    let server = TestServer::start_with_storage("file")
+    let broker = TestBroker::start_with_storage("file")
         .await
-        .expect("Failed to start test server with file backend");
-    let client = TestClient::new(&server);
+        .expect("Failed to start test broker with file backend");
+    let client = TestClient::new(&broker);
     let topic = unique_topic();
 
     // Post a record to ensure directory creation
@@ -256,7 +256,7 @@ async fn test_file_backend_creates_data_directory() {
         .unwrap();
 
     // Verify data directory exists
-    if let Some(data_dir) = server.data_dir() {
+    if let Some(data_dir) = broker.data_dir() {
         assert!(data_dir.exists());
         assert!(data_dir.is_dir());
 

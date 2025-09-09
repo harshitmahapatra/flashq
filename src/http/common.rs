@@ -24,6 +24,31 @@ pub struct ProduceResponse {
 // =============================================================================
 
 #[derive(Serialize, Deserialize)]
+pub struct ConsumerGroupParams {
+    pub group_id: String,
+    pub topic: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConsumerGroupIdParams {
+    pub group_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PollOffsetQuery {
+    pub from_offset: Option<u64>,
+    pub max_records: Option<usize>,
+    pub include_headers: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PollTimeQuery {
+    pub from_time: String,
+    pub max_records: Option<usize>,
+    pub include_headers: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct PollQuery {
     pub from_offset: Option<u64>,
     pub from_time: Option<String>,
@@ -366,6 +391,11 @@ pub struct HealthCheckResponse {
     pub status: String,
     pub service: String,
     pub timestamp: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TopicsResponse {
+    pub topics: Vec<String>,
 }
 
 // =============================================================================

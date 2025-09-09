@@ -1,14 +1,14 @@
 // Tests for expanded client functionality
 // These tests verify that the client binary supports all operations needed by integration tests
 
-use super::test_utilities::{TestServer, ensure_client_binary};
+use super::test_utilities::{TestBroker, ensure_client_binary};
 use std::process::Command;
 
 #[tokio::test]
 async fn test_client_consumer_group_operations() {
-    let server = TestServer::start().await.unwrap();
+    let broker = TestBroker::start().await.unwrap();
     let client_binary = ensure_client_binary().unwrap();
-    let port = server.port.to_string();
+    let port = broker.port.to_string();
 
     // Test creating consumer group
     let output = Command::new(&client_binary)
@@ -92,9 +92,9 @@ async fn test_client_consumer_group_operations() {
 
 #[tokio::test]
 async fn test_client_batch_posting() {
-    let server = TestServer::start().await.unwrap();
+    let broker = TestBroker::start().await.unwrap();
     let client_binary = ensure_client_binary().unwrap();
-    let port = server.port.to_string();
+    let port = broker.port.to_string();
 
     // Test batch posting with JSON file
     let batch_data = r#"[
@@ -126,9 +126,9 @@ async fn test_client_batch_posting() {
 
 #[tokio::test]
 async fn test_client_advanced_post() {
-    let server = TestServer::start().await.unwrap();
+    let broker = TestBroker::start().await.unwrap();
     let client_binary = ensure_client_binary().unwrap();
-    let port = server.port.to_string();
+    let port = broker.port.to_string();
 
     // Test posting with key and headers
     let output = Command::new(&client_binary)
@@ -157,9 +157,9 @@ async fn test_client_advanced_post() {
 
 #[tokio::test]
 async fn test_client_advanced_poll() {
-    let server = TestServer::start().await.unwrap();
+    let broker = TestBroker::start().await.unwrap();
     let client_binary = ensure_client_binary().unwrap();
-    let port = server.port.to_string();
+    let port = broker.port.to_string();
 
     // First create consumer group
     let output = Command::new(&client_binary)
@@ -197,9 +197,9 @@ async fn test_client_advanced_poll() {
 
 #[tokio::test]
 async fn test_client_health_check() {
-    let server = TestServer::start().await.unwrap();
+    let broker = TestBroker::start().await.unwrap();
     let client_binary = ensure_client_binary().unwrap();
-    let port = server.port.to_string();
+    let port = broker.port.to_string();
 
     // Test health check
     let output = Command::new(&client_binary)

@@ -57,11 +57,18 @@ fn test_consumer_group_compatibility() {
         .unwrap();
     file_queue.create_consumer_group(group_id.clone()).unwrap();
 
+    let memory_offset = memory_queue
+        .get_consumer_group_offset(&group_id, &topic_name)
+        .unwrap_or(0);
+    let file_offset = file_queue
+        .get_consumer_group_offset(&group_id, &topic_name)
+        .unwrap_or(0);
+
     let memory_batch = memory_queue
-        .poll_records_for_consumer_group(&group_id, &topic_name, Some(2))
+        .poll_records_for_consumer_group_from_offset(&group_id, &topic_name, memory_offset, Some(2))
         .unwrap();
     let file_batch = file_queue
-        .poll_records_for_consumer_group(&group_id, &topic_name, Some(2))
+        .poll_records_for_consumer_group_from_offset(&group_id, &topic_name, file_offset, Some(2))
         .unwrap();
 
     assert_eq!(memory_batch.len(), file_batch.len());

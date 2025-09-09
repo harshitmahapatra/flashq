@@ -1,4 +1,4 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use serde_json::Value;
 
 fn load_openapi_spec() -> Value {
@@ -68,8 +68,8 @@ fn validate_schema(spec: &Value, schema: &Value, data: &Value) -> Result<(), Str
 #[tokio::test]
 async fn test_health_endpoint_compliance() {
     let spec = load_openapi_spec();
-    let server = TestServer::start().await.unwrap();
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.unwrap();
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .client
@@ -90,8 +90,8 @@ async fn test_health_endpoint_compliance() {
 #[tokio::test]
 async fn test_produce_records_endpoint_compliance() {
     let spec = load_openapi_spec();
-    let server = TestServer::start().await.unwrap();
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.unwrap();
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .post_record_with_record("test_topic", None, "Test record", None)
@@ -110,8 +110,8 @@ async fn test_produce_records_endpoint_compliance() {
 #[tokio::test]
 async fn test_consumer_group_create_compliance() {
     let spec = load_openapi_spec();
-    let server = TestServer::start().await.unwrap();
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.unwrap();
+    let helper = TestClient::new(&broker);
 
     let response = helper.create_consumer_group("test_group").await.unwrap();
 
@@ -127,8 +127,8 @@ async fn test_consumer_group_create_compliance() {
 #[tokio::test]
 async fn test_consumer_fetch_records_by_offset_compliance() {
     let spec = load_openapi_spec();
-    let server = TestServer::start().await.unwrap();
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.unwrap();
+    let helper = TestClient::new(&broker);
 
     let group_id = "fetch_compliance_group";
     let topic = "fetch_compliance_topic";
@@ -158,8 +158,8 @@ async fn test_consumer_fetch_records_by_offset_compliance() {
 #[tokio::test]
 async fn test_error_response_compliance() {
     let _spec = load_openapi_spec();
-    let server = TestServer::start().await.unwrap();
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.unwrap();
+    let helper = TestClient::new(&broker);
 
     let response = helper
         .fetch_records_for_consumer_group("nonexistent_group", "test_topic", None)

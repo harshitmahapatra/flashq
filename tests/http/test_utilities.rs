@@ -14,9 +14,9 @@ use tokio::time::sleep;
 // CONFIGURATION CONSTANTS
 // ============================================================================
 
-static SERVER_INIT: Once = Once::new();
+static BROKER_INIT: Once = Once::new();
 static CLIENT_INIT: Once = Once::new();
-static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static BROKER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CLIENT_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 // ============================================================================
@@ -30,32 +30,32 @@ pub fn find_available_port() -> Result<u16, Box<dyn std::error::Error>> {
     Ok(addr.port())
 }
 
-pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    SERVER_INIT.call_once(|| {
+pub fn ensure_broker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    BROKER_INIT.call_once(|| {
         let _ = env_logger::try_init();
-        info!("Building server binary for integration tests...");
+        info!("Building broker binary for integration tests...");
         let output = Command::new("cargo")
-            .args(["build", "--bin", "server"])
+            .args(["build", "--bin", "broker"])
             .output()
-            .expect("Failed to build server binary");
+            .expect("Failed to build broker binary");
 
         if !output.status.success() {
             panic!(
-                "Failed to build server binary: {}",
+                "Failed to build broker binary: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
 
-        let binary_path = PathBuf::from("target/debug/server");
-        *SERVER_BINARY_PATH.lock().unwrap() = Some(binary_path);
-        info!("Server binary built successfully");
+        let binary_path = PathBuf::from("target/debug/broker");
+        *BROKER_BINARY_PATH.lock().unwrap() = Some(binary_path);
+        info!("Broker binary built successfully");
     });
 
-    let binary_path = SERVER_BINARY_PATH
+    let binary_path = BROKER_BINARY_PATH
         .lock()
         .unwrap()
         .as_ref()
-        .expect("Server binary path should be set")
+        .expect("Broker binary path should be set")
         .clone();
 
     Ok(binary_path)
@@ -105,27 +105,27 @@ pub fn get_timeout_config() -> (u32, u64) {
 // TEST INFRASTRUCTURE
 // ============================================================================
 
-pub struct TestServer {
+pub struct TestBroker {
     process: Child,
     pub port: u16,
     temp_dir: Option<tempfile::TempDir>,
 }
 
-impl TestServer {
+impl TestBroker {
     pub async fn start() -> Result<Self, Box<dyn std::error::Error>> {
         let port = find_available_port()?;
-        let server_binary = ensure_server_binary()?;
+        let broker_binary = ensure_broker_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
-        info!("Starting server on port {port} using binary: {server_binary:?}");
+        info!("Starting broker on port {port} using binary: {broker_binary:?}");
 
-        let mut process = Command::new(&server_binary)
+        let mut process = Command::new(&broker_binary)
             .args([&port.to_string()])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
 
-        // Wait for server to start and verify it's responding
+        // Wait for broker to start and verify it's responding
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
@@ -136,24 +136,24 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                error!("Server process exited with status: {exit_status}");
+                error!("Broker process exited with status: {exit_status}");
                 if let Some(mut stderr) = process.stderr.take() {
                     let mut buf = String::new();
                     stderr.read_to_string(&mut buf).unwrap();
-                    error!("Server stderr: {buf}");
+                    error!("Broker stderr: {buf}");
                 }
-                return Err("Server process exited".into());
+                return Err("Broker process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
                     info!(
-                        "Server started successfully on port {} after {} attempts",
+                        "Broker started successfully on port {} after {} attempts",
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer {
+                    return Ok(TestBroker {
                         process,
                         port,
                         temp_dir: None,
@@ -167,21 +167,21 @@ impl TestServer {
             }
         }
 
-        error!("Server failed to start within {max_attempts} attempts");
+        error!("Broker failed to start within {max_attempts} attempts");
         let _ = process.kill();
-        Err("Server failed to start within timeout".into())
+        Err("Broker failed to start within timeout".into())
     }
 
     pub async fn start_with_storage(storage: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let port = find_available_port()?;
-        let server_binary = ensure_server_binary()?;
+        let broker_binary = ensure_broker_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
         info!(
-            "Starting server on port {port} with {storage} storage using binary: {server_binary:?}"
+            "Starting broker on port {port} with {storage} storage using binary: {broker_binary:?}"
         );
 
-        let mut cmd = Command::new(&server_binary);
+        let mut cmd = Command::new(&broker_binary);
         cmd.args([&port.to_string()]);
 
         // For file storage, create a temporary directory for each test
@@ -199,7 +199,7 @@ impl TestServer {
         };
 
         let mut process = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
-        // Wait for server to start and verify it's responding
+        // Wait for broker to start and verify it's responding
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
@@ -210,24 +210,24 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                error!("Server process exited with status: {exit_status}");
+                error!("Broker process exited with status: {exit_status}");
                 if let Some(mut stderr) = process.stderr.take() {
                     let mut buf = String::new();
                     stderr.read_to_string(&mut buf).unwrap();
-                    error!("Server stderr: {buf}");
+                    error!("Broker stderr: {buf}");
                 }
-                return Err("Server process exited".into());
+                return Err("Broker process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
                     info!(
-                        "Server started successfully on port {} with {storage} storage after {} attempts",
+                        "Broker started successfully on port {} with {storage} storage after {} attempts",
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer {
+                    return Ok(TestBroker {
                         process,
                         port,
                         temp_dir,
@@ -241,9 +241,9 @@ impl TestServer {
             }
         }
 
-        error!("Server failed to start within {max_attempts} attempts");
+        error!("Broker failed to start within {max_attempts} attempts");
         let _ = process.kill();
-        Err("Server failed to start within timeout".into())
+        Err("Broker failed to start within timeout".into())
     }
 
     async fn try_health_check(
@@ -294,18 +294,18 @@ impl TestServer {
         self.temp_dir.as_ref().map(|t| t.path())
     }
 
-    /// Start server with a specific data directory (for persistence testing)
+    /// Start broker with a specific data directory (for persistence testing)
     pub async fn start_with_data_dir<P: AsRef<std::path::Path>>(
         data_dir: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let port = find_available_port()?;
-        let server_binary = ensure_server_binary()?;
+        let broker_binary = ensure_broker_binary()?;
         let (max_attempts, sleep_ms) = get_timeout_config();
 
         let data_dir_path = data_dir.as_ref();
-        info!("Starting server on port {port} with file storage using data dir: {data_dir_path:?}");
+        info!("Starting broker on port {port} with file storage using data dir: {data_dir_path:?}");
 
-        let mut process = Command::new(&server_binary)
+        let mut process = Command::new(&broker_binary)
             .args([
                 &port.to_string(),
                 "--data-dir",
@@ -315,7 +315,7 @@ impl TestServer {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        // Wait for server to start and verify it's responding
+        // Wait for broker to start and verify it's responding
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
@@ -326,24 +326,24 @@ impl TestServer {
 
             // Check if process is still running
             if let Ok(Some(exit_status)) = process.try_wait() {
-                error!("Server process exited with status: {exit_status}");
+                error!("Broker process exited with status: {exit_status}");
                 if let Some(mut stderr) = process.stderr.take() {
                     let mut buf = String::new();
                     stderr.read_to_string(&mut buf).unwrap();
-                    error!("Server stderr: {buf}");
+                    error!("Broker stderr: {buf}");
                 }
-                return Err("Server process exited".into());
+                return Err("Broker process exited".into());
             }
 
             // Try to connect to health endpoint with retry logic
             match Self::try_health_check(&client, &health_url, attempt + 1).await {
                 Ok(true) => {
                     info!(
-                        "Server started successfully on port {} with custom data dir after {} attempts",
+                        "Broker started successfully on port {} with custom data dir after {} attempts",
                         port,
                         attempt + 1
                     );
-                    return Ok(TestServer {
+                    return Ok(TestBroker {
                         process,
                         port,
                         temp_dir: None, // External directory - no cleanup
@@ -357,13 +357,13 @@ impl TestServer {
             }
         }
 
-        error!("Server failed to start within {max_attempts} attempts");
+        error!("Broker failed to start within {max_attempts} attempts");
         let _ = process.kill();
-        Err("Server failed to start within timeout".into())
+        Err("Broker failed to start within timeout".into())
     }
 }
 
-impl Drop for TestServer {
+impl Drop for TestBroker {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
@@ -378,10 +378,10 @@ pub struct TestClient {
 
 #[allow(dead_code)]
 impl TestClient {
-    pub fn new(server: &TestServer) -> Self {
+    pub fn new(broker: &TestBroker) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: format!("http://127.0.0.1:{}", server.port),
+            base_url: format!("http://127.0.0.1:{}", broker.port),
         }
     }
 
@@ -579,7 +579,7 @@ impl TestClient {
         let poll_data: FetchResponse = response.json().await.unwrap();
         assert_eq!(poll_data.records.len(), expected_count);
 
-        // Verify high water mark is reasonable (should be >= next_offset)
+        // Verify high-water mark is reasonable (should be >= next_offset)
         assert!(poll_data.high_water_mark >= poll_data.next_offset);
 
         // Verify lag calculation if present

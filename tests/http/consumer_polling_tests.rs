@@ -1,12 +1,12 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::http::*;
 
 #[tokio::test]
 async fn test_consumer_group_record_fetching() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "fetch_test_group";
     let topic = "fetch_test_topic";
 
@@ -63,10 +63,10 @@ async fn test_consumer_group_record_fetching() {
 
 #[tokio::test]
 async fn test_consumer_group_from_offset_fetching() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "offset_fetch_group";
     let topic = "offset_fetch_topic";
 
@@ -101,10 +101,10 @@ async fn test_consumer_group_from_offset_fetching() {
 
 #[tokio::test]
 async fn test_basic_polling_for_testing() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "poll_test_topic";
 
     // Post some records
@@ -136,10 +136,10 @@ async fn test_basic_polling_for_testing() {
 
 #[tokio::test]
 async fn test_polling_with_max_records_limit() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let topic = "limit_test_topic";
 
     // Post 10 records

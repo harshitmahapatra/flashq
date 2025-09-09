@@ -8,24 +8,24 @@ use std::collections::HashMap;
 // HEALTH CHECK COMMANDS
 // =============================================================================
 
-pub async fn handle_health_command(client: &reqwest::Client, server_url: &str) {
-    let url = format!("{server_url}/health");
+pub async fn handle_health_command(client: &reqwest::Client, broker_url: &str) {
+    let url = format!("{broker_url}/health");
     match client.get(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
                 match response.json::<HealthCheckResponse>().await {
                     Ok(health_response) => {
-                        println!("Server Status: {}", health_response.status);
+                        println!("Broker Status: {}", health_response.status);
                         println!("Service: {}", health_response.service);
                         println!("Timestamp: {}", health_response.timestamp);
                     }
-                    Err(_) => println!("Server is healthy (response parsing failed)"),
+                    Err(_) => println!("Broker is healthy (response parsing failed)"),
                 }
             } else {
-                handle_error_response(response, "check server health").await;
+                handle_error_response(response, "check broker health").await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
@@ -35,7 +35,7 @@ pub async fn handle_health_command(client: &reqwest::Client, server_url: &str) {
 
 pub async fn handle_batch_post(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     topic: &str,
     batch_file: &str,
 ) {
@@ -43,7 +43,7 @@ pub async fn handle_batch_post(
         Ok(json_content) => match serde_json::from_str::<Vec<Record>>(&json_content) {
             Ok(records) => {
                 let request = ProduceRequest { records };
-                let url = format!("{server_url}/topic/{topic}/record");
+                let url = format!("{broker_url}/topic/{topic}/record");
 
                 match client.post(&url).json(&request).send().await {
                     Ok(response) => {
@@ -67,7 +67,7 @@ pub async fn handle_batch_post(
                             .await;
                         }
                     }
-                    Err(e) => println!("Failed to connect to server: {e}"),
+                    Err(e) => println!("Failed to connect to broker: {e}"),
                 }
             }
             Err(e) => {
@@ -84,7 +84,7 @@ pub async fn handle_batch_post(
 
 pub async fn post_records(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     topic: &str,
     key: Option<String>,
     message: &str,
@@ -100,7 +100,7 @@ pub async fn post_records(
         records: vec![record],
     };
 
-    let url = format!("{server_url}/topic/{topic}/record");
+    let url = format!("{broker_url}/topic/{topic}/record");
 
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
@@ -118,7 +118,7 @@ pub async fn post_records(
                 handle_error_response(response, &format!("post to topic '{topic}'")).await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
@@ -128,10 +128,10 @@ pub async fn post_records(
 
 pub async fn create_consumer_group_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}");
+    let url = format!("{broker_url}/consumer/{group_id}");
     match client.post(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
@@ -141,16 +141,16 @@ pub async fn create_consumer_group_command(
                     .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
 pub async fn leave_consumer_group_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}");
+    let url = format!("{broker_url}/consumer/{group_id}");
     match client.delete(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
@@ -160,7 +160,7 @@ pub async fn leave_consumer_group_command(
                     .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
@@ -169,14 +169,14 @@ pub async fn leave_consumer_group_command(
 /// Fetch records using the new by-offset endpoint.
 pub async fn fetch_consumer_records_by_offset_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
     topic: &str,
     from_offset: Option<u64>,
     max_records: Option<usize>,
     include_headers: Option<bool>,
 ) {
-    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topic/{topic}/record/offset");
+    let mut fetch_url = format!("{broker_url}/consumer/{group_id}/topic/{topic}/record/offset");
     let mut query_params = Vec::new();
     if let Some(c) = max_records {
         query_params.push(format!("max_records={c}"));
@@ -220,21 +220,21 @@ pub async fn fetch_consumer_records_by_offset_command(
                 .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
 /// Fetch records using the new by-time endpoint.
 pub async fn fetch_consumer_records_by_time_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
     topic: &str,
     from_time: &str,
     max_records: Option<usize>,
     include_headers: Option<bool>,
 ) {
-    let mut fetch_url = format!("{server_url}/consumer/{group_id}/topic/{topic}/record/time");
+    let mut fetch_url = format!("{broker_url}/consumer/{group_id}/topic/{topic}/record/time");
     let mut query_params = Vec::new();
     query_params.push(format!("from_time={}", urlencoding::encode(from_time)));
     if let Some(c) = max_records {
@@ -274,18 +274,18 @@ pub async fn fetch_consumer_records_by_time_command(
                 .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
 pub async fn commit_offset_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
     topic: &str,
     offset: u64,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}/topic/{topic}/offset");
+    let url = format!("{broker_url}/consumer/{group_id}/topic/{topic}/offset");
     let request = UpdateConsumerGroupOffsetRequest { offset };
     match client.post(&url).json(&request).send().await {
         Ok(response) => {
@@ -301,17 +301,17 @@ pub async fn commit_offset_command(
                 .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
 pub async fn get_offset_command(
     client: &reqwest::Client,
-    server_url: &str,
+    broker_url: &str,
     group_id: &str,
     topic: &str,
 ) {
-    let url = format!("{server_url}/consumer/{group_id}/topic/{topic}/offset");
+    let url = format!("{broker_url}/consumer/{group_id}/topic/{topic}/offset");
     match client.get(&url).send().await {
         Ok(response) => {
             if response.status().is_success() {
@@ -332,7 +332,7 @@ pub async fn get_offset_command(
                 .await;
             }
         }
-        Err(e) => println!("Failed to connect to server: {e}"),
+        Err(e) => println!("Failed to connect to broker: {e}"),
     }
 }
 
@@ -349,14 +349,14 @@ pub async fn handle_error_response(response: reqwest::Response, operation: &str)
                 println!("Failed to {}: {}", operation, error_response.error);
             }
             Err(parse_error) => {
-                println!("Server error: {status} (failed to parse error response: {parse_error})");
+                println!("Broker error: {status} (failed to parse error response: {parse_error})");
                 if !body.is_empty() {
                     println!("   Raw response: {}", body.trim());
                 }
             }
         },
         Err(body_error) => {
-            println!("Server error: {status} (failed to read response body: {body_error})");
+            println!("Broker error: {status} (failed to read response body: {body_error})");
         }
     }
 }

@@ -1,12 +1,12 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::http::*;
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]
 async fn time_polling_returns_tail_from_mid_timestamp_http() {
     // Setup
-    let server = TestServer::start().await.expect("start server");
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.expect("start broker");
+    let helper = TestClient::new(&broker);
     let topic = "http_time_poll";
     helper
         .post_record_with_record(topic, None, "m0", None)
@@ -51,8 +51,8 @@ async fn time_polling_returns_tail_from_mid_timestamp_http() {
 #[tokio::test]
 async fn time_polling_invalid_timestamp_returns_400_http() {
     // Setup
-    let server = TestServer::start().await.expect("start server");
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.expect("start broker");
+    let helper = TestClient::new(&broker);
     let topic = "http_time_poll_invalid";
     let group_id = "http_time_group_bad";
     helper.create_consumer_group(group_id).await.unwrap();
@@ -71,8 +71,8 @@ async fn time_polling_invalid_timestamp_returns_400_http() {
 #[tokio::test]
 async fn offset_fetch_control_returns_200_http() {
     // Setup
-    let server = TestServer::start().await.expect("start server");
-    let helper = TestClient::new(&server);
+    let broker = TestBroker::start().await.expect("start broker");
+    let helper = TestClient::new(&broker);
     let topic = "http_time_poll_offset";
     helper
         .post_record_with_record(topic, None, "m0", None)

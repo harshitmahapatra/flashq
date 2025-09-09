@@ -1,12 +1,12 @@
-use super::test_utilities::{TestClient, TestServer};
+use super::test_utilities::{TestBroker, TestClient};
 use flashq::http::*;
 
 #[tokio::test]
 async fn test_consumer_group_offset_management() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "offset_test_group";
     let topic = "offset_test_topic";
 
@@ -47,10 +47,10 @@ async fn test_consumer_group_offset_management() {
 
 #[tokio::test]
 async fn test_offset_validation_and_edge_cases() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "validation_group";
     let topic = "validation_topic";
 
@@ -69,7 +69,7 @@ async fn test_offset_validation_and_edge_cases() {
         .update_consumer_group_offset(group_id, topic, 10)
         .await
         .unwrap();
-    // Server rejects offsets beyond high water mark with Bad Request
+    // broker rejects offsets beyond high water mark with Bad Request
     assert_eq!(response.status(), 400);
 
     // Test setting offset to 0 (beginning)
@@ -90,10 +90,10 @@ async fn test_offset_validation_and_edge_cases() {
 
 #[tokio::test]
 async fn test_multiple_topic_offsets() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let group_id = "multi_topic_group";
     let topic1 = "topic_one";
     let topic2 = "topic_two";
@@ -142,10 +142,10 @@ async fn test_multiple_topic_offsets() {
 
 #[tokio::test]
 async fn test_offset_operations_for_nonexistent_groups() {
-    let server = TestServer::start()
+    let broker = TestBroker::start()
         .await
-        .expect("Failed to start test server");
-    let helper = TestClient::new(&server);
+        .expect("Failed to start test broker");
+    let helper = TestClient::new(&broker);
     let invalid_group = "nonexistent_group";
     let topic = "test_topic";
 

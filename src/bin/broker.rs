@@ -1,9 +1,9 @@
-//! FlashQ HTTP Server Binary
+//! FlashQ HTTP Broker Binary
 //!
-//! Lightweight binary that instantiates and starts the FlashQ HTTP server.
-//! All core server logic is implemented in src/http/broker.
+//! Lightweight binary that instantiates and starts the FlashQ HTTP broker.
+//! All core broker logic is implemented in src/http/broker.
 
-use flashq::http::server::start_server;
+use flashq::http::broker::start_broker;
 use flashq::storage::file::SyncMode;
 use std::env;
 use std::path::PathBuf;
@@ -148,15 +148,15 @@ async fn main() {
         storage_backend = storage_backend.with_time_seek_back_bytes(bytes);
     }
 
-    if let Err(e) = start_server(port, storage_backend).await {
-        log::error!("Server error: {e}");
+    if let Err(e) = start_broker(port, storage_backend).await {
+        log::error!("Broker error: {e}");
         std::process::exit(1);
     }
 }
 
 fn print_usage() {
     log::info!(
-        "Usage: server [port] [--storage <backend>] [--data-dir <path>] [--batch-bytes <n>] [--time-seek-back-bytes <n>]"
+        "Usage: broker [port] [--storage <backend>] [--data-dir <path>] [--batch-bytes <n>] [--time-seek-back-bytes <n>]"
     );
     log::info!("  port: Port number to bind to (default: 8080)");
     log::info!("  --storage: Storage backend to use");

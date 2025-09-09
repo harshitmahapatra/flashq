@@ -69,8 +69,16 @@ fn test_consumer_group_topic_recovery() {
             .unwrap();
 
         queue.create_consumer_group(group_id.clone()).unwrap();
+        let current_offset = queue
+            .get_consumer_group_offset(&group_id, &topic_name)
+            .unwrap_or(0);
         let records = queue
-            .poll_records_for_consumer_group(&group_id, &topic_name, Some(1))
+            .poll_records_for_consumer_group_from_offset(
+                &group_id,
+                &topic_name,
+                current_offset,
+                Some(1),
+            )
             .unwrap();
         assert_eq!(records.len(), 1);
         queue
@@ -82,8 +90,11 @@ fn test_consumer_group_topic_recovery() {
         StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
     );
 
+    let current_offset = new_queue
+        .get_consumer_group_offset(&group_id, &topic_name)
+        .unwrap_or(0);
     let records = new_queue
-        .poll_records_for_consumer_group(&group_id, &topic_name, None)
+        .poll_records_for_consumer_group_from_offset(&group_id, &topic_name, current_offset, None)
         .unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].record.value, "msg2");
@@ -115,13 +126,19 @@ fn test_multiple_consumer_groups_isolation() {
         .unwrap();
 
     queue.create_consumer_group(group1.clone()).unwrap();
+    let group1_offset = queue
+        .get_consumer_group_offset(&group1, &topic_name)
+        .unwrap_or(0);
     let group1_records = queue
-        .poll_records_for_consumer_group(&group1, &topic_name, None)
+        .poll_records_for_consumer_group_from_offset(&group1, &topic_name, group1_offset, None)
         .unwrap();
 
     queue.create_consumer_group(group2.clone()).unwrap();
+    let group2_offset = queue
+        .get_consumer_group_offset(&group2, &topic_name)
+        .unwrap_or(0);
     let group2_records = queue
-        .poll_records_for_consumer_group(&group2, &topic_name, None)
+        .poll_records_for_consumer_group_from_offset(&group2, &topic_name, group2_offset, None)
         .unwrap();
 
     assert_eq!(group1_records.len(), 2);
