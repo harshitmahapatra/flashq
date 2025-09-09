@@ -1,154 +1,21 @@
-//! HTTP server implementation for FlashQ
+//! Consumer route handlers for FlashQ HTTP API
 
-use super::common::*;
-use crate::{FlashQ, Record, error, info, trace};
+use crate::http::{
+    ConsumerGroupIdParams, ConsumerGroupParams, ConsumerGroupResponse, ErrorResponse,
+    FetchResponse, GetConsumerGroupOffsetResponse, OffsetResponse, PollOffsetQuery, PollQuery,
+    PollTimeQuery, UpdateConsumerGroupOffsetRequest, validate_consumer_group_id,
+    validate_poll_query, validate_topic_name,
+};
+use crate::{Record, error, trace};
 use axum::{
-    Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
-    routing::{delete, get, post},
 };
-use std::sync::Arc;
-use tokio::net::TcpListener;
 
-// =============================================================================
-// APPLICATION STATE
-// =============================================================================
+use super::server::{AppState, error_to_status_code};
 
-pub type AppState = Arc<AppStateInner>;
-
-#[derive(Clone)]
-pub struct AppStateInner {
-    pub queue: Arc<FlashQ>,
-}
-
-// =============================================================================
-// REQUEST/RESPONSE TYPES
-// =============================================================================
-
-#[derive(serde::Deserialize)]
-pub struct ConsumerGroupParams {
-    pub group_id: String,
-    pub topic: String,
-}
-
-#[derive(serde::Deserialize)]
-pub struct ConsumerGroupIdParams {
-    pub group_id: String,
-}
-
-#[derive(serde::Deserialize)]
-pub struct PollOffsetQuery {
-    pub from_offset: Option<u64>,
-    pub max_records: Option<usize>,
-    pub include_headers: Option<bool>,
-}
-
-#[derive(serde::Deserialize)]
-pub struct PollTimeQuery {
-    pub from_time: String,
-    pub max_records: Option<usize>,
-    pub include_headers: Option<bool>,
-}
-
-// =============================================================================
-// UTILITY FUNCTIONS
-// =============================================================================
-
-pub fn error_to_status_code(error_code: &str) -> StatusCode {
-    match error_code {
-        "invalid_parameter" | "validation_error" => StatusCode::BAD_REQUEST,
-        "topic_not_found" | "group_not_found" => StatusCode::NOT_FOUND,
-        "conflict" => StatusCode::CONFLICT,
-        "invalid_offset" => StatusCode::BAD_REQUEST,
-        "record_validation_error" => StatusCode::UNPROCESSABLE_ENTITY,
-        "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
-// =============================================================================
-// ROUTE HANDLERS
-// =============================================================================
-
-pub async fn health_check(
-    State(_app_state): State<AppState>,
-) -> Result<Json<HealthCheckResponse>, (StatusCode, Json<ErrorResponse>)> {
-    trace!("GET /health");
-    Ok(Json(HealthCheckResponse {
-        status: "healthy".to_string(),
-        service: "flashq".to_string(),
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    }))
-}
-
-pub async fn produce_records(
-    State(app_state): State<AppState>,
-    Path(topic): Path<String>,
-    Json(request): Json<ProduceRequest>,
-) -> Result<Json<ProduceResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Validate topic name
-    if let Err(error_response) = validate_topic_name(&topic) {
-        error!(
-            "POST /topics/{}/records topic validation failed: {}",
-            topic, error_response.message
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    // Validate produce request
-    if let Err(error_response) = validate_produce_request(&request) {
-        error!(
-            "POST /topics/{}/records validation failed: {}",
-            topic, error_response.message
-        );
-        return Err((
-            error_to_status_code(&error_response.error),
-            Json(error_response),
-        ));
-    }
-
-    let record_count = request.records.len();
-
-    // Convert request records to Record type
-    let records: Vec<Record> = request
-        .records
-        .into_iter()
-        .map(|msg_record| Record {
-            key: msg_record.key,
-            value: msg_record.value,
-            headers: msg_record.headers,
-        })
-        .collect();
-
-    match app_state.queue.post_records(topic.clone(), records) {
-        Ok(offset) => {
-            trace!(
-                "POST /topics/{topic}/records - Posted {record_count} records, offset: {offset}"
-            );
-
-            let timestamp = chrono::Utc::now().to_rfc3339();
-
-            Ok(Json(ProduceResponse { offset, timestamp }))
-        }
-        Err(error) => {
-            error!("POST /topics/{topic}/records failed: {error}");
-            let error_response = ErrorResponse::from(error);
-            Err((
-                error_to_status_code(&error_response.error),
-                Json(error_response),
-            ))
-        }
-    }
-}
-
+/// Handles POST /consumer/{group_id} - create consumer group
 pub async fn create_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
@@ -190,6 +57,7 @@ pub async fn create_consumer_group(
     }
 }
 
+/// Handles DELETE /consumer/{group_id} - leave consumer group
 pub async fn leave_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
@@ -224,6 +92,7 @@ pub async fn leave_consumer_group(
     }
 }
 
+/// Handles GET /consumer/{group_id}/topic/{topic}/offset - get consumer group offset
 pub async fn get_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -291,6 +160,7 @@ pub async fn get_consumer_group_offset(
     }
 }
 
+/// Handles POST /consumer/{group_id}/topic/{topic}/offset - commit consumer group offset
 pub async fn commit_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -352,6 +222,7 @@ pub async fn commit_consumer_group_offset(
     }
 }
 
+/// Handles GET /consumer/{group_id}/topic/{topic}/record/offset - fetch records by offset
 pub async fn fetch_records_by_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -406,9 +277,16 @@ pub async fn fetch_records_by_offset(
             limit,
         ),
         None => {
-            app_state
+            let current_offset = app_state
                 .queue
-                .poll_records_for_consumer_group(&params.group_id, &params.topic, limit)
+                .get_consumer_group_offset(&params.group_id, &params.topic)
+                .unwrap_or(0);
+            app_state.queue.poll_records_for_consumer_group_from_offset(
+                &params.group_id,
+                &params.topic,
+                current_offset,
+                limit,
+            )
         }
     };
 
@@ -463,6 +341,7 @@ pub async fn fetch_records_by_offset(
     }
 }
 
+/// Handles GET /consumer/{group_id}/topic/{topic}/record/time - fetch records by time
 pub async fn fetch_records_by_time(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -564,105 +443,5 @@ pub async fn fetch_records_by_time(
                 Json(error_response),
             ))
         }
-    }
-}
-
-// =============================================================================
-// APPLICATION FACTORY & SERVER UTILITIES
-// =============================================================================
-
-/// Creates the Axum router with all routes configured
-pub fn create_router(app_state: AppState) -> Router {
-    Router::new()
-        .route("/topic/{topic}/record", post(produce_records))
-        .route("/health", get(health_check))
-        .route("/consumer/{group_id}", post(create_consumer_group))
-        .route("/consumer/{group_id}", delete(leave_consumer_group))
-        .route(
-            "/consumer/{group_id}/topic/{topic}/record/offset",
-            get(fetch_records_by_offset),
-        )
-        .route(
-            "/consumer/{group_id}/topic/{topic}/record/time",
-            get(fetch_records_by_time),
-        )
-        .route(
-            "/consumer/{group_id}/topic/{topic}/offset",
-            get(get_consumer_group_offset),
-        )
-        .route(
-            "/consumer/{group_id}/topic/{topic}/offset",
-            post(commit_consumer_group_offset),
-        )
-        .with_state(app_state)
-}
-
-/// Creates application state with storage backend
-pub fn create_app_state(storage_backend: crate::storage::StorageBackend) -> AppState {
-    Arc::new(AppStateInner {
-        queue: Arc::new(FlashQ::with_storage_backend(storage_backend)),
-    })
-}
-
-/// Starts the HTTP server on the specified port with the given storage backend
-pub async fn start_server(
-    port: u16,
-    storage_backend: crate::storage::StorageBackend,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let app_state = create_app_state(storage_backend);
-    let app = create_router(app_state.clone());
-
-    let bind_address = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&bind_address)
-        .await
-        .map_err(|e| format!("Failed to bind to address {bind_address}: {e}"))?;
-
-    info!("FlashQ Server starting on http://{bind_address}");
-
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| format!("Server failed to start: {e}"))?;
-
-    Ok(())
-}
-
-// =============================================================================
-// UNIT TESTS
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_to_status_code() {
-        assert_eq!(
-            error_to_status_code("invalid_parameter"),
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(
-            error_to_status_code("validation_error"),
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(
-            error_to_status_code("topic_not_found"),
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            error_to_status_code("group_not_found"),
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            error_to_status_code("record_validation_error"),
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            error_to_status_code("internal_error"),
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-        assert_eq!(
-            error_to_status_code("unknown_error"),
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
     }
 }

@@ -1,7 +1,7 @@
 //! FlashQ HTTP Server Binary
 //!
 //! Lightweight binary that instantiates and starts the FlashQ HTTP server.
-//! All core server logic is implemented in src/http/server.rs.
+//! All core server logic is implemented in src/http/broker.
 
 use flashq::http::server::start_server;
 use flashq::storage::file::SyncMode;
