@@ -2,7 +2,7 @@
 
 use crate::http::{
     consumer::cli::{ConsumerCommands, handle_consumer_command},
-    metadata::handle_health_command,
+    metadata::{handle_get_topics_command, handle_health_command},
     producer::cli::{ProducerCommands, handle_producer_command},
 };
 use clap::{Parser, Subcommand};
@@ -26,6 +26,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Health,
+    Topics,
 
     #[command(subcommand)]
     Producer(ProducerCommands),
@@ -42,6 +43,9 @@ pub async fn handle_cli_command(client: &reqwest::Client, broker_url: &str, comm
     match command {
         Commands::Health => {
             handle_health_command(client, broker_url).await;
+        }
+        Commands::Topics => {
+            handle_get_topics_command(client, broker_url).await;
         }
         Commands::Producer(producer_cmd) => {
             handle_producer_command(client, broker_url, producer_cmd).await;
@@ -82,6 +86,7 @@ mod tests {
     #[test]
     fn test_commands_enum_variants() {
         let _health = Commands::Health;
+        let _topics = Commands::Topics;
         let _producer = Commands::Producer(ProducerCommands::Records {
             topic: "test".to_string(),
             message: Some("value".to_string()),
