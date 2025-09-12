@@ -6,6 +6,7 @@ use std::collections::HashMap;
 static ALLOC: AllocProfiler = AllocProfiler::system();
 
 fn main() {
+    flashq::telemetry::init_for_benchmarks();
     divan::main();
 }
 
