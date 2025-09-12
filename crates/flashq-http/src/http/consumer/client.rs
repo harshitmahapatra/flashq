@@ -2,6 +2,7 @@
 
 use crate::http::common::*;
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, url = %format!("{broker_url}/consumer/{group_id}")))]
 pub async fn create_consumer_group_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -24,6 +25,7 @@ pub async fn create_consumer_group_command(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, url = %format!("{broker_url}/consumer/{group_id}")))]
 pub async fn leave_consumer_group_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -46,6 +48,7 @@ pub async fn leave_consumer_group_command(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, topic, from_offset = ?from_offset, max_records = ?max_records, include_headers = ?include_headers))]
 pub async fn fetch_consumer_records_by_offset_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -103,6 +106,7 @@ pub async fn fetch_consumer_records_by_offset_command(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, topic, from_time, max_records = ?max_records, include_headers = ?include_headers))]
 pub async fn fetch_consumer_records_by_time_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -155,6 +159,7 @@ pub async fn fetch_consumer_records_by_time_command(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, topic, offset))]
 pub async fn commit_offset_command(
     client: &reqwest::Client,
     broker_url: &str,
@@ -182,6 +187,7 @@ pub async fn commit_offset_command(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client), fields(group_id, topic))]
 pub async fn get_offset_command(
     client: &reqwest::Client,
     broker_url: &str,

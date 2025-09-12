@@ -19,6 +19,9 @@ dashmap.workspace = true
 fs4.workspace = true
 sysinfo.workspace = true
 log.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-log.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
@@ -40,4 +43,3 @@ path = "benches/file_storage.rs"
 name = "batching_baseline"
 harness = false
 path = "benches/batching_baseline.rs"
-

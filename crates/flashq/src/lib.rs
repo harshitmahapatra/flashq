@@ -7,6 +7,7 @@ use storage::{ConsumerGroup, TopicLog};
 pub mod demo;
 pub mod error;
 pub mod storage;
+pub mod telemetry;
 
 pub use error::FlashQError;
 
@@ -74,9 +75,13 @@ impl Default for FlashQ {
 }
 
 impl FlashQ {
+    #[tracing::instrument(level = "info")]
+
     pub fn new() -> Self {
         Self::with_storage_backend(storage::StorageBackend::new_memory())
     }
+
+    #[tracing::instrument(level = "info", skip(storage_backend))]
 
     pub fn with_storage_backend(storage_backend: storage::StorageBackend) -> Self {
         let queue = FlashQ {
@@ -99,6 +104,8 @@ impl FlashQ {
         queue
     }
 
+    #[tracing::instrument(level = "debug", skip(self, records), fields(topic = %topic, count = records.len()))]
+
     pub fn post_records(&self, topic: String, records: Vec<Record>) -> Result<u64, FlashQError> {
         let topic_log = self.topics.entry(topic.clone()).or_insert_with(|| {
             self.storage_backend
@@ -113,6 +120,8 @@ impl FlashQ {
         Ok(last)
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(topic = %topic, count = ?count))]
+
     pub fn poll_records(
         &self,
         topic: &str,
@@ -120,6 +129,8 @@ impl FlashQ {
     ) -> Result<Vec<RecordWithOffset>, FlashQError> {
         self.poll_records_from_offset(topic, 0, count)
     }
+
+    #[tracing::instrument(level = "debug", skip(self), fields(topic = %topic, offset, count = ?count))]
 
     pub fn poll_records_from_offset(
         &self,
@@ -140,6 +151,8 @@ impl FlashQ {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(topic = %topic, from_time, count = ?count))]
+
     pub fn poll_records_from_time(
         &self,
         topic: &str,
@@ -159,6 +172,8 @@ impl FlashQ {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id))]
+
     pub fn create_consumer_group(&self, group_id: String) -> Result<(), FlashQError> {
         match self.consumer_groups.entry(group_id.clone()) {
             Occupied(_) => Err(FlashQError::ConsumerGroupAlreadyExists { group_id }),
@@ -176,6 +191,8 @@ impl FlashQ {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id, topic = %topic))]
+
     pub fn get_consumer_group_offset(
         &self,
         group_id: &str,
@@ -188,6 +205,8 @@ impl FlashQ {
             }),
         }
     }
+
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id, topic = %topic, offset))]
 
     pub fn update_consumer_group_offset(
         &self,
@@ -227,6 +246,8 @@ impl FlashQ {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id))]
+
     pub fn delete_consumer_group(&self, group_id: &str) -> Result<(), FlashQError> {
         match self.consumer_groups.remove(group_id) {
             Some(_) => Ok(()),
@@ -235,6 +256,8 @@ impl FlashQ {
             }),
         }
     }
+
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id, topic = %topic, offset, count = ?count))]
 
     pub fn poll_records_for_consumer_group_from_offset(
         &self,
@@ -254,6 +277,8 @@ impl FlashQ {
 
         Ok(records)
     }
+
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = %group_id, topic = %topic, from_time, count = ?count))]
 
     pub fn poll_records_for_consumer_group_from_time(
         &self,
@@ -281,6 +306,8 @@ impl FlashQ {
             .collect()
     }
 
+    #[tracing::instrument(level = "info", skip(self))]
+
     /// Recover existing topics from disk for file storage backends
     fn recover_existing_topics(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Discover existing topics using the storage backend
@@ -298,6 +325,8 @@ impl FlashQ {
 
         Ok(())
     }
+
+    #[tracing::instrument(level = "info", skip(self))]
 
     /// Recover existing consumer groups from disk for file storage backends  
     fn recover_existing_consumer_groups(&self) -> Result<(), Box<dyn std::error::Error>> {

@@ -5,6 +5,7 @@ use flashq::FlashQ;
 use log::info;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::trace::TraceLayer;
 
 use super::routes::create_router;
 
@@ -33,12 +34,13 @@ pub fn create_app_state(storage_backend: flashq::storage::StorageBackend) -> App
     })
 }
 
+#[tracing::instrument(level = "info", skip(storage_backend), fields(port = port))]
 pub async fn start_server(
     port: u16,
     storage_backend: flashq::storage::StorageBackend,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_state = create_app_state(storage_backend);
-    let app = create_router(app_state.clone());
+    let app = create_router(app_state.clone()).layer(TraceLayer::new_for_http());
     let bind_address = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&bind_address)
         .await

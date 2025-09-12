@@ -23,6 +23,7 @@ pub struct SegmentManager {
 }
 
 impl SegmentManager {
+    #[tracing::instrument(level = "info", fields(base_dir = %base_dir.display(), segment_size_bytes))]
     pub fn new(
         base_dir: PathBuf,
         segment_size_bytes: u64,
@@ -87,6 +88,7 @@ impl SegmentManager {
     }
 
     /// Streaming read that keeps a single reader per segment and iterates sequentially across segments
+    #[tracing::instrument(level = "debug", skip(self), fields(offset, count = ?count))]
     pub fn read_records_streaming(
         &self,
         offset: u64,
@@ -138,6 +140,7 @@ impl SegmentManager {
 
     /// Streaming read starting from the first record whose timestamp is >= `ts_rfc3339`.
     /// Uses each segment's sparse time index to compute a near position and then streams forward.
+    #[tracing::instrument(level = "debug", skip(self, ts_rfc3339), fields(ts = %ts_rfc3339, count = ?count))]
     pub fn read_records_from_timestamp(
         &self,
         ts_rfc3339: &str,
@@ -303,6 +306,7 @@ impl SegmentManager {
         false
     }
 
+    #[tracing::instrument(level = "info", skip(self), fields(next_offset))]
     pub fn roll_to_new_segment(&mut self, next_offset: u64) -> Result<(), StorageError> {
         if let Some(active) = self.active_segment.take() {
             let base_offset = active.base_offset;
@@ -332,6 +336,7 @@ impl SegmentManager {
         self.segments.values().chain(self.active_segment.iter())
     }
 
+    #[tracing::instrument(level = "info", skip(self))]
     pub fn recover_from_directory(&mut self) -> Result<(), StorageError> {
         self.segments.clear();
         self.active_segment = None;
@@ -344,6 +349,7 @@ impl SegmentManager {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip(self, segment_offsets), fields(segments = segment_offsets.len()))]
     fn recover_segments(&mut self, segment_offsets: &[u64]) -> Result<(), StorageError> {
         for &base_offset in segment_offsets {
             let log_path = self.base_dir.join(format!("{base_offset:020}.log"));

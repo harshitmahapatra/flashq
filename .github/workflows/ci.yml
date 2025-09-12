@@ -32,11 +32,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Run tests
-      run: cargo test --lib --bins --verbose
+    - name: Check (workspace, all targets)
+      run: cargo check --workspace --all-targets
 
-    - name: Run integration tests
-      run: cargo test --test '*' --verbose
+    - name: Run tests (workspace, all targets)
+      run: cargo test --workspace --all-targets --verbose
 
   lint:
     name: Lint
@@ -58,11 +58,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Check formatting
-      run: cargo fmt -- --check
+    - name: Check formatting (workspace)
+      run: cargo fmt --all -- --check
 
-    - name: Run clippy
-      run: cargo clippy -- -D warnings
+    - name: Run clippy (workspace, all targets)
+      run: cargo clippy --workspace --all-targets -- -D warnings
 
   build:
     name: Build
@@ -84,27 +84,13 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Build debug (default)
+    - name: Build debug (workspace)
       if: github.event_name != 'release'
-      run: cargo build --verbose
+      run: cargo build --workspace --all-targets --verbose
 
-    - name: Build all binaries (debug)
-      if: github.event_name != 'release'
-      run: |
-        cargo build -p flashq-http --bin broker
-        cargo build -p flashq-http --bin client
-        cargo build -p flashq --bin flashq
-
-    - name: Build release (on release only)
+    - name: Build release (workspace)
       if: github.event_name == 'release'
-      run: cargo build --release --verbose
-
-    - name: Build all binaries (release)
-      if: github.event_name == 'release'
-      run: |
-        cargo build --release -p flashq-http --bin broker
-        cargo build --release -p flashq-http --bin client
-        cargo build --release -p flashq --bin flashq
+      run: cargo build --workspace --all-targets --release --verbose
 
   security:
     name: Security Audit
