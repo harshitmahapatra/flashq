@@ -52,6 +52,7 @@ pub struct LogSegment {
 }
 
 impl LogSegment {
+    #[tracing::instrument(level = "info", fields(base_offset, log = %log_path.display(), index = %index_path.display()))]
     pub fn new(
         base_offset: u64,
         log_path: PathBuf,
@@ -108,6 +109,7 @@ impl LogSegment {
         })
     }
 
+    #[tracing::instrument(level = "info", fields(base_offset, log = %log_path.display(), index = %index_path.display()))]
     pub fn recover(
         base_offset: u64,
         log_path: PathBuf,
@@ -207,6 +209,7 @@ impl LogSegment {
         Ok(segment)
     }
 
+    #[tracing::instrument(level = "debug", skip(self, record), fields(offset))]
     pub fn append_record(&mut self, record: &Record, offset: u64) -> Result<(), StorageError> {
         let serialized = serialize_record(record, offset)?;
         let start_position = self.write_record_to_log(&serialized)?;
@@ -263,6 +266,7 @@ impl LogSegment {
 
     /// Append multiple records in a single I/O operation by coalescing
     /// serialized bytes into one contiguous buffer and writing once.
+    #[tracing::instrument(level = "debug", skip(self, records), fields(count = records.len(), start_offset))]
     pub fn append_records_bulk(
         &mut self,
         records: &[Record],
@@ -362,6 +366,7 @@ impl LogSegment {
         Ok(current_offset - 1)
     }
 
+    #[tracing::instrument(level = "debug", skip(self, serialized_record), fields(len = serialized_record.len()))]
     fn write_record_to_log(&mut self, serialized_record: &[u8]) -> Result<u32, StorageError> {
         // Use StdFileIO append method
         let start_position = FileIo::append_data_to_end(&mut self.log_file, serialized_record)
@@ -416,6 +421,7 @@ impl LogSegment {
             || self.records_since_last_index >= self.indexing_config.index_interval_records
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.index_buffer.len()))]
     fn flush_index_buffer(&mut self) -> Result<(), StorageError> {
         if self.index_buffer.is_empty() {
             return Ok(());
@@ -432,6 +438,7 @@ impl LogSegment {
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.time_index_buffer.len()))]
     fn flush_time_index_buffer(&mut self) -> Result<(), StorageError> {
         if self.time_index_buffer.is_empty() {
             return Ok(());
@@ -463,6 +470,7 @@ impl LogSegment {
         self.index.find_floor_position_for_position(file_pos)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn size_bytes(&mut self) -> Result<u64, StorageError> {
         FileIo::get_file_size(&self.log_file).map_err(|e| {
             StorageError::from_io_error(
@@ -488,6 +496,7 @@ impl LogSegment {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn sync(&mut self) -> Result<(), StorageError> {
         self.flush_index_buffer()?;
         self.flush_time_index_buffer()?;
@@ -513,6 +522,7 @@ impl LogSegment {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip(self))]
     fn rebuild_time_index_from_log(&mut self) -> Result<(), StorageError> {
         self.time_index = SparseTimeIndex::new();
         self.time_index_buffer.clear();
@@ -585,6 +595,7 @@ impl LogSegment {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip(self))]
     fn rebuild_offset_index_from_log(&mut self) -> Result<(), StorageError> {
         self.index = SparseIndex::new();
         self.index_buffer.clear();

@@ -12,6 +12,7 @@ use axum::{
 use flashq::Record;
 use log::{error, trace};
 
+#[tracing::instrument(level = "debug", skip(app_state, request), fields(topic = %topic))]
 pub async fn produce_records(
     State(app_state): State<AppState>,
     Path(topic): Path<String>,

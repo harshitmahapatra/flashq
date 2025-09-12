@@ -37,7 +37,7 @@ pub fn ensure_broker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
         return Ok(PathBuf::from(p));
     }
     BROKER_INIT.call_once(|| {
-        let _ = env_logger::try_init();
+        flashq::telemetry::init();
         info!("Building broker binary for integration tests...");
         let output = Command::new("cargo")
             .args(["build", "-p", "flashq-http", "--bin", "broker"])

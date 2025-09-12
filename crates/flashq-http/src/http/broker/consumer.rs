@@ -15,6 +15,7 @@ use axum::{
 use flashq::Record;
 use log::{error, trace};
 
+#[tracing::instrument(level = "debug", skip(app_state, params), fields(group_id = %params.group_id))]
 pub async fn create_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
@@ -50,6 +51,7 @@ pub async fn create_consumer_group(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(app_state, params), fields(group_id = %params.group_id))]
 pub async fn leave_consumer_group(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupIdParams>,
@@ -80,6 +82,7 @@ pub async fn leave_consumer_group(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(app_state, params), fields(group_id = %params.group_id, topic = %params.topic))]
 pub async fn get_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -137,6 +140,7 @@ pub async fn get_consumer_group_offset(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(app_state, params, request), fields(group_id = %params.group_id, topic = %params.topic))]
 pub async fn commit_consumer_group_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -192,6 +196,7 @@ pub async fn commit_consumer_group_offset(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(app_state, params, query), fields(group_id = %params.group_id, topic = %params.topic))]
 pub async fn fetch_records_by_offset(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,
@@ -299,6 +304,7 @@ pub async fn fetch_records_by_offset(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(app_state, params, query), fields(group_id = %params.group_id, topic = %params.topic))]
 pub async fn fetch_records_by_time(
     State(app_state): State<AppState>,
     Path(params): Path<ConsumerGroupParams>,

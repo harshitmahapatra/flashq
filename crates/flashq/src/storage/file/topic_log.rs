@@ -14,6 +14,7 @@ pub struct FileTopicLog {
 }
 
 impl FileTopicLog {
+    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes))]
     pub fn new<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -30,6 +31,7 @@ impl FileTopicLog {
         )
     }
 
+    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes, batch_bytes))]
     pub fn new_with_batch_bytes<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -47,6 +49,7 @@ impl FileTopicLog {
         )
     }
 
+    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes, batch_bytes))]
     pub fn new_with_batch_bytes_and_indexing_config<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -81,6 +84,7 @@ impl FileTopicLog {
         Ok(log)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn sync(&mut self) -> Result<(), StorageError> {
         if let Some(active_segment) = self.segment_manager.active_segment_mut() {
             active_segment.sync()?;
@@ -88,6 +92,7 @@ impl FileTopicLog {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip(self))]
     fn recover_from_segments(&mut self) -> Result<(), StorageError> {
         self.segment_manager.recover_from_directory()?;
 

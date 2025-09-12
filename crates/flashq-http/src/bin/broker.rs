@@ -5,7 +5,8 @@ use flashq_http::broker::start_broker;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    // Initialize tracing + log bridge; respects RUST_LOG
+    flashq::telemetry::init();
     let args: Vec<String> = std::env::args().collect();
     let mut port: u16 = 8080;
     let mut storage_selection: Option<&str> = None;

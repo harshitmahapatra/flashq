@@ -21,4 +21,6 @@ fs4 = "0.13.1"
 sysinfo = "0.37.0"
 log = "0.4"
 env_logger = "0.11"
-
+tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_info"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
+tracing-log = "0.2"

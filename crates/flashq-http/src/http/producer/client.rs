@@ -4,6 +4,7 @@ use crate::http::common::*;
 use flashq::Record;
 use std::collections::HashMap;
 
+#[tracing::instrument(level = "debug", skip(client), fields(topic, batch_file))]
 pub async fn handle_batch_post(
     client: &reqwest::Client,
     broker_url: &str,
@@ -52,6 +53,7 @@ pub async fn handle_batch_post(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(client, message, headers), fields(topic, key = ?key))]
 pub async fn post_records(
     client: &reqwest::Client,
     broker_url: &str,
