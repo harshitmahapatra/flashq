@@ -151,7 +151,17 @@ cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./dev-data --
 
 ## Debugging
 
-**Logging:** Debug builds use TRACE, release builds use INFO. Structured logging via `log` crate.  
+### Tracing and Logging
+
+FlashQ uses `tracing` for structured instrumentation with automatic level filtering:
+- **Debug builds:** TRACE level (verbose)
+- **Release builds:** INFO level (production)
+- **Environment control:** Set `RUST_LOG=debug` or `RUST_LOG=flashq=trace,warn`
+- **Benchmarks:** Automatically disabled via `init_for_benchmarks()` to prevent overhead
+
+### Common Issues
+
 **Port conflicts:** `lsof -ti:8080 | xargs kill` or use different port  
 **Test issues:** `cargo test test_name -- --nocapture`  
-**File storage:** Check `./data/` directory for persistent state and logs
+**File storage:** Check `./data/` directory for persistent state and logs  
+**Tracing output:** Control with `RUST_LOG` environment variable
