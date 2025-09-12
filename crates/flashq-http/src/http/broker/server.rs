@@ -1,11 +1,11 @@
 //! HTTP server (broker) implementation for FlashQ
 
 use axum::http::StatusCode;
-use tower_http::trace::TraceLayer;
 use flashq::FlashQ;
 use log::info;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::trace::TraceLayer;
 
 use super::routes::create_router;
 
