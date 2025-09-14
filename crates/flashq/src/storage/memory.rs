@@ -1,157 +1,199 @@
-use super::{ConsumerGroup, TopicLog};
+use super::{ConsumerGroup, PartitionId, TopicLog};
 use crate::error::StorageError;
 use crate::{Record, RecordWithOffset};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default)]
 pub struct InMemoryTopicLog {
-    records: Vec<RecordWithOffset>,
-    next_offset: u64,
+    partitions: HashMap<PartitionId, PartitionData>,
     batch_bytes: usize,
 }
 
-impl Default for InMemoryTopicLog {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Debug, Clone)]
+struct PartitionData {
+    records: Vec<RecordWithOffset>,
+    next_offset: u64,
 }
 
 impl InMemoryTopicLog {
     pub fn new() -> Self {
         InMemoryTopicLog {
-            records: Vec::new(),
-            next_offset: 0,
+            partitions: HashMap::new(),
             batch_bytes: crate::storage::batching_heuristics::default_batch_bytes(),
         }
     }
 
     pub fn new_with_batch_bytes(batch_bytes: usize) -> Self {
         InMemoryTopicLog {
-            records: Vec::new(),
-            next_offset: 0,
+            partitions: HashMap::new(),
             batch_bytes,
         }
+    }
+
+    fn get_or_create_partition(&mut self, partition_id: PartitionId) -> &mut PartitionData {
+        self.partitions
+            .entry(partition_id)
+            .or_insert_with(|| PartitionData {
+                records: Vec::new(),
+                next_offset: 0,
+            })
+    }
+
+    fn get_partition(&self, partition_id: PartitionId) -> Option<&PartitionData> {
+        self.partitions.get(&partition_id)
     }
 }
 
 impl TopicLog for InMemoryTopicLog {
-    fn append(&mut self, record: Record) -> Result<u64, StorageError> {
-        let current_offset = self.next_offset;
+    fn append_partition(
+        &mut self,
+        partition_id: PartitionId,
+        record: Record,
+    ) -> Result<u64, StorageError> {
+        let partition_data = self.get_or_create_partition(partition_id);
+        let current_offset = partition_data.next_offset;
         let record_with_offset = RecordWithOffset::from_record(record, current_offset);
-        self.records.push(record_with_offset);
-        self.next_offset += 1;
+        partition_data.records.push(record_with_offset);
+        partition_data.next_offset += 1;
         Ok(current_offset)
     }
 
-    fn append_batch(&mut self, records: Vec<Record>) -> Result<u64, StorageError> {
+    fn append_batch_partition(
+        &mut self,
+        partition_id: PartitionId,
+        records: Vec<Record>,
+    ) -> Result<u64, StorageError> {
         if records.is_empty() {
-            return Ok(self.next_offset);
+            let partition_data = self.get_or_create_partition(partition_id);
+            return Ok(partition_data.next_offset);
         }
 
-        let mut last: u64 = self.next_offset.saturating_sub(1);
+        let batch_bytes = self.batch_bytes;
+        let partition_data = self.get_or_create_partition(partition_id);
+        let mut last: u64 = partition_data.next_offset.saturating_sub(1);
         let mut start = 0usize;
+
         while start < records.len() {
             let mut end = start;
             let mut acc = 0usize;
             while end < records.len() {
                 let est = crate::storage::batching_heuristics::estimate_record_size(&records[end]);
-                if acc > 0 && acc + est > self.batch_bytes {
+                if acc > 0 && acc + est > batch_bytes {
                     break;
                 }
                 acc += est;
                 end += 1;
             }
 
-            // Append this chunk in one go
             let batch_len = end - start;
             if batch_len == 0 {
                 break;
             }
-            self.records.reserve(batch_len);
+            partition_data.records.reserve(batch_len);
             let batch_ts = chrono::Utc::now().to_rfc3339();
-            let mut offset = self.next_offset;
+            let mut offset = partition_data.next_offset;
             for r in records[start..end].iter().cloned() {
                 let rwo = RecordWithOffset {
                     record: r,
                     offset,
                     timestamp: batch_ts.clone(),
                 };
-                self.records.push(rwo);
+                partition_data.records.push(rwo);
                 last = offset;
                 offset += 1;
             }
-            self.next_offset = offset;
+            partition_data.next_offset = offset;
             start = end;
         }
         Ok(last)
     }
 
-    fn get_records_from_offset(
+    fn read_from_partition(
         &self,
-        offset: u64,
-        count: Option<usize>,
+        partition_id: PartitionId,
+        from_offset: u64,
+        max_bytes: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        let start_index = offset
-            .try_into()
-            .map_err(|_| StorageError::DataCorruption {
-                context: "memory storage".to_string(),
-                details: format!("offset {offset} too large to convert to array index"),
-            })?;
+        match self.get_partition(partition_id) {
+            Some(partition_data) => {
+                let start_index =
+                    from_offset
+                        .try_into()
+                        .map_err(|_| StorageError::DataCorruption {
+                            context: "memory storage".to_string(),
+                            details: format!(
+                                "offset {from_offset} too large to convert to array index"
+                            ),
+                        })?;
 
-        if start_index >= self.records.len() {
-            return Ok(Vec::new());
+                if start_index >= partition_data.records.len() {
+                    return Ok(Vec::new());
+                }
+                let slice = &partition_data.records[start_index..];
+                let limited = match max_bytes {
+                    Some(limit) => &slice[..limit.min(slice.len())],
+                    None => slice,
+                };
+                Ok(limited.to_vec())
+            }
+            None => Ok(Vec::new()),
         }
-        let slice = &self.records[start_index..];
-        let limited = match count {
-            Some(limit) => &slice[..limit.min(slice.len())],
-            None => slice,
-        };
-        Ok(limited.to_vec())
     }
 
-    fn get_records_from_timestamp(
+    fn read_from_partition_timestamp(
         &self,
+        partition_id: PartitionId,
         ts_rfc3339: &str,
-        count: Option<usize>,
+        max_bytes: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        // Parse target timestamp; if parsing fails, return DataCorruption for symmetry with file backend
-        let ts_target = chrono::DateTime::parse_from_rfc3339(ts_rfc3339).map_err(|e| {
-            StorageError::DataCorruption {
-                context: "parse from_time".to_string(),
-                details: e.to_string(),
-            }
-        })?;
+        match self.get_partition(partition_id) {
+            Some(partition_data) => {
+                let ts_target = chrono::DateTime::parse_from_rfc3339(ts_rfc3339).map_err(|e| {
+                    StorageError::DataCorruption {
+                        context: "parse from_time".to_string(),
+                        details: e.to_string(),
+                    }
+                })?;
 
-        let mut out: Vec<RecordWithOffset> = Vec::new();
-        let max = count.unwrap_or(usize::MAX);
-        if max == 0 {
-            return Ok(out);
-        }
+                let mut out: Vec<RecordWithOffset> = Vec::new();
+                let max = max_bytes.unwrap_or(usize::MAX);
+                if max == 0 {
+                    return Ok(out);
+                }
 
-        for rwo in &self.records {
-            if let Ok(ts_rec) = chrono::DateTime::parse_from_rfc3339(&rwo.timestamp) {
-                if ts_rec >= ts_target {
-                    out.push(rwo.clone());
-                    if out.len() >= max {
-                        break;
+                for rwo in &partition_data.records {
+                    if let Ok(ts_rec) = chrono::DateTime::parse_from_rfc3339(&rwo.timestamp) {
+                        if ts_rec >= ts_target {
+                            out.push(rwo.clone());
+                            if out.len() >= max {
+                                break;
+                            }
+                        }
                     }
                 }
+
+                Ok(out)
             }
+            None => Ok(Vec::new()),
         }
-
-        Ok(out)
     }
 
-    fn len(&self) -> usize {
-        self.records.len()
+    fn partition_len(&self, partition_id: PartitionId) -> usize {
+        self.get_partition(partition_id)
+            .map(|p| p.records.len())
+            .unwrap_or(0)
     }
 
-    fn is_empty(&self) -> bool {
-        self.records.is_empty()
+    fn partition_is_empty(&self, partition_id: PartitionId) -> bool {
+        self.get_partition(partition_id)
+            .map(|p| p.records.is_empty())
+            .unwrap_or(true)
     }
 
-    fn next_offset(&self) -> u64 {
-        self.next_offset
+    fn partition_next_offset(&self, partition_id: PartitionId) -> u64 {
+        self.get_partition(partition_id)
+            .map(|p| p.next_offset)
+            .unwrap_or(0)
     }
 }
 

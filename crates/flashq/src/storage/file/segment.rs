@@ -33,12 +33,11 @@ pub struct LogSegment {
     pub max_offset: Option<u64>,
     pub log_path: PathBuf,
     pub index_path: PathBuf,
+    pub time_index_path: PathBuf,
     log_file: File,
     index_file: File,
     index_buffer: Vec<u8>,
     index: SparseIndex,
-    // Time-based sparse index (parallel to offset index)
-    pub time_index_path: PathBuf,
     time_index_file: File,
     time_index_buffer: Vec<u8>,
     time_index: SparseTimeIndex,
@@ -46,7 +45,6 @@ pub struct LogSegment {
     records_since_last_index: u32,
     sync_mode: SyncMode,
     indexing_config: IndexingConfig,
-    // Cached timestamp range for pruning during time-based reads
     pub min_ts_ms: Option<u64>,
     pub max_ts_ms: Option<u64>,
 }
@@ -57,35 +55,55 @@ impl LogSegment {
         base_offset: u64,
         log_path: PathBuf,
         index_path: PathBuf,
+        time_index_path: PathBuf,
         sync_mode: SyncMode,
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
         // Use StdFileIO for log file operations
+        tracing::debug!("Creating log file: {}", log_path.display());
         let log_file = FileIo::create_with_append_and_read_permissions(&log_path).map_err(|e| {
+            tracing::error!("Failed to create log file {}: {}", log_path.display(), e);
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to open log file",
             )
         })?;
+        tracing::info!("Successfully created log file: {}", log_path.display());
 
         // Use StdFileIO for index file operations
+        tracing::debug!("Creating index file: {}", index_path.display());
         let index_file =
             FileIo::create_with_append_and_read_permissions(&index_path).map_err(|e| {
+                tracing::error!(
+                    "Failed to create index file {}: {}",
+                    index_path.display(),
+                    e
+                );
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to open index file",
                 )
             })?;
+        tracing::info!("Successfully created index file: {}", index_path.display());
 
         // Prepare time index alongside
-        let time_index_path = index_path.with_extension("timeindex");
+        tracing::debug!("Creating time index file: {}", time_index_path.display());
         let time_index_file = FileIo::create_with_append_and_read_permissions(&time_index_path)
             .map_err(|e| {
+                tracing::error!(
+                    "Failed to create time index file {}: {}",
+                    time_index_path.display(),
+                    e
+                );
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to open time index file",
                 )
             })?;
+        tracing::info!(
+            "Successfully created time index file: {}",
+            time_index_path.display()
+        );
 
         Ok(LogSegment {
             base_offset,
@@ -109,24 +127,47 @@ impl LogSegment {
         })
     }
 
-    #[tracing::instrument(level = "info", fields(base_offset, log = %log_path.display(), index = %index_path.display()))]
+    #[tracing::instrument(level = "info", fields(base_offset, base_path = %base_path.display()))]
     pub fn recover(
         base_offset: u64,
-        log_path: PathBuf,
-        index_path: PathBuf,
+        base_path: PathBuf,
         sync_mode: SyncMode,
         indexing_config: IndexingConfig,
     ) -> Result<Self, StorageError> {
+        // Derive all file paths from the base path
+        let log_path = base_path.with_extension("log");
+        let index_path = base_path.with_extension("index");
+        let time_index_path = base_path.with_extension("timeindex");
+
+        tracing::info!(
+            "Starting segment recovery - log: {}, index: {}, time_index: {}",
+            log_path.display(),
+            index_path.display(),
+            time_index_path.display()
+        );
+
         let mut segment = Self::new(
             base_offset,
-            log_path,
-            index_path,
+            log_path.clone(),
+            index_path.clone(),
+            time_index_path.clone(),
             sync_mode,
             indexing_config,
         )?;
 
+        // Check if index file exists and try to read it
         if segment.index_path.exists() {
+            let index_size = std::fs::metadata(&segment.index_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            tracing::info!("Index file exists with size: {} bytes", index_size);
+
+            if index_size == 0 {
+                tracing::warn!("Index file exists but is empty (0 bytes)");
+            }
+
             let index_file = std::fs::File::open(&segment.index_path).map_err(|e| {
+                tracing::error!("Failed to open index file for reading: {}", e);
                 StorageError::from_io_error(e, "Failed to open index file for reading")
             })?;
             let mut index_reader = BufReader::new(index_file);
@@ -137,11 +178,15 @@ impl LogSegment {
                 .index
                 .read_from_file(&mut index_reader, base_offset, Some(1_000_000))
             {
-                Ok(()) => {}
+                Ok(()) => {
+                    let entries_read = segment.index.entry_count();
+                    tracing::info!("Successfully read {} entries from index file", entries_read);
+                }
                 Err(err) => {
-                    warn!(
+                    tracing::warn!(
                         "Offset index read failed ({}); rebuilding from log {:?}",
-                        err, segment.log_path
+                        err,
+                        segment.log_path
                     );
                     segment.rebuild_offset_index_from_log()?;
                 }
@@ -153,19 +198,39 @@ impl LogSegment {
                 Err(_) => 0,
             };
             if segment.index.last_entry().is_none() && log_len > 0 {
-                warn!(
-                    "Offset index at {:?} appears empty; rebuilding from log {:?}",
-                    segment.index_path, segment.log_path
+                tracing::warn!(
+                    "Offset index at {:?} appears empty (0 entries) while log has {} bytes; rebuilding from log {:?}",
+                    segment.index_path,
+                    log_len,
+                    segment.log_path
                 );
                 segment.rebuild_offset_index_from_log()?;
             }
         } else {
+            tracing::warn!(
+                "Index file does not exist: {}",
+                segment.index_path.display()
+            );
             // Missing offset index: build from the log
             segment.rebuild_offset_index_from_log()?;
         }
 
+        // Check if time index file exists and try to read it
         if segment.time_index_path.exists() {
+            let time_index_size = std::fs::metadata(&segment.time_index_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            tracing::info!(
+                "Time index file exists with size: {} bytes",
+                time_index_size
+            );
+
+            if time_index_size == 0 {
+                tracing::warn!("Time index file exists but is empty (0 bytes)");
+            }
+
             let time_index_file = std::fs::File::open(&segment.time_index_path).map_err(|e| {
+                tracing::error!("Failed to open time index file for reading: {}", e);
                 StorageError::from_io_error(e, "Failed to open time index file for reading")
             })?;
             let mut time_index_reader = BufReader::new(time_index_file);
@@ -174,11 +239,18 @@ impl LogSegment {
                 .time_index
                 .read_from_file(&mut time_index_reader, Some(1_000_000))
             {
-                Ok(()) => {}
+                Ok(()) => {
+                    let entries_read = segment.time_index.entry_count();
+                    tracing::info!(
+                        "Successfully read {} entries from time index file",
+                        entries_read
+                    );
+                }
                 Err(err) => {
-                    warn!(
+                    tracing::warn!(
                         "Time index read failed ({}); rebuilding from log {:?}",
-                        err, segment.log_path
+                        err,
+                        segment.log_path
                     );
                     segment.rebuild_time_index_from_log()?;
                 }
@@ -190,13 +262,19 @@ impl LogSegment {
                 Err(_) => 0,
             };
             if segment.time_index.last_entry().is_none() && log_len > 0 {
-                warn!(
-                    "Time index at {:?} appears empty; rebuilding from log {:?}",
-                    segment.time_index_path, segment.log_path
+                tracing::warn!(
+                    "Time index at {:?} appears empty (0 entries) while log has {} bytes; rebuilding from log {:?}",
+                    segment.time_index_path,
+                    log_len,
+                    segment.log_path
                 );
                 segment.rebuild_time_index_from_log()?;
             }
         } else {
+            tracing::warn!(
+                "Time index file does not exist: {}",
+                segment.time_index_path.display()
+            );
             // Missing time index: build from the log
             segment.rebuild_time_index_from_log()?;
         }
@@ -205,6 +283,13 @@ impl LogSegment {
         segment.max_ts_ms = segment.time_index.last_entry().map(|e| e.timestamp_ms);
 
         segment.max_offset = determine_max_offset(&segment.log_path, &segment.index)?;
+
+        tracing::info!(
+            "Segment recovery completed - max_offset: {:?}, index entries: {}, time index entries: {}",
+            segment.max_offset,
+            segment.index.entry_count(),
+            segment.time_index.entry_count()
+        );
 
         Ok(segment)
     }
@@ -223,7 +308,23 @@ impl LogSegment {
         self.min_ts_ms = Some(self.min_ts_ms.map_or(ts_ms, |v| v.min(ts_ms)));
         self.max_ts_ms = Some(self.max_ts_ms.map_or(ts_ms, |v| v.max(ts_ms)));
 
+        tracing::trace!(
+            "Record appended - offset: {}, bytes_since_last_index: {}, records_since_last_index: {}, should_add_index: {}",
+            offset,
+            self.bytes_since_last_index,
+            self.records_since_last_index,
+            self.should_add_index_entry()
+        );
+
         if self.should_add_index_entry() {
+            tracing::info!(
+                "Adding index entry - offset: {}, position: {}, bytes_accumulated: {}, records_accumulated: {}",
+                offset,
+                start_position,
+                self.bytes_since_last_index,
+                self.records_since_last_index
+            );
+
             // Offset index update
             let index_entry = IndexEntry {
                 offset,
@@ -231,8 +332,18 @@ impl LogSegment {
             };
             self.index.add_entry(index_entry.clone());
             let serialized_entry = self.index.serialize_entry(&index_entry, self.base_offset);
+            tracing::debug!(
+                "Adding {} bytes to index buffer (current buffer size: {})",
+                serialized_entry.len(),
+                self.index_buffer.len()
+            );
             self.index_buffer.extend_from_slice(&serialized_entry);
+
             if self.index_buffer.len() >= self.indexing_config.index_interval_bytes as usize {
+                tracing::info!(
+                    "Index buffer reached threshold ({}), flushing",
+                    self.index_buffer.len()
+                );
                 self.flush_index_buffer()?;
             }
 
@@ -242,11 +353,21 @@ impl LogSegment {
                 None => true,
             };
             if write_time_entry {
+                tracing::info!(
+                    "Adding time index entry - timestamp: {}, position: {}",
+                    ts_ms,
+                    start_position
+                );
                 let tentry = TimeIndexEntry {
                     timestamp_ms: ts_ms,
                     position: start_position,
                 };
                 self.time_index.add_entry(tentry.clone());
+                tracing::debug!(
+                    "Adding {} bytes to time index buffer (current buffer size: {})",
+                    8 + 4,
+                    self.time_index_buffer.len()
+                ); // 8 bytes timestamp + 4 bytes position
                 self.time_index_buffer
                     .extend_from_slice(&tentry.timestamp_ms.to_be_bytes());
                 self.time_index_buffer
@@ -254,8 +375,17 @@ impl LogSegment {
                 if self.time_index_buffer.len()
                     >= self.indexing_config.index_interval_bytes as usize
                 {
+                    tracing::info!(
+                        "Time index buffer reached threshold ({}), flushing",
+                        self.time_index_buffer.len()
+                    );
                     self.flush_time_index_buffer()?;
                 }
+            } else {
+                tracing::debug!(
+                    "Skipping time index entry - timestamp {} already exists",
+                    ts_ms
+                );
             }
 
             self.bytes_since_last_index = 0;
@@ -417,35 +547,74 @@ impl LogSegment {
     }
 
     fn should_add_index_entry(&self) -> bool {
-        self.bytes_since_last_index >= self.indexing_config.index_interval_bytes
-            || self.records_since_last_index >= self.indexing_config.index_interval_records
+        let bytes_threshold_met =
+            self.bytes_since_last_index >= self.indexing_config.index_interval_bytes;
+        let records_threshold_met =
+            self.records_since_last_index >= self.indexing_config.index_interval_records;
+        let should_add = bytes_threshold_met || records_threshold_met;
+
+        tracing::trace!(
+            "Index threshold check - bytes: {}/{} ({}), records: {}/{} ({}), should_add: {}",
+            self.bytes_since_last_index,
+            self.indexing_config.index_interval_bytes,
+            bytes_threshold_met,
+            self.records_since_last_index,
+            self.indexing_config.index_interval_records,
+            records_threshold_met,
+            should_add
+        );
+
+        should_add
     }
 
-    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.index_buffer.len()))]
+    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.index_buffer.len(), index_path = %self.index_path.display()))]
     fn flush_index_buffer(&mut self) -> Result<(), StorageError> {
         if self.index_buffer.is_empty() {
+            tracing::debug!("Index buffer empty, skipping flush");
             return Ok(());
         }
 
+        tracing::info!("Flushing {} bytes to index file", self.index_buffer.len());
+
         FileIo::append_data_to_end(&mut self.index_file, &self.index_buffer).map_err(|e| {
+            tracing::error!(
+                "Failed to write {} bytes to index file: {}",
+                self.index_buffer.len(),
+                e
+            );
             StorageError::from_io_error(
                 std::io::Error::other(e.to_string()),
                 "Failed to write to index file",
             )
         })?;
 
+        tracing::info!(
+            "Successfully flushed {} bytes to index file",
+            self.index_buffer.len()
+        );
         self.index_buffer.clear();
         Ok(())
     }
 
-    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.time_index_buffer.len()))]
+    #[tracing::instrument(level = "debug", skip(self), fields(bytes = self.time_index_buffer.len(), time_index_path = %self.time_index_path.display()))]
     fn flush_time_index_buffer(&mut self) -> Result<(), StorageError> {
         if self.time_index_buffer.is_empty() {
+            tracing::debug!("Time index buffer empty, skipping flush");
             return Ok(());
         }
 
+        tracing::info!(
+            "Flushing {} bytes to time index file",
+            self.time_index_buffer.len()
+        );
+
         FileIo::append_data_to_end(&mut self.time_index_file, &self.time_index_buffer).map_err(
             |e| {
+                tracing::error!(
+                    "Failed to write {} bytes to time index file: {}",
+                    self.time_index_buffer.len(),
+                    e
+                );
                 StorageError::from_io_error(
                     std::io::Error::other(e.to_string()),
                     "Failed to write to time index file",
@@ -453,6 +622,10 @@ impl LogSegment {
             },
         )?;
 
+        tracing::info!(
+            "Successfully flushed {} bytes to time index file",
+            self.time_index_buffer.len()
+        );
         self.time_index_buffer.clear();
         Ok(())
     }

@@ -50,6 +50,7 @@ pub enum StorageError {
         context: String,
         pid: Option<u32>,
     },
+    InvalidTopic(String),
     LockAcquisitionFailed,
 }
 
@@ -121,6 +122,7 @@ impl fmt::Display for StorageError {
                 Some(pid) => write!(f, "Directory locked in {context} (PID: {pid})"),
                 None => write!(f, "Directory locked in {context}"),
             },
+            StorageError::InvalidTopic(topic) => write!(f, "Invalid topic: {topic}"),
             StorageError::LockAcquisitionFailed => {
                 write!(f, "Failed to acquire exclusive lock on file")
             }

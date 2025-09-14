@@ -1,20 +1,29 @@
 use crate::error::StorageError;
 use crate::storage::file::common::ensure_directory_exists;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
-use crate::storage::r#trait::TopicLog;
+use crate::storage::r#trait::{PartitionId, TopicLog};
 use crate::{Record, RecordWithOffset};
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// File-based topic log implementation using Kafka-aligned segment architecture
 pub struct FileTopicLog {
-    segment_manager: SegmentManager,
-    next_offset: u64,
-    record_count: usize,
+    topic: String,
+    base_dir: PathBuf,
+    pub partitions: HashMap<PartitionId, PartitionData>,
+    sync_mode: SyncMode,
+    segment_size_bytes: u64,
     batch_bytes: usize,
+    indexing_config: IndexingConfig,
+}
+
+pub struct PartitionData {
+    pub segment_manager: SegmentManager,
+    pub next_offset: u64,
+    pub record_count: usize,
 }
 
 impl FileTopicLog {
-    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes))]
     pub fn new<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -31,7 +40,6 @@ impl FileTopicLog {
         )
     }
 
-    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes, batch_bytes))]
     pub fn new_with_batch_bytes<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -58,178 +66,416 @@ impl FileTopicLog {
         batch_bytes: usize,
         indexing_config: IndexingConfig,
     ) -> Result<Self, std::io::Error> {
+        let base_dir = Self::setup_topic_directory(&data_dir, topic)?;
+
+        let mut log = FileTopicLog {
+            topic: topic.to_string(),
+            base_dir,
+            partitions: HashMap::new(),
+            sync_mode,
+            segment_size_bytes,
+            batch_bytes,
+            indexing_config,
+        };
+
+        log.recover_all_partitions()?;
+        Ok(log)
+    }
+
+    fn setup_topic_directory<P: AsRef<Path>>(
+        data_dir: P,
+        topic: &str,
+    ) -> Result<PathBuf, std::io::Error> {
         let data_dir = data_dir.as_ref().to_path_buf();
         ensure_directory_exists(&data_dir)?;
 
         let base_dir = data_dir.join(topic);
         ensure_directory_exists(&base_dir)?;
 
-        let segment_manager = SegmentManager::new(
-            base_dir.clone(),
-            segment_size_bytes,
-            sync_mode,
-            indexing_config.clone(),
-        );
-
-        let mut log = FileTopicLog {
-            segment_manager,
-            next_offset: 0,
-            record_count: 0,
-            batch_bytes,
-        };
-
-        log.recover_from_segments()
-            .map_err(|e| std::io::Error::other(format!("Recovery failed: {e}")))?;
-
-        Ok(log)
+        Ok(base_dir)
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
-    pub fn sync(&mut self) -> Result<(), StorageError> {
-        if let Some(active_segment) = self.segment_manager.active_segment_mut() {
-            active_segment.sync()?;
+    fn sync_all_partitions(&mut self) -> Result<(), StorageError> {
+        for partition_data in self.partitions.values_mut() {
+            if let Some(active_segment) = partition_data.segment_manager.active_segment_mut() {
+                active_segment.sync()?;
+            }
         }
         Ok(())
     }
 
-    #[tracing::instrument(level = "info", skip(self))]
-    fn recover_from_segments(&mut self) -> Result<(), StorageError> {
-        self.segment_manager.recover_from_directory()?;
+    pub fn sync(&mut self) -> Result<(), StorageError> {
+        self.sync_all_partitions()
+    }
 
+    #[tracing::instrument(level = "info", skip(self), fields(topic = %self.topic, base_dir = %self.base_dir.display()))]
+    fn recover_all_partitions(&mut self) -> Result<(), std::io::Error> {
+        let partition_ids = self.scan_for_existing_partitions()?;
+
+        tracing::info!(
+            "Found {} existing partitions for topic {}: {:?}",
+            partition_ids.len(),
+            self.topic,
+            partition_ids
+        );
+
+        for partition_id in partition_ids {
+            self.recover_single_partition(partition_id)?;
+        }
+
+        tracing::info!("Completed partition recovery for topic: {}", self.topic);
+        Ok(())
+    }
+
+    fn scan_for_existing_partitions(&self) -> Result<Vec<PartitionId>, std::io::Error> {
+        let entries = std::fs::read_dir(&self.base_dir).map_err(|e| {
+            tracing::error!(
+                "Failed to read topic directory {}: {}",
+                self.base_dir.display(),
+                e
+            );
+            e
+        })?;
+
+        let mut partition_ids = Vec::new();
+        for entry in entries {
+            let path = entry?.path();
+            if let Some(partition_id) = self.extract_partition_id_from_path(&path) {
+                partition_ids.push(partition_id);
+            }
+        }
+
+        partition_ids.sort_by_key(|id| id.0);
+        Ok(partition_ids)
+    }
+
+    fn extract_partition_id_from_path(&self, path: &std::path::Path) -> Option<PartitionId> {
+        if !path.is_dir() {
+            return None;
+        }
+
+        let dir_name = path.file_name()?.to_str()?;
+        match dir_name.parse::<u32>() {
+            Ok(partition_id) => {
+                tracing::debug!(
+                    "Found partition directory: {} for partition {}",
+                    path.display(),
+                    partition_id
+                );
+                Some(PartitionId(partition_id))
+            }
+            Err(_) => {
+                tracing::debug!("Skipping non-numeric directory: {}", path.display());
+                None
+            }
+        }
+    }
+
+    #[tracing::instrument(level = "debug", skip(self), fields(partition_id = %partition_id.0))]
+    fn recover_single_partition(
+        &mut self,
+        partition_id: PartitionId,
+    ) -> Result<(), std::io::Error> {
+        let partition_dir = self.base_dir.join(partition_id.to_string());
+
+        let mut segment_manager = self.create_segment_manager(&partition_dir);
+        segment_manager.recover_from_directory().map_err(|e| {
+            tracing::error!(
+                "Failed to recover partition {} from {}: {}",
+                partition_id.0,
+                partition_dir.display(),
+                e
+            );
+            std::io::Error::other(format!("Partition recovery failed: {e}"))
+        })?;
+
+        let (next_offset, record_count) = self.calculate_metadata_from_segments(&segment_manager);
+
+        tracing::info!(
+            "Recovered partition {}: next_offset={}, record_count={}",
+            partition_id.0,
+            next_offset,
+            record_count
+        );
+
+        self.partitions.insert(
+            partition_id,
+            PartitionData {
+                segment_manager,
+                next_offset,
+                record_count,
+            },
+        );
+
+        Ok(())
+    }
+
+    fn create_segment_manager(&self, partition_dir: &std::path::Path) -> SegmentManager {
+        SegmentManager::new(
+            partition_dir.to_path_buf(),
+            self.segment_size_bytes,
+            self.sync_mode,
+            self.indexing_config.clone(),
+        )
+    }
+
+    fn calculate_metadata_from_segments(&self, segment_manager: &SegmentManager) -> (u64, usize) {
         let mut total_records = 0;
         let mut highest_offset = 0;
 
-        for segment in self.segment_manager.all_segments() {
+        for segment in segment_manager.all_segments() {
             let segment_record_count = segment.record_count();
             total_records += segment_record_count;
 
             if segment_record_count > 0 {
-                if let Some(segment_highest_offset) = segment.max_offset {
-                    highest_offset = highest_offset.max(segment_highest_offset);
+                if let Some(segment_max_offset) = segment.max_offset {
+                    highest_offset = highest_offset.max(segment_max_offset);
                 }
             }
         }
 
-        self.record_count = total_records;
-        self.next_offset = if total_records > 0 {
+        let next_offset = if total_records > 0 {
             highest_offset + 1
         } else {
             0
         };
 
-        if self.segment_manager.active_segment_mut().is_none() {
-            self.segment_manager.roll_to_new_segment(self.next_offset)?;
-        }
-
-        Ok(())
+        tracing::debug!(
+            "Calculated metadata: next_offset={}, record_count={}",
+            next_offset,
+            total_records
+        );
+        (next_offset, total_records)
     }
-}
 
-impl TopicLog for FileTopicLog {
-    fn append(&mut self, record: Record) -> Result<u64, StorageError> {
-        let offset = self.next_offset;
-
-        if self.segment_manager.should_roll_segment() {
-            self.segment_manager.roll_to_new_segment(offset)?;
+    fn get_or_create_partition(
+        &mut self,
+        partition_id: PartitionId,
+    ) -> Result<&mut PartitionData, StorageError> {
+        if self.partitions.contains_key(&partition_id) {
+            return Ok(self.partitions.get_mut(&partition_id).unwrap());
         }
 
-        let active_segment = self.segment_manager.active_segment_mut().ok_or_else(|| {
+        let partition_data = self.create_new_partition(partition_id)?;
+        self.partitions.insert(partition_id, partition_data);
+        Ok(self.partitions.get_mut(&partition_id).unwrap())
+    }
+
+    fn create_new_partition(
+        &mut self,
+        partition_id: PartitionId,
+    ) -> Result<PartitionData, StorageError> {
+        let partition_dir = self.setup_partition_directory(partition_id)?;
+        let mut segment_manager = self.create_segment_manager(&partition_dir);
+
+        segment_manager.recover_from_directory().map_err(|e| {
             StorageError::from_io_error(
-                std::io::Error::other("No active segment"),
-                "No active segment available for writing",
+                std::io::Error::other(format!("Recovery failed: {e}")),
+                &format!(
+                    "recover partition directory {}/{}",
+                    self.topic, partition_id
+                ),
             )
         })?;
 
-        active_segment.append_record(&record, offset)?;
+        let (next_offset, total_records) = self.calculate_partition_state(&mut segment_manager)?;
 
-        self.next_offset += 1;
-        self.record_count += 1;
-        Ok(offset)
+        Ok(PartitionData {
+            segment_manager,
+            next_offset,
+            record_count: total_records,
+        })
     }
 
-    fn append_batch(&mut self, records: Vec<Record>) -> Result<u64, StorageError> {
-        if records.is_empty() {
-            return Ok(self.next_offset);
-        }
-        // Chunk by approximate serialized size to keep each write under batch_bytes
+    fn setup_partition_directory(
+        &self,
+        partition_id: PartitionId,
+    ) -> Result<PathBuf, StorageError> {
+        let partition_dir = self.base_dir.join(partition_id.to_string());
+        ensure_directory_exists(&partition_dir).map_err(|e| {
+            StorageError::from_io_error(
+                e,
+                &format!("create partition directory {}/{}", self.topic, partition_id),
+            )
+        })?;
+        Ok(partition_dir)
+    }
 
-        let mut start = 0usize;
-        let mut acc = 0usize;
-        let mut last_offset = self.next_offset.saturating_sub(1);
-        // Process in approx-size-bounded chunks
-        for i in 0..records.len() {
-            let est = crate::storage::batching_heuristics::estimate_record_size(&records[i]);
-            if acc > 0 && acc + est > self.batch_bytes {
-                if self.segment_manager.should_roll_segment() {
-                    self.segment_manager.roll_to_new_segment(self.next_offset)?;
-                }
-                let active = self.segment_manager.active_segment_mut().ok_or_else(|| {
-                    StorageError::from_io_error(
-                        std::io::Error::other("No active segment"),
-                        "No active segment available for bulk writing",
-                    )
-                })?;
+    fn calculate_partition_state(
+        &self,
+        segment_manager: &mut SegmentManager,
+    ) -> Result<(u64, usize), StorageError> {
+        let (next_offset, total_records) = self.calculate_metadata_from_segments(segment_manager);
 
-                let start_off = self.next_offset;
-                last_offset = active.append_records_bulk(&records[start..i], start_off)?;
-                let appended = (last_offset - start_off + 1) as usize;
-                self.next_offset = last_offset + 1;
-                self.record_count += appended;
-                let _ = appended;
-                start = i;
-                acc = 0;
-            }
-            acc += est;
+        if segment_manager.active_segment_mut().is_none() {
+            segment_manager.roll_to_new_segment(next_offset)?;
         }
 
-        if start < records.len() {
-            if self.segment_manager.should_roll_segment() {
-                self.segment_manager.roll_to_new_segment(self.next_offset)?;
-            }
-            let active = self.segment_manager.active_segment_mut().ok_or_else(|| {
+        Ok((next_offset, total_records))
+    }
+
+    fn find_partition(&self, partition_id: PartitionId) -> Option<&PartitionData> {
+        self.partitions.get(&partition_id)
+    }
+
+    fn write_batch_to_partition(
+        &mut self,
+        partition_id: PartitionId,
+        records: &[Record],
+    ) -> Result<u64, StorageError> {
+        let partition_data = self.get_or_create_partition(partition_id)?;
+
+        if partition_data.segment_manager.should_roll_segment() {
+            partition_data
+                .segment_manager
+                .roll_to_new_segment(partition_data.next_offset)?;
+        }
+
+        let active_segment = partition_data
+            .segment_manager
+            .active_segment_mut()
+            .ok_or_else(|| {
                 StorageError::from_io_error(
                     std::io::Error::other("No active segment"),
                     "No active segment available for bulk writing",
                 )
             })?;
-            let start_off = self.next_offset;
-            last_offset = active.append_records_bulk(&records[start..], start_off)?;
-            let appended = (last_offset - start_off + 1) as usize;
-            self.next_offset = last_offset + 1;
-            self.record_count += appended;
-            let _ = appended;
+
+        let start_offset = partition_data.next_offset;
+        let last_offset = active_segment.append_records_bulk(records, start_offset)?;
+        let appended_count = (last_offset - start_offset + 1) as usize;
+
+        partition_data.next_offset += appended_count as u64;
+        partition_data.record_count += appended_count;
+
+        Ok(last_offset)
+    }
+}
+
+impl TopicLog for FileTopicLog {
+    fn append_partition(
+        &mut self,
+        partition_id: PartitionId,
+        record: Record,
+    ) -> Result<u64, StorageError> {
+        // Get the initial state we need
+        let next_offset = {
+            let partition_data = self.get_or_create_partition(partition_id)?;
+            partition_data.next_offset
+        };
+
+        // Now work with a fresh mutable borrow
+        let partition_data = self.get_or_create_partition(partition_id)?;
+
+        if partition_data.segment_manager.should_roll_segment() {
+            partition_data
+                .segment_manager
+                .roll_to_new_segment(partition_data.next_offset)?;
+        }
+
+        let active_segment = partition_data
+            .segment_manager
+            .active_segment_mut()
+            .ok_or_else(|| {
+                StorageError::from_io_error(
+                    std::io::Error::other("No active segment"),
+                    "No active segment available for writing",
+                )
+            })?;
+
+        active_segment.append_record(&record, next_offset)?;
+        partition_data.next_offset += 1;
+        partition_data.record_count += 1;
+
+        Ok(next_offset)
+    }
+
+    fn append_batch_partition(
+        &mut self,
+        partition_id: PartitionId,
+        records: Vec<Record>,
+    ) -> Result<u64, StorageError> {
+        if records.is_empty() {
+            return Ok(self.get_or_create_partition(partition_id)?.next_offset);
+        }
+
+        let mut last_offset = 0;
+        let mut start = 0;
+
+        for i in 0..records.len() {
+            // Check if we should flush this batch
+            let should_flush = {
+                if i <= start {
+                    false
+                } else {
+                    let accumulated_size: usize = records[start..i]
+                        .iter()
+                        .map(crate::storage::batching_heuristics::estimate_record_size)
+                        .sum();
+
+                    let next_record_size =
+                        crate::storage::batching_heuristics::estimate_record_size(&records[i]);
+
+                    accumulated_size > 0 && accumulated_size + next_record_size > self.batch_bytes
+                }
+            };
+
+            if should_flush {
+                last_offset = self.write_batch_to_partition(partition_id, &records[start..i])?;
+                start = i;
+            }
+        }
+
+        if start < records.len() {
+            last_offset = self.write_batch_to_partition(partition_id, &records[start..])?;
         }
 
         Ok(last_offset)
     }
 
-    fn get_records_from_offset(
+    fn read_from_partition(
         &self,
-        offset: u64,
-        count: Option<usize>,
+        partition_id: PartitionId,
+        from_offset: u64,
+        max_bytes: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        // Use streaming reader to minimize per-chunk reopens/seeks
-        self.segment_manager.read_records_streaming(offset, count)
+        match self.find_partition(partition_id) {
+            Some(partition_data) => partition_data
+                .segment_manager
+                .read_records_streaming(from_offset, max_bytes),
+            None => Ok(Vec::new()),
+        }
     }
 
-    fn get_records_from_timestamp(
+    fn read_from_partition_timestamp(
         &self,
+        partition_id: PartitionId,
         ts_rfc3339: &str,
-        count: Option<usize>,
+        max_bytes: Option<usize>,
     ) -> Result<Vec<RecordWithOffset>, StorageError> {
-        self.segment_manager
-            .read_records_from_timestamp(ts_rfc3339, count)
+        match self.find_partition(partition_id) {
+            Some(partition_data) => partition_data
+                .segment_manager
+                .read_records_from_timestamp(ts_rfc3339, max_bytes),
+            None => Ok(Vec::new()),
+        }
     }
 
-    fn len(&self) -> usize {
-        self.record_count
+    fn partition_len(&self, partition_id: PartitionId) -> usize {
+        self.find_partition(partition_id)
+            .map(|p| p.record_count)
+            .unwrap_or(0)
     }
 
-    fn is_empty(&self) -> bool {
-        self.record_count == 0
+    fn partition_is_empty(&self, partition_id: PartitionId) -> bool {
+        self.find_partition(partition_id)
+            .map(|p| p.record_count == 0)
+            .unwrap_or(true)
     }
 
-    fn next_offset(&self) -> u64 {
-        self.next_offset
+    fn partition_next_offset(&self, partition_id: PartitionId) -> u64 {
+        self.find_partition(partition_id)
+            .map(|p| p.next_offset)
+            .unwrap_or(0)
     }
 }
