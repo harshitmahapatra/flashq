@@ -53,10 +53,11 @@ cargo bench --bench batching_baseline    # Batching performance benchmarks
 
 ### Test Coverage
 
-**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
-**Storage Integration:** File persistence, crash recovery, directory locking, error simulation  
-**Batching Integration:** Batch operations, performance validation, memory efficiency  
-**Client Integration:** CLI commands, batch operations, consumer group lifecycle  
+**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling
+**Storage Integration:** File persistence, crash recovery, directory locking, error simulation, partition tests
+**Partition Integration:** Multi-partition consumer groups, backward compatibility with partition 0
+**Batching Integration:** Batch operations, performance validation, memory efficiency
+**Client Integration:** CLI commands, batch operations, consumer group lifecycle
 **Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
 
 ## Code Quality
@@ -135,9 +136,14 @@ benches/                # Performance benchmarks
 # Test file storage with temporary directories
 cargo test -p flashq --test storage_integration_tests
 
-# Test specific storage components  
+# Test specific storage components
 cargo test -p flashq --test storage_integration_tests::file_topic_log_tests
 cargo test -p flashq --test storage_integration_tests::error_simulation_tests
+
+# Test partition functionality
+cargo test -p flashq --test storage_integration_tests::partition_tests
+cargo test -p flashq --test storage_integration_tests::partition_backward_compatibility_tests
+RUST_LOG=flashq::storage::file::consumer_group=debug cargo test partition_tests -- --nocapture
 ```
 
 ### Storage Backend Selection

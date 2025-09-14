@@ -105,12 +105,16 @@ HTTP API documentation for FlashQ server (`http://127.0.0.1:8080`).
 
 ## Consumer Groups
 
-**Create:** `POST /consumer/{group-id}` → `{"group_id": "analytics-processors"}`  
-**Delete:** `DELETE /consumer/{group-id}` → 204 No Content  
-**Get Offset:** `GET /consumer/{group-id}/topic/{topic}/offset`  
-**Set Offset:** `POST /consumer/{group-id}/topic/{topic}/offset` with `{"offset": 10, "metadata": "Processed batch #42"}`  
-**Poll by Offset:** `GET /consumer/{group-id}/topic/{topic}/record/offset?max_records=5&from_offset=10`  
+Consumer groups track offsets per partition within topics. Current implementation defaults to partition 0 for backward compatibility.
+
+**Create:** `POST /consumer/{group-id}` → `{"group_id": "analytics-processors"}`
+**Delete:** `DELETE /consumer/{group-id}` → 204 No Content
+**Get Offset:** `GET /consumer/{group-id}/topic/{topic}/offset` (defaults to partition 0)
+**Set Offset:** `POST /consumer/{group-id}/topic/{topic}/offset` with `{"offset": 10, "metadata": "Processed batch #42"}` (defaults to partition 0)
+**Poll by Offset:** `GET /consumer/{group-id}/topic/{topic}/record/offset?max_records=5&from_offset=10`
 **Poll by Time:** `GET /consumer/{group-id}/topic/{topic}/record/time?from_time=2025-01-01T00:00:00Z&max_records=5`
+
+**Note:** Partition-aware offset tracking is implemented internally but HTTP API currently operates on partition 0 for simplicity.
 
 ## Get Topics
 

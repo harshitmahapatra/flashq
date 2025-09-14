@@ -3,8 +3,9 @@
 
 use crate::storage::test_utilities::TestConfig;
 use flashq::Record;
-use flashq::storage::file::FileTopicLog;
-use flashq::storage::r#trait::{PartitionId, TopicLog};
+use flashq::storage::file::{FileConsumerGroup, FileTopicLog, SyncMode};
+use flashq::storage::memory::InMemoryConsumerGroup;
+use flashq::storage::r#trait::{ConsumerGroup, PartitionId, TopicLog};
 use test_log::test;
 
 #[test]
@@ -251,4 +252,140 @@ fn test_offset_continuity_in_default_partition() {
     assert_eq!(offset2, 1);
     assert_eq!(offset3, 2);
     assert_eq!(log.partition_next_offset(default_partition), 3);
+}
+
+#[test]
+fn test_consumer_group_backward_compatibility_get_offset() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("backward_compat_group".to_string());
+    let topic = "compat_topic";
+
+    // Action: use old API methods that should delegate to partition 0
+    memory_group.set_offset(topic.to_string(), 25);
+
+    // Expectation: should work with partition 0 internally
+    assert_eq!(memory_group.get_offset(topic), 25);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 25);
+}
+
+#[test]
+fn test_consumer_group_backward_compatibility_set_offset() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("set_compat_group".to_string());
+    let topic = "set_compat_topic";
+
+    // Action: set using old API
+    memory_group.set_offset(topic.to_string(), 42);
+
+    // Expectation: should be accessible via both old and new APIs
+    assert_eq!(memory_group.get_offset(topic), 42);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 42);
+
+    // Verify other partitions remain unaffected
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(1)), 0);
+}
+
+#[test]
+fn test_consumer_group_backward_compatibility_get_all_offsets() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("all_compat_group".to_string());
+    let topic1 = "topic1";
+    let topic2 = "topic2";
+
+    // Action: set offsets using new partition-aware API
+    memory_group.set_offset_partition(topic1.to_string(), PartitionId(0), 10);
+    memory_group.set_offset_partition(topic1.to_string(), PartitionId(1), 20);
+    memory_group.set_offset_partition(topic2.to_string(), PartitionId(0), 30);
+
+    // Expectation: old API should only return partition 0 offsets
+    let old_api_offsets = memory_group.get_all_offsets();
+    assert_eq!(old_api_offsets.len(), 2);
+    assert_eq!(old_api_offsets[topic1], 10);
+    assert_eq!(old_api_offsets[topic2], 30);
+
+    // New API should return all partition offsets
+    let new_api_offsets = memory_group.get_all_offsets_partitioned();
+    assert_eq!(new_api_offsets.len(), 3);
+}
+
+#[test]
+fn test_consumer_group_mixed_api_usage() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("mixed_api_group".to_string());
+    let topic = "mixed_topic";
+
+    // Action: mix old and new API usage
+    memory_group.set_offset(topic.to_string(), 5); // Sets partition 0
+    memory_group.set_offset_partition(topic.to_string(), PartitionId(1), 15); // Sets partition 1
+
+    // Expectation: both APIs should work correctly
+    assert_eq!(memory_group.get_offset(topic), 5); // Gets partition 0
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 5);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(1)), 15);
+
+    // Update via old API and verify it only affects partition 0
+    memory_group.set_offset(topic.to_string(), 8);
+    assert_eq!(memory_group.get_offset(topic), 8);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 8);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(1)), 15); // Unchanged
+}
+
+#[test]
+fn test_file_consumer_group_backward_compatibility_persistence() {
+    // Setup
+    let config = TestConfig::new("file_backward_compat");
+    let group_id = "backward_compat_file_group";
+    let topic = "compat_file_topic";
+
+    // First instance: use old API
+    {
+        let mut file_group =
+            FileConsumerGroup::new(group_id, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+
+        file_group.set_offset(topic.to_string(), 99);
+    }
+
+    // Action: create new instance and verify with both APIs
+    let file_group =
+        FileConsumerGroup::new(group_id, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+
+    // Expectation: offset should be recoverable via both APIs
+    assert_eq!(file_group.get_offset(topic), 99);
+    assert_eq!(file_group.get_offset_partition(topic, PartitionId(0)), 99);
+    assert_eq!(file_group.get_offset_partition(topic, PartitionId(1)), 0);
+}
+
+#[test]
+fn test_consumer_group_partition_zero_equals_old_api() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("zero_equals_old".to_string());
+    let topic = "zero_topic";
+
+    // Action: set using partition 0 directly
+    memory_group.set_offset_partition(topic.to_string(), PartitionId(0), 77);
+
+    // Expectation: old API should return the same value
+    assert_eq!(memory_group.get_offset(topic), 77);
+
+    // Action: set using old API
+    memory_group.set_offset(topic.to_string(), 88);
+
+    // Expectation: partition 0 should have the updated value
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 88);
+}
+
+#[test]
+fn test_consumer_group_default_offset_behavior() {
+    // Setup
+    let memory_group = InMemoryConsumerGroup::new("default_behavior".to_string());
+    let topic = "default_topic";
+
+    // Action & Expectation: unset offsets should return 0 for both APIs
+    assert_eq!(memory_group.get_offset(topic), 0);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(0)), 0);
+    assert_eq!(memory_group.get_offset_partition(topic, PartitionId(5)), 0);
+
+    // Verify empty state
+    assert!(memory_group.get_all_offsets().is_empty());
+    assert!(memory_group.get_all_offsets_partitioned().is_empty());
 }

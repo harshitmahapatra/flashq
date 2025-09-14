@@ -3,8 +3,9 @@
 
 use crate::storage::test_utilities::TestConfig;
 use flashq::Record;
-use flashq::storage::file::FileTopicLog;
-use flashq::storage::r#trait::{PartitionId, TopicLog};
+use flashq::storage::file::{FileConsumerGroup, FileTopicLog, SyncMode};
+use flashq::storage::memory::InMemoryConsumerGroup;
+use flashq::storage::r#trait::{ConsumerGroup, PartitionId, TopicLog};
 use test_log::test;
 
 #[test]
@@ -325,4 +326,130 @@ fn test_partition_recovery_after_restart() {
     assert_eq!(log.partition_next_offset(partition_id), 1);
     let records = log.read_from_partition(partition_id, 0, None).unwrap();
     assert_eq!(records[0].record.value, "persisted_record");
+}
+
+#[test]
+fn test_consumer_group_partition_aware_offset_tracking() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("test_group".to_string());
+    let partition0 = PartitionId(0);
+    let partition1 = PartitionId(1);
+    let topic = "test_topic";
+
+    // Action
+    memory_group.set_offset_partition(topic.to_string(), partition0, 5);
+    memory_group.set_offset_partition(topic.to_string(), partition1, 10);
+
+    // Expectation
+    assert_eq!(memory_group.get_offset_partition(topic, partition0), 5);
+    assert_eq!(memory_group.get_offset_partition(topic, partition1), 10);
+    assert_eq!(
+        memory_group.get_offset_partition("other_topic", partition0),
+        0
+    );
+}
+
+#[test]
+fn test_consumer_group_partition_isolation() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("isolation_group".to_string());
+    let partition0 = PartitionId(0);
+    let partition1 = PartitionId(1);
+    let partition2 = PartitionId(2);
+    let topic = "isolation_topic";
+
+    // Action
+    memory_group.set_offset_partition(topic.to_string(), partition0, 100);
+    memory_group.set_offset_partition(topic.to_string(), partition1, 200);
+    memory_group.set_offset_partition(topic.to_string(), partition2, 300);
+
+    // Expectation: each partition maintains independent offsets
+    assert_eq!(memory_group.get_offset_partition(topic, partition0), 100);
+    assert_eq!(memory_group.get_offset_partition(topic, partition1), 200);
+    assert_eq!(memory_group.get_offset_partition(topic, partition2), 300);
+
+    // Verify all partition offsets are stored
+    let all_offsets = memory_group.get_all_offsets_partitioned();
+    assert_eq!(all_offsets.len(), 3);
+    assert_eq!(all_offsets[&(topic.to_string(), partition0)], 100);
+    assert_eq!(all_offsets[&(topic.to_string(), partition1)], 200);
+    assert_eq!(all_offsets[&(topic.to_string(), partition2)], 300);
+}
+
+#[test]
+fn test_consumer_group_multi_topic_partition_tracking() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("multi_topic_group".to_string());
+    let partition0 = PartitionId(0);
+    let partition1 = PartitionId(1);
+    let topic1 = "topic1";
+    let topic2 = "topic2";
+
+    // Action
+    memory_group.set_offset_partition(topic1.to_string(), partition0, 50);
+    memory_group.set_offset_partition(topic1.to_string(), partition1, 75);
+    memory_group.set_offset_partition(topic2.to_string(), partition0, 25);
+    memory_group.set_offset_partition(topic2.to_string(), partition1, 30);
+
+    // Expectation: topics and partitions are independently tracked
+    assert_eq!(memory_group.get_offset_partition(topic1, partition0), 50);
+    assert_eq!(memory_group.get_offset_partition(topic1, partition1), 75);
+    assert_eq!(memory_group.get_offset_partition(topic2, partition0), 25);
+    assert_eq!(memory_group.get_offset_partition(topic2, partition1), 30);
+
+    // Verify all combinations are stored
+    let all_offsets = memory_group.get_all_offsets_partitioned();
+    assert_eq!(all_offsets.len(), 4);
+}
+
+#[test]
+fn test_file_consumer_group_partition_persistence() {
+    // Setup
+    let config = TestConfig::new("file_consumer_partition");
+    let group_id = "persistent_partition_group";
+    let topic = "persistent_topic";
+    let partition0 = PartitionId(0);
+    let partition1 = PartitionId(1);
+
+    // First instance: set partition offsets
+    {
+        let mut file_group =
+            FileConsumerGroup::new(group_id, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+
+        file_group.set_offset_partition(topic.to_string(), partition0, 42);
+        file_group.set_offset_partition(topic.to_string(), partition1, 84);
+    }
+
+    // Action: create new instance (simulates restart)
+    let file_group =
+        FileConsumerGroup::new(group_id, SyncMode::Immediate, config.temp_dir_path()).unwrap();
+
+    // Expectation: partition offsets should be recovered
+    assert_eq!(file_group.get_offset_partition(topic, partition0), 42);
+    assert_eq!(file_group.get_offset_partition(topic, partition1), 84);
+
+    let all_offsets = file_group.get_all_offsets_partitioned();
+    assert_eq!(all_offsets.len(), 2);
+}
+
+#[test]
+fn test_consumer_group_partition_zero_independence() {
+    // Setup
+    let mut memory_group = InMemoryConsumerGroup::new("zero_independence".to_string());
+    let partition0 = PartitionId(0);
+    let partition5 = PartitionId(5);
+    let topic = "independence_topic";
+
+    // Action: set different offsets for partition 0 and other partitions
+    memory_group.set_offset_partition(topic.to_string(), partition0, 10);
+    memory_group.set_offset_partition(topic.to_string(), partition5, 20);
+
+    // Expectation: partition 0 doesn't interfere with other partitions
+    assert_eq!(memory_group.get_offset_partition(topic, partition0), 10);
+    assert_eq!(memory_group.get_offset_partition(topic, partition5), 20);
+
+    // Verify independence - updating one doesn't affect the other
+    memory_group.set_offset_partition(topic.to_string(), partition0, 15);
+    assert_eq!(memory_group.get_offset_partition(topic, partition0), 15);
+    assert_eq!(memory_group.get_offset_partition(topic, partition5), 20);
 }

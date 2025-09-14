@@ -61,7 +61,8 @@ graph TD
 - `InMemoryTopicLog`: Fast in-memory storage
 
 **Key Features:**
-- Partition-aware storage infrastructure (currently using partition 0 only)
+- Partition-aware storage infrastructure with per-partition offset tracking
+- Consumer groups with partition-aware offset management (defaults to partition 0)
 - High-throughput batching with configurable batch sizes
 - Thread-safe concurrent access with DashMap and RwLocks
 - Kafka-style segment architecture with sparse indexing
@@ -131,6 +132,9 @@ sequenceDiagram
 **Directory Structure:**
 ```
 data/
+├── consumer_groups/               # Consumer group offset storage
+│   ├── analytics-group.json       # Per-group offset persistence
+│   └── realtime-processors.json   # Format: {"topic--partition": offset}
 └── {topic}/
     └── {partition}/                   # Partition directory (0, 1, 2, ...)
         ├── 00000000000000000000.log       # First segment
@@ -157,6 +161,12 @@ data/
 - **Storage abstraction**: Pluggable backends (memory/file) via traits
 - **Kafka-aligned segments**: Rolling log files with sparse indexing
 - **Append-only logs**: Immutable history with FIFO ordering
+
+**Consumer Group Offset Tracking:**
+- Consumer groups track offsets per (topic, partition) pair
+- Internal ConsumerGroup trait supports partition-aware offset management
+- Backward compatible methods default to partition 0 for existing API compatibility
+- File-based consumer groups persist partition offsets to JSON files in `data/consumer_groups/`
 
 **Current Limitation**: Multiple partitions are implemented at the storage layer but not yet exposed through the public API. All operations currently use partition 0.
 
