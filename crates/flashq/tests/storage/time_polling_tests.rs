@@ -7,6 +7,7 @@ use flashq::storage::backend::StorageBackend;
 use flashq::storage::file::{FileTopicLog, SyncMode};
 use std::thread;
 use std::time::Duration as StdDuration;
+use test_log::test;
 
 #[test]
 fn time_polling_from_mid_returns_tail_values() {

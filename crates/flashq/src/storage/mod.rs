@@ -7,4 +7,4 @@ pub mod r#trait;
 // Re-exports for ergonomics
 pub use backend::StorageBackend;
 pub use memory::{InMemoryConsumerGroup, InMemoryTopicLog};
-pub use r#trait::{ConsumerGroup, TopicLog};
+pub use r#trait::{ConsumerGroup, PartitionId, TopicLog};

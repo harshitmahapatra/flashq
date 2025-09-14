@@ -129,6 +129,10 @@ impl SparseTimeIndex {
         self.entries.last()
     }
 
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
     #[cfg(test)]
     fn len(&self) -> usize {
         self.entries.len()

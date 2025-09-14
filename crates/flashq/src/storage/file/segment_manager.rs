@@ -315,11 +315,13 @@ impl SegmentManager {
 
         let log_path = self.base_dir.join(format!("{next_offset:020}.log"));
         let index_path = self.base_dir.join(format!("{next_offset:020}.index"));
+        let time_index_path = self.base_dir.join(format!("{next_offset:020}.timeindex"));
 
         let new_segment = LogSegment::new(
             next_offset,
             log_path,
             index_path,
+            time_index_path,
             self.sync_mode,
             self.indexing_config.clone(),
         )?;
@@ -352,14 +354,13 @@ impl SegmentManager {
     #[tracing::instrument(level = "info", skip(self, segment_offsets), fields(segments = segment_offsets.len()))]
     fn recover_segments(&mut self, segment_offsets: &[u64]) -> Result<(), StorageError> {
         for &base_offset in segment_offsets {
-            let log_path = self.base_dir.join(format!("{base_offset:020}.log"));
-            let index_path = self.base_dir.join(format!("{base_offset:020}.index"));
+            let base_path = self.base_dir.join(format!("{base_offset:020}"));
+            let log_path = base_path.with_extension("log");
 
-            if log_path.exists() && index_path.exists() {
+            if log_path.exists() {
                 let segment = LogSegment::recover(
                     base_offset,
-                    log_path,
-                    index_path,
+                    base_path,
                     self.sync_mode,
                     self.indexing_config.clone(),
                 )?;
@@ -503,6 +504,7 @@ mod tests {
 
         let log_path = base.join("00000000000000000000.log");
         let index_path = base.join("00000000000000000000.index");
+        let time_index_path = base.join("00000000000000000000.timeindex");
 
         // Segment index config: frequent entries to stabilize anchors
         let seg_idx_cfg = IndexingConfig {
@@ -514,6 +516,7 @@ mod tests {
             0,
             log_path,
             index_path,
+            time_index_path,
             SyncMode::Immediate,
             seg_idx_cfg.clone(),
         )

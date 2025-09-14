@@ -3,6 +3,7 @@ use crate::storage::file::{FileConsumerGroup, FileTopicLog};
 use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
 use crate::warn;
 use fs4::fs_std::FileExt;
+use log::debug;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -163,6 +164,7 @@ impl StorageBackend {
     }
 
     /// Discover all existing topics in the storage backend
+    #[tracing::instrument(level = "debug")]
     pub fn discover_topics(&self) -> Result<Vec<String>, std::io::Error> {
         match self {
             StorageBackend::Memory { .. } => {
@@ -171,33 +173,62 @@ impl StorageBackend {
             }
             StorageBackend::File { data_dir, .. } => {
                 let mut topics = Vec::new();
+                tracing::debug!(?data_dir, "Checking data directory for existing topics");
 
                 // Check if data directory exists
                 if !data_dir.exists() {
+                    tracing::debug!("Data directory does not exist, returning empty topics");
                     return Ok(topics);
                 }
 
                 // Read all entries in the data directory
-                let entries = std::fs::read_dir(data_dir)?;
+                let topic_log_entries = std::fs::read_dir(data_dir)?;
 
-                for entry in entries {
-                    let entry = entry?;
-                    let path = entry.path();
+                for topic_log_entry in topic_log_entries.flatten() {
+                    let entry_path = topic_log_entry.path();
+                    tracing::trace!(?entry_path, "Processing directory entry");
 
-                    // Only consider directories (topic directories)
-                    if path.is_dir() {
-                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                            // Skip special directories like lock files
-                            if !dir_name.starts_with('.') && dir_name != "lock" {
-                                // Verify it's a valid topic directory by checking for .log files
-                                if has_log_files(&path)? {
-                                    topics.push(dir_name.to_string());
+                    if topic_log_entry.file_type()?.is_dir() {
+                        if let Some(topic_name) = topic_log_entry.file_name().to_str() {
+                            // Skip system directories
+                            if topic_name == "consumer_groups" || topic_name.starts_with('.') {
+                                tracing::trace!(topic_name, "Skipping system directory");
+                                continue;
+                            }
+
+                            tracing::debug!(topic_name, "Found potential topic directory");
+                            let partition_dirs = std::fs::read_dir(topic_log_entry.path())?;
+                            let mut found_partitions = false;
+
+                            for partition_dir in partition_dirs {
+                                let partition_path = partition_dir?.path();
+                                tracing::trace!(?partition_path, "Checking partition directory");
+
+                                if has_log_files(&partition_path)? {
+                                    tracing::debug!(
+                                        topic_name,
+                                        ?partition_path,
+                                        "Found partition with log files"
+                                    );
+                                    topics.push(topic_name.to_string());
+                                    found_partitions = true;
+                                    break; // Found at least one partition with log files
                                 }
+                            }
+
+                            if !found_partitions {
+                                tracing::debug!(topic_name, "No partitions with log files found");
                             }
                         }
                     }
                 }
 
+                tracing::info!(
+                    topic_count = topics.len(),
+                    ?topics,
+                    "Topic discovery completed"
+                );
+                debug!("Found {} topics: {:?}", topics.len(), topics);
                 Ok(topics)
             }
         }

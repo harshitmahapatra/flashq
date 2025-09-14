@@ -6,6 +6,7 @@ use flashq::storage::file::{FileTopicLog, SyncMode};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use test_log::test;
 
 fn create_disk_full_scenario(temp_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let fill_path = temp_dir.join("disk_filler");
@@ -193,25 +194,19 @@ fn test_file_read_failure() {
     let record = Record::new(Some("key".to_string()), "value".to_string(), None);
     log.append(record).unwrap();
 
-    // With segment-based storage, files are in {data_dir}/{topic}/00000000000000000000.log
     let log_file_path = config
         .temp_dir_path()
         .join(&config.topic_name)
+        .join("0")
         .join("00000000000000000000.log");
     corrupt_log_file(&log_file_path).unwrap();
 
     let result = log.get_records_from_offset(0, None);
 
     match result {
-        Err(StorageError::DataCorruption { .. }) => {
-            // Expected: corruption detected during deserialization
-        }
-        Err(StorageError::ReadFailed { .. }) => {
-            // Expected: I/O error during file read
-        }
+        Err(StorageError::DataCorruption { .. }) => {}
+        Err(StorageError::ReadFailed { .. }) => {}
         Ok(records) => {
-            // Acceptable: corruption resulted in no readable records, but read operation succeeded
-            // This is actually reasonable behavior - partial corruption shouldn't prevent reading valid data
             assert_eq!(records.len(), 0, "Expected no records due to corruption");
         }
         Err(other) => panic!("Unexpected error type for corruption test: {other:?}"),
@@ -233,10 +228,10 @@ fn test_partial_record_corruption() {
     let valid_record = Record::new(Some("key".to_string()), "valid_value".to_string(), None);
     log.append(valid_record).unwrap();
 
-    // With segment-based storage, files are in {data_dir}/{topic}/00000000000000000000.log
     let log_file_path = config
         .temp_dir_path()
         .join(topic)
+        .join("0")
         .join("00000000000000000000.log");
     let mut file = OpenOptions::new()
         .append(true)
@@ -330,7 +325,6 @@ fn test_serialization_error_conversion() {
 
 #[test]
 fn test_time_index_oversize_triggers_rebuild() {
-    // Setup: create topic and write a few records
     let config = TestConfig::new("time_index_oversize");
     let topic = &config.topic_name;
     let mut log = FileTopicLog::new(
@@ -349,13 +343,13 @@ fn test_time_index_oversize_triggers_rebuild() {
         .unwrap();
     log.sync().unwrap();
 
-    // Craft an oversized time index file (> 1_000_000 entries) so bounded read fails
     let time_index_path = config
         .temp_dir_path()
         .join(topic)
+        .join("0")
         .join("00000000000000000000.timeindex");
-    let oversized_entries = 1_000_001usize; // reader bound is 1_000_000
-    let bytes = vec![0u8; oversized_entries * 12]; // 12 bytes per entry
+    let oversized_entries = 1_000_001usize;
+    let bytes = vec![0u8; oversized_entries * 12];
     let mut f = OpenOptions::new()
         .write(true)
         .create(true)
@@ -365,7 +359,6 @@ fn test_time_index_oversize_triggers_rebuild() {
     f.write_all(&bytes).expect("write oversize time index");
     f.sync_all().ok();
 
-    // Reopen the topic; recovery should detect the error and rebuild from log
     drop(log);
     let log2 = FileTopicLog::new(
         topic,
@@ -375,7 +368,6 @@ fn test_time_index_oversize_triggers_rebuild() {
     )
     .expect("reopen after oversize time index");
 
-    // Verify time-based read still works after rebuild
     let all = log2.get_records_from_offset(0, None).unwrap();
     assert!(all.len() >= 2);
     let ts0 = all[0].timestamp.clone();
@@ -385,7 +377,6 @@ fn test_time_index_oversize_triggers_rebuild() {
 
 #[test]
 fn test_offset_index_oversize_triggers_rebuild() {
-    // Setup: create topic and write a record to generate segment files
     let config = TestConfig::new("offset_index_oversize");
     let topic = &config.topic_name;
     let mut log = FileTopicLog::new(
@@ -401,13 +392,13 @@ fn test_offset_index_oversize_triggers_rebuild() {
         .unwrap();
     log.sync().unwrap();
 
-    // Craft an oversized offset index file (> 1_000_000 entries) so bounded read fails
     let index_path = config
         .temp_dir_path()
         .join(topic)
+        .join("0")
         .join("00000000000000000000.index");
-    let oversized_entries = 1_000_001usize; // reader bound is 1_000_000
-    let bytes = vec![0u8; oversized_entries * 8]; // 8 bytes per entry
+    let oversized_entries = 1_000_001usize;
+    let bytes = vec![0u8; oversized_entries * 8];
     let mut f = OpenOptions::new()
         .write(true)
         .create(true)
@@ -417,7 +408,6 @@ fn test_offset_index_oversize_triggers_rebuild() {
     f.write_all(&bytes).expect("write oversize offset index");
     f.sync_all().ok();
 
-    // Reopen the topic; offset index read error should trigger index rebuild and succeed
     drop(log);
     let log2 = FileTopicLog::new(
         topic,
@@ -427,7 +417,6 @@ fn test_offset_index_oversize_triggers_rebuild() {
     )
     .expect("reopen after oversize offset index");
 
-    // Verify offset-based read still works after rebuild
     let recs = log2.get_records_from_offset(0, None).unwrap();
     assert!(!recs.is_empty());
 }

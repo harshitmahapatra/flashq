@@ -84,6 +84,11 @@ impl FlashQ {
     #[tracing::instrument(level = "info", skip(storage_backend))]
 
     pub fn with_storage_backend(storage_backend: storage::StorageBackend) -> Self {
+        debug!(
+            "Creating FlashQ with storage backend: {:?}",
+            storage_backend
+        );
+
         let queue = FlashQ {
             topics: Arc::new(DashMap::new()),
             consumer_groups: Arc::new(DashMap::new()),
@@ -91,16 +96,22 @@ impl FlashQ {
         };
 
         // For file backends, recover existing topics and consumer groups from disk
+        debug!("Starting topic recovery...");
         queue.recover_existing_topics().unwrap_or_else(|e| {
             warn!("Failed to recover existing topics: {e}");
         });
 
+        debug!("Starting consumer group recovery...");
         queue
             .recover_existing_consumer_groups()
             .unwrap_or_else(|e| {
                 warn!("Failed to recover existing consumer groups: {e}");
             });
 
+        debug!(
+            "FlashQ initialization complete. Topics loaded: {}",
+            queue.topics.len()
+        );
         queue
     }
 
@@ -316,10 +327,19 @@ impl FlashQ {
             .discover_topics()
             .map_err(|e| format!("Failed to discover topics: {e}"))?;
 
+        debug!(
+            "Discovered {} topics during recovery: {:?}",
+            topic_names.len(),
+            topic_names
+        );
+
         // Create TopicLog instances for discovered topics
         for topic_name in topic_names {
             if let Ok(topic_log) = self.storage_backend.create(&topic_name) {
+                debug!("Successfully recovered topic: {topic_name}");
                 self.topics.insert(topic_name, topic_log);
+            } else {
+                debug!("Failed to create topic log for: {topic_name}");
             }
         }
 

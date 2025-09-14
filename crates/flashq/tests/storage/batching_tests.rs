@@ -1,6 +1,7 @@
 use flashq::storage::StorageBackend;
 use flashq::storage::file::SyncMode;
 use flashq::{FlashQ, Record};
+use test_log::test;
 
 fn make_record(i: usize) -> Record {
     Record::new(Some(format!("k{i}")), "x".repeat(16), None)

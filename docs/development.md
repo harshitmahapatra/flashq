@@ -39,6 +39,7 @@ cargo test -p flashq-http --test http_integration_tests # HTTP integration tests
 cargo test -p flashq --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
+RUST_LOG=debug cargo test              # Tests with debug logging output
 ```
 
 ### Benchmarking
@@ -52,10 +53,11 @@ cargo bench --bench batching_baseline    # Batching performance benchmarks
 
 ### Test Coverage
 
-**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling  
-**Storage Integration:** File persistence, crash recovery, directory locking, error simulation  
-**Batching Integration:** Batch operations, performance validation, memory efficiency  
-**Client Integration:** CLI commands, batch operations, consumer group lifecycle  
+**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling
+**Storage Integration:** File persistence, crash recovery, directory locking, error simulation, partition tests
+**Partition Integration:** Multi-partition consumer groups, backward compatibility with partition 0
+**Batching Integration:** Batch operations, performance validation, memory efficiency
+**Client Integration:** CLI commands, batch operations, consumer group lifecycle
 **Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
 
 ## Code Quality
@@ -134,9 +136,14 @@ benches/                # Performance benchmarks
 # Test file storage with temporary directories
 cargo test -p flashq --test storage_integration_tests
 
-# Test specific storage components  
+# Test specific storage components
 cargo test -p flashq --test storage_integration_tests::file_topic_log_tests
 cargo test -p flashq --test storage_integration_tests::error_simulation_tests
+
+# Test partition functionality
+cargo test -p flashq --test storage_integration_tests::partition_tests
+cargo test -p flashq --test storage_integration_tests::partition_backward_compatibility_tests
+RUST_LOG=flashq::storage::file::consumer_group=debug cargo test partition_tests -- --nocapture
 ```
 
 ### Storage Backend Selection
@@ -153,11 +160,18 @@ cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./dev-data --
 
 ### Tracing and Logging
 
-FlashQ uses `tracing` for structured instrumentation with automatic level filtering:
+FlashQ uses `tracing` and `log` crates for instrumentation with automatic level filtering:
 - **Debug builds:** TRACE level (verbose)
 - **Release builds:** INFO level (production)
 - **Environment control:** Set `RUST_LOG=debug` or `RUST_LOG=flashq=trace,warn`
+- **Test logging:** Tests use `test-log` with tracing features for visible output
+- **Test execution:** Use `RUST_LOG=debug cargo test` to see logging during tests
 - **Benchmarks:** Automatically disabled via `init_for_benchmarks()` to prevent overhead
+
+**Test Log Configuration:**
+- Add `#[test_log::test]` attribute to tests for automatic log capture
+- Configure `test-log = { version = "0.2", features = ["trace"] }` in Cargo.toml
+- Test output includes structured tracing spans and debug information
 
 ### Common Issues
 

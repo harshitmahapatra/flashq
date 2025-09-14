@@ -2,6 +2,7 @@ use super::test_utilities::*;
 use flashq::storage::StorageBackend;
 use flashq::storage::file::SyncMode;
 use flashq::{FlashQ, Record};
+use test_log::test;
 
 #[test]
 fn test_memory_vs_file_basic_operations() {

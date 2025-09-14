@@ -1,6 +1,7 @@
 use super::test_utilities::*;
 use flashq::Record;
 use flashq::storage::file::{IndexingConfig, SegmentManager, SyncMode};
+use test_log::test;
 
 #[test]
 fn test_segment_manager_creation() {

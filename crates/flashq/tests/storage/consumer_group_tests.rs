@@ -1,6 +1,7 @@
 use super::test_utilities::*;
 use flashq::FlashQ;
 use flashq::storage::StorageBackend;
+use test_log::test;
 
 #[test]
 fn test_consumer_group_creation_backends() {
@@ -145,4 +146,91 @@ fn test_multiple_consumer_groups_isolation() {
     assert_eq!(group2_records.len(), 2);
     assert_eq!(group1_records[0].record.value, "msg1");
     assert_eq!(group2_records[0].record.value, "msg1");
+}
+
+#[test]
+fn test_empty_index_file_warning() {
+    use std::fs;
+
+    let config = TestConfig::new("empty_index_warning");
+    let topic_name = config.topic_name.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
+
+    // Create topic directory structure with empty index files
+    let topic_dir = temp_dir.join(&topic_name);
+    let partition_dir = topic_dir.join("0");
+    fs::create_dir_all(&partition_dir).unwrap();
+
+    // Create a log file with properly serialized record data
+    let log_path = partition_dir.join("00000000000000000000.log");
+    let record = flashq::Record::new(None, "test_value".to_string(), None);
+    let serialized = flashq::storage::file::common::serialize_record(&record, 0).unwrap();
+    fs::write(&log_path, serialized).unwrap();
+
+    // Create empty index files (this should trigger the warning)
+    let index_path = partition_dir.join("00000000000000000000.index");
+    let time_index_path = partition_dir.join("00000000000000000000.timeindex");
+    fs::write(&index_path, b"").unwrap(); // Empty index file
+    fs::write(&time_index_path, b"").unwrap(); // Empty time index file
+
+    // Now create a FlashQ instance which should trigger recovery and the warning
+    let _queue = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir).unwrap(),
+    );
+
+    // If we get here without panicking, the recovery handled empty index files correctly
+    // The warning should have been logged (visible with RUST_LOG=debug)
+}
+
+#[test]
+fn test_debug_empty_index_files() {
+    let config = TestConfig::new("debug_empty_index");
+    let topic_name = config.topic_name.clone();
+    let temp_dir = config.temp_dir_path().to_path_buf();
+
+    println!("Test directory: {}", temp_dir.display());
+
+    // First FlashQ instance - create some records
+    {
+        let queue = FlashQ::with_storage_backend(
+            StorageBackend::new_file_with_path(config.sync_mode, temp_dir.clone()).unwrap(),
+        );
+
+        // Post just 2 small records (should not trigger index writes)
+        queue
+            .post_records(
+                topic_name.clone(),
+                vec![flashq::Record::new(None, "msg1".to_string(), None)],
+            )
+            .unwrap();
+        queue
+            .post_records(
+                topic_name.clone(),
+                vec![flashq::Record::new(None, "msg2".to_string(), None)],
+            )
+            .unwrap();
+    }
+
+    // Check what files exist
+    let topic_dir = temp_dir.join(&topic_name).join("0");
+    if topic_dir.exists() {
+        println!("Files in partition directory:");
+        for entry in std::fs::read_dir(&topic_dir).unwrap() {
+            let entry = entry.unwrap();
+            let metadata = entry.metadata().unwrap();
+            println!(
+                "  {} - {} bytes",
+                entry.file_name().to_string_lossy(),
+                metadata.len()
+            );
+        }
+    }
+
+    // Second FlashQ instance - should trigger recovery
+    println!("Creating second FlashQ instance (should trigger recovery)...");
+    let _queue2 = FlashQ::with_storage_backend(
+        StorageBackend::new_file_with_path(config.sync_mode, temp_dir).unwrap(),
+    );
+
+    println!("Recovery complete");
 }

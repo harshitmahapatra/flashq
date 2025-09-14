@@ -151,6 +151,10 @@ impl SparseIndex {
     pub fn last_entry(&self) -> Option<&IndexEntry> {
         self.entries.last()
     }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
 }
 
 #[cfg(test)]
