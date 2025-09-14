@@ -39,6 +39,7 @@ cargo test -p flashq-http --test http_integration_tests # HTTP integration tests
 cargo test -p flashq --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
+RUST_LOG=debug cargo test              # Tests with debug logging output
 ```
 
 ### Benchmarking
@@ -153,11 +154,18 @@ cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./dev-data --
 
 ### Tracing and Logging
 
-FlashQ uses `tracing` for structured instrumentation with automatic level filtering:
+FlashQ uses `tracing` and `log` crates for instrumentation with automatic level filtering:
 - **Debug builds:** TRACE level (verbose)
 - **Release builds:** INFO level (production)
 - **Environment control:** Set `RUST_LOG=debug` or `RUST_LOG=flashq=trace,warn`
+- **Test logging:** Tests use `test-log` with tracing features for visible output
+- **Test execution:** Use `RUST_LOG=debug cargo test` to see logging during tests
 - **Benchmarks:** Automatically disabled via `init_for_benchmarks()` to prevent overhead
+
+**Test Log Configuration:**
+- Add `#[test_log::test]` attribute to tests for automatic log capture
+- Configure `test-log = { version = "0.2", features = ["trace"] }` in Cargo.toml
+- Test output includes structured tracing spans and debug information
 
 ### Common Issues
 

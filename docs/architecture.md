@@ -9,45 +9,40 @@ graph TD
     A[CLI Client] -->|HTTP| B[HTTP Broker]
     C[Interactive Demo] --> D[FlashQ Core Library]
     B --> D
-    
+
     subgraph "flashq-http crate"
         B
         A
     end
-    
+
     subgraph "flashq crate"
         D
         E[DashMap Topics]
         F[DashMap Consumer Groups]
     end
-    
+
     D --> E
     D --> F
-    
-    E --> G[Arc RwLock TopicLog]
-    F --> H[Arc RwLock ConsumerGroup]
-    
+
+    E -->|"1:N"| G[Arc RwLock TopicLog]
+    F -->|"1:N"| H[Arc RwLock ConsumerGroup]
+
     subgraph "Storage Backends"
         I[InMemoryTopicLog]
-        J[FileTopicLog + Segments]
+        J[FileTopicLog]
         K[InMemoryConsumerGroup]
         L[FileConsumerGroup]
     end
-    
-    subgraph "File Storage Components"
-        M[SegmentManager]
-        N[LogSegment]
-        O[SparseIndex]
-        Q[SparseTimeIndex]
-        P[Serialization Utils]
+
+    subgraph "File Storage Hierarchy"
+        J -->|"1:N"| JP["Partition(s)"]
+        JP -->|"1:1"| M["SegmentManager"]
+        M -->|"1:N"| N["LogSegment(s)"]
+        N -->|"1:1"| O["SparseIndex"]
+        N -->|"1:1"| Q["SparseTimeIndex"]
+        J --> P["Serialization Utils"]
     end
-    
-    J --> M
-    M --> N
-    N --> O
-    N --> Q
-    J --> P
-    
+
     G --> I
     G --> J
     H --> K
@@ -57,25 +52,21 @@ graph TD
 ## Project Structure
 
 **Core Components:**
-- `FlashQ`: Topic-based record storage with pluggable backend support
-- `Record/RecordWithOffset`: Record structures for requests/responses
-- `TopicLog` trait: Storage abstraction with batched append operations (`append_batch`)
-- `ConsumerGroup` trait: Storage abstraction for offset management
-- `StorageBackend`: Factory with configurable batch_bytes and backend selection
-- `batching_heuristics`: Shared utilities for record size estimation and batching logic
-- `FileTopicLog`: Kafka-aligned segment-based file storage with batched writes
-- `SegmentManager`: Manages log segment lifecycle and rolling with streaming reads
-- `LogSegment`: Individual segment files with bulk append and sparse indexing
-- `SparseIndex`: Efficient offset-to-position mapping within segments
-- `SparseTimeIndex`: Efficient timestamp-to-position mapping for time-based queries
-- `InMemoryTopicLog`: Fast in-memory storage with batched operations
+- `FlashQ`: Main queue with topic and consumer group management
+- `Record/RecordWithOffset`: Message structures with keys, headers, and offsets
+- `PartitionId`: Partition identification for topic organization
+- `TopicLog/ConsumerGroup` traits: Storage abstraction layer
+- `StorageBackend`: Pluggable backends (memory/file) with batching
+- `FileTopicLog`: File storage with partitions and segments
+- `InMemoryTopicLog`: Fast in-memory storage
 
 **Key Features:**
-- Batched operations with configurable batch_bytes for high-throughput processing
-- Concurrent access with DashMap and reader-writer locks for improved performance
-- Kafka-aligned segment architecture with rolling and sparse indexing
-- Directory locking and crash recovery for data durability
-- Append-only logs with FIFO ordering and non-destructive polling
+- Partition-aware storage infrastructure (currently using partition 0 only)
+- High-throughput batching with configurable batch sizes
+- Thread-safe concurrent access with DashMap and RwLocks
+- Kafka-style segment architecture with sparse indexing
+- Crash recovery and directory locking for data safety
+- FIFO ordering with non-destructive polling
 
 ## Data Flow
 
@@ -141,27 +132,33 @@ sequenceDiagram
 ```
 data/
 └── {topic}/
-    ├── 00000000000000000000.log       # First segment
-    ├── 00000000000000000000.index     # Offset-to-position index
-    ├── 00000000000000000000.timeindex # Timestamp-to-position index
-    ├── 00000000000000000010.log       # Second segment (starting at offset 10)
-    ├── 00000000000000000010.index     # Index for second segment
-    ├── 00000000000000000010.timeindex # Time index for second segment
-    └── ...
+    └── {partition}/                   # Partition directory (0, 1, 2, ...)
+        ├── 00000000000000000000.log       # First segment
+        ├── 00000000000000000000.index     # Offset-to-position index
+        ├── 00000000000000000000.timeindex # Timestamp-to-position index
+        ├── 00000000000000000010.log       # Second segment (starting at offset 10)
+        ├── 00000000000000000010.index     # Index for second segment
+        ├── 00000000000000000010.timeindex # Time index for second segment
+        └── ...
 ```
+
+**Partition Organization:**
+- Each topic contains multiple partitions (numbered 0, 1, 2, ...)
+- Backward compatibility: operations default to partition 0 when no partition is specified
+- Each partition maintains independent offset counters and segment files
+- Partition directories are created dynamically as data is written
 
 ## Design Decisions
 
-**Architecture Choices:**
-- **Batched operations**: `append_batch` trait method with configurable batch_bytes for performance
-- **Storage abstraction**: Trait-based pluggable backends with memory and file implementations
-- **Segment-based storage**: Kafka-aligned architecture with bulk writes for scalability
-- **Directory locking**: Prevents data corruption from concurrent processes
-- **Sparse indexing**: Efficient offset and timestamp lookup without loading entire segments
-- **Error handling**: Comprehensive error types with context preservation
-- **Owned data**: Returns `Vec<RecordWithOffset>` vs references
-- **Safe casting**: `try_into()` with bounds checking
-- **Append-only logs**: Immutable history, FIFO ordering
+**Key Design Decisions:**
+- **Partition organization**: Storage layer supports multiple partitions (currently defaults to partition 0)
+- **Backward compatibility**: Existing APIs maintained while partition infrastructure is built
+- **Batched operations**: Configurable batching for high-throughput performance
+- **Storage abstraction**: Pluggable backends (memory/file) via traits
+- **Kafka-aligned segments**: Rolling log files with sparse indexing
+- **Append-only logs**: Immutable history with FIFO ordering
+
+**Current Limitation**: Multiple partitions are implemented at the storage layer but not yet exposed through the public API. All operations currently use partition 0.
 
 ## Performance Characteristics
 
