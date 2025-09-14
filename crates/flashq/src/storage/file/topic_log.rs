@@ -239,9 +239,7 @@ impl FileTopicLog {
             0
         };
 
-        debug!(
-            "Calculated metadata: next_offset={next_offset}, record_count={total_records}"
-        );
+        debug!("Calculated metadata: next_offset={next_offset}, record_count={total_records}");
         (next_offset, total_records)
     }
 
