@@ -5,6 +5,7 @@ use crate::storage::test_utilities::TestConfig;
 use flashq::Record;
 use flashq::storage::file::FileTopicLog;
 use flashq::storage::r#trait::{PartitionId, TopicLog};
+use test_log::test;
 
 #[test]
 fn test_default_partition_behavior() {

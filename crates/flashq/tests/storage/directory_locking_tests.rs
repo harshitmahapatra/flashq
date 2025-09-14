@@ -1,6 +1,7 @@
 use flashq::error::StorageError;
 use flashq::storage::StorageBackend;
 use tempfile::tempdir;
+use test_log::test;
 
 #[test]
 fn test_directory_locking() {

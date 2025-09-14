@@ -2,6 +2,7 @@ use super::test_utilities::*;
 use flashq::storage::file::FileTopicLog;
 use flashq::storage::{StorageBackend, TopicLog};
 use flashq::{FlashQ, Record};
+use test_log::test;
 
 #[test]
 fn test_file_topic_log_recovery() {

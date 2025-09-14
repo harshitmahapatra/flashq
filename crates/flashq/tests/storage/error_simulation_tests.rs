@@ -6,6 +6,7 @@ use flashq::storage::file::{FileTopicLog, SyncMode};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use test_log::test;
 
 fn create_disk_full_scenario(temp_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let fill_path = temp_dir.join("disk_filler");

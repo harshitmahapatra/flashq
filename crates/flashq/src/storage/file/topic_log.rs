@@ -3,6 +3,7 @@ use crate::storage::file::common::ensure_directory_exists;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::{PartitionId, TopicLog};
 use crate::{Record, RecordWithOffset};
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -57,7 +58,7 @@ impl FileTopicLog {
         )
     }
 
-    #[tracing::instrument(level = "info", skip(data_dir), fields(topic, dir = %data_dir.as_ref().display(), segment_size_bytes, batch_bytes))]
+    #[tracing::instrument(level = "info", skip_all, fields(topic = %topic))]
     pub fn new_with_batch_bytes_and_indexing_config<P: AsRef<Path>>(
         topic: &str,
         sync_mode: SyncMode,
@@ -108,11 +109,11 @@ impl FileTopicLog {
         self.sync_all_partitions()
     }
 
-    #[tracing::instrument(level = "info", skip(self), fields(topic = %self.topic, base_dir = %self.base_dir.display()))]
+    #[tracing::instrument(level = "info", skip(self), fields(topic = %self.topic))]
     fn recover_all_partitions(&mut self) -> Result<(), std::io::Error> {
         let partition_ids = self.scan_for_existing_partitions()?;
 
-        tracing::info!(
+        info!(
             "Found {} existing partitions for topic {}: {:?}",
             partition_ids.len(),
             self.topic,
@@ -123,13 +124,13 @@ impl FileTopicLog {
             self.recover_single_partition(partition_id)?;
         }
 
-        tracing::info!("Completed partition recovery for topic: {}", self.topic);
+        info!("Completed partition recovery for topic: {}", self.topic);
         Ok(())
     }
 
     fn scan_for_existing_partitions(&self) -> Result<Vec<PartitionId>, std::io::Error> {
         let entries = std::fs::read_dir(&self.base_dir).map_err(|e| {
-            tracing::error!(
+            error!(
                 "Failed to read topic directory {}: {}",
                 self.base_dir.display(),
                 e
@@ -157,7 +158,7 @@ impl FileTopicLog {
         let dir_name = path.file_name()?.to_str()?;
         match dir_name.parse::<u32>() {
             Ok(partition_id) => {
-                tracing::debug!(
+                debug!(
                     "Found partition directory: {} for partition {}",
                     path.display(),
                     partition_id
@@ -165,13 +166,13 @@ impl FileTopicLog {
                 Some(PartitionId(partition_id))
             }
             Err(_) => {
-                tracing::debug!("Skipping non-numeric directory: {}", path.display());
+                debug!("Skipping non-numeric directory: {}", path.display());
                 None
             }
         }
     }
 
-    #[tracing::instrument(level = "debug", skip(self), fields(partition_id = %partition_id.0))]
+    #[tracing::instrument(level = "debug", skip(self), fields(partition = %partition_id.0))]
     fn recover_single_partition(
         &mut self,
         partition_id: PartitionId,
@@ -180,7 +181,7 @@ impl FileTopicLog {
 
         let mut segment_manager = self.create_segment_manager(&partition_dir);
         segment_manager.recover_from_directory().map_err(|e| {
-            tracing::error!(
+            error!(
                 "Failed to recover partition {} from {}: {}",
                 partition_id.0,
                 partition_dir.display(),
@@ -191,11 +192,9 @@ impl FileTopicLog {
 
         let (next_offset, record_count) = self.calculate_metadata_from_segments(&segment_manager);
 
-        tracing::info!(
+        info!(
             "Recovered partition {}: next_offset={}, record_count={}",
-            partition_id.0,
-            next_offset,
-            record_count
+            partition_id.0, next_offset, record_count
         );
 
         self.partitions.insert(
@@ -240,10 +239,8 @@ impl FileTopicLog {
             0
         };
 
-        tracing::debug!(
-            "Calculated metadata: next_offset={}, record_count={}",
-            next_offset,
-            total_records
+        debug!(
+            "Calculated metadata: next_offset={next_offset}, record_count={total_records}"
         );
         (next_offset, total_records)
     }
@@ -261,10 +258,16 @@ impl FileTopicLog {
         Ok(self.partitions.get_mut(&partition_id).unwrap())
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(topic = %self.topic, partition = %partition_id.0), name = "create_partition")]
     fn create_new_partition(
         &mut self,
         partition_id: PartitionId,
     ) -> Result<PartitionData, StorageError> {
+        debug!(
+            "Creating new partition {} for topic {}",
+            partition_id.0, self.topic
+        );
+
         let partition_dir = self.setup_partition_directory(partition_id)?;
         let mut segment_manager = self.create_segment_manager(&partition_dir);
 
@@ -279,6 +282,11 @@ impl FileTopicLog {
         })?;
 
         let (next_offset, total_records) = self.calculate_partition_state(&mut segment_manager)?;
+
+        debug!(
+            "Successfully created partition {}: next_offset={}, record_count={}",
+            partition_id.0, next_offset, total_records
+        );
 
         Ok(PartitionData {
             segment_manager,
@@ -318,6 +326,7 @@ impl FileTopicLog {
         self.partitions.get(&partition_id)
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(topic = %self.topic, partition = %partition_id.0, count = records.len()), name = "write_batch")]
     fn write_batch_to_partition(
         &mut self,
         partition_id: PartitionId,
@@ -325,7 +334,15 @@ impl FileTopicLog {
     ) -> Result<u64, StorageError> {
         let partition_data = self.get_or_create_partition(partition_id)?;
 
+        debug!(
+            "Writing {} records to partition {} starting at offset {}",
+            records.len(),
+            partition_id.0,
+            partition_data.next_offset
+        );
+
         if partition_data.segment_manager.should_roll_segment() {
+            info!("Rolling to new segment for partition {}", partition_id.0);
             partition_data
                 .segment_manager
                 .roll_to_new_segment(partition_data.next_offset)?;
@@ -348,11 +365,17 @@ impl FileTopicLog {
         partition_data.next_offset += appended_count as u64;
         partition_data.record_count += appended_count;
 
+        debug!(
+            "Successfully wrote {} records to partition {}, offsets {}-{}, total records: {}",
+            appended_count, partition_id.0, start_offset, last_offset, partition_data.record_count
+        );
+
         Ok(last_offset)
     }
 }
 
 impl TopicLog for FileTopicLog {
+    #[tracing::instrument(level = "debug", skip_all, fields(topic = %self.topic, partition = %partition_id.0), name = "append")]
     fn append_partition(
         &mut self,
         partition_id: PartitionId,
@@ -364,10 +387,16 @@ impl TopicLog for FileTopicLog {
             partition_data.next_offset
         };
 
+        debug!(
+            "Appending single record to partition {} at offset {}",
+            partition_id.0, next_offset
+        );
+
         // Now work with a fresh mutable borrow
         let partition_data = self.get_or_create_partition(partition_id)?;
 
         if partition_data.segment_manager.should_roll_segment() {
+            info!("Rolling to new segment for partition {}", partition_id.0);
             partition_data
                 .segment_manager
                 .roll_to_new_segment(partition_data.next_offset)?;
@@ -387,9 +416,15 @@ impl TopicLog for FileTopicLog {
         partition_data.next_offset += 1;
         partition_data.record_count += 1;
 
+        debug!(
+            "Successfully appended record to partition {} at offset {}, total records: {}",
+            partition_id.0, next_offset, partition_data.record_count
+        );
+
         Ok(next_offset)
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(topic = %self.topic, partition = %partition_id.0, count = records.len()), name = "append_batch")]
     fn append_batch_partition(
         &mut self,
         partition_id: PartitionId,

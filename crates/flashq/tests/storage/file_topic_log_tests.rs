@@ -2,6 +2,7 @@ use super::test_utilities::*;
 use flashq::Record;
 use flashq::storage::TopicLog;
 use flashq::storage::file::FileTopicLog;
+use test_log::test;
 
 #[test]
 fn test_basic_append_and_retrieval() {

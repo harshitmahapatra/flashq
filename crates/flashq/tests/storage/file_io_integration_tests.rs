@@ -1,6 +1,7 @@
 use flashq::storage::StorageBackend;
 use flashq::storage::file::FileIo;
 use tempfile::tempdir;
+use test_log::test;
 
 /// Test basic file operations with StdFileIO
 #[test]
