@@ -320,32 +320,35 @@ mod tests {
 #[derive(Debug, Clone)]
 pub struct InMemoryConsumerGroup {
     group_id: String,
-    topic_offsets: HashMap<String, u64>,
+    partition_offsets: HashMap<(String, PartitionId), u64>,
 }
 
 impl InMemoryConsumerGroup {
     pub fn new(group_id: String) -> Self {
         InMemoryConsumerGroup {
             group_id,
-            topic_offsets: HashMap::new(),
+            partition_offsets: HashMap::new(),
         }
     }
 }
 
 impl ConsumerGroup for InMemoryConsumerGroup {
-    fn get_offset(&self, topic: &str) -> u64 {
-        self.topic_offsets.get(topic).copied().unwrap_or(0)
+    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64 {
+        self.partition_offsets
+            .get(&(topic.to_string(), partition_id))
+            .copied()
+            .unwrap_or(0)
     }
 
-    fn set_offset(&mut self, topic: String, offset: u64) {
-        self.topic_offsets.insert(topic, offset);
+    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64) {
+        self.partition_offsets.insert((topic, partition_id), offset);
+    }
+
+    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64> {
+        self.partition_offsets.clone()
     }
 
     fn group_id(&self) -> &str {
         &self.group_id
-    }
-
-    fn get_all_offsets(&self) -> HashMap<String, u64> {
-        self.topic_offsets.clone()
     }
 }

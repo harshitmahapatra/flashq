@@ -3,7 +3,7 @@ use crate::storage::file::common::ensure_directory_exists;
 use crate::storage::file::{IndexingConfig, SegmentManager, SyncMode};
 use crate::storage::r#trait::{PartitionId, TopicLog};
 use crate::{Record, RecordWithOffset};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -165,8 +165,10 @@ impl FileTopicLog {
                 );
                 Some(PartitionId(partition_id))
             }
-            Err(_) => {
-                debug!("Skipping non-numeric directory: {}", path.display());
+            Err(e) => {
+                // Only log as trace for non-numeric directories to avoid noise
+                // These are expected (consumer_groups, etc.)
+                trace!("Skipping non-numeric directory '{dir_name}' (not a partition): {e}");
                 None
             }
         }

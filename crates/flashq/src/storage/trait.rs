@@ -108,8 +108,32 @@ pub trait TopicLog: Send + Sync {
 }
 
 pub trait ConsumerGroup: Send + Sync {
-    fn get_offset(&self, topic: &str) -> u64;
-    fn set_offset(&mut self, topic: String, offset: u64);
+    // New partition-aware methods (primary interface)
+    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64;
+    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64);
+    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64>;
+
+    // Existing methods for backward compatibility (delegate to partition 0)
+    fn get_offset(&self, topic: &str) -> u64 {
+        self.get_offset_partition(topic, PartitionId(0))
+    }
+
+    fn set_offset(&mut self, topic: String, offset: u64) {
+        self.set_offset_partition(topic, PartitionId(0), offset)
+    }
+
+    fn get_all_offsets(&self) -> HashMap<String, u64> {
+        self.get_all_offsets_partitioned()
+            .into_iter()
+            .filter_map(|((topic, partition_id), offset)| {
+                if partition_id == PartitionId(0) {
+                    Some((topic, offset))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn group_id(&self) -> &str;
-    fn get_all_offsets(&self) -> HashMap<String, u64>;
 }

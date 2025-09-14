@@ -7,19 +7,19 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::{
-    ConsumerGroup,
+    ConsumerGroup, PartitionId,
     file::{SyncMode, common::ensure_directory_exists, file_io::FileIo},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ConsumerGroupData {
     group_id: String,
-    topic_offsets: HashMap<String, u64>,
+    partition_offsets: HashMap<String, u64>, // Format: "topic:partition_id" -> offset
 }
 
 pub struct FileConsumerGroup {
     group_id: String,
-    topic_offsets: HashMap<String, u64>,
+    partition_offsets: HashMap<(String, PartitionId), u64>,
     file_path: PathBuf,
     sync_mode: SyncMode,
 }
@@ -31,11 +31,11 @@ impl FileConsumerGroup {
         data_dir: P,
     ) -> Result<Self, std::io::Error> {
         let file_path = Self::setup_consumer_group_file(data_dir, group_id)?;
-        let topic_offsets = Self::load_existing_offsets(&file_path)?;
+        let partition_offsets = Self::load_existing_offsets(&file_path)?;
 
         let consumer_group = FileConsumerGroup {
             group_id: group_id.to_string(),
-            topic_offsets,
+            partition_offsets,
             file_path,
             sync_mode,
         };
@@ -58,7 +58,9 @@ impl FileConsumerGroup {
         Ok(consumer_groups_dir.join(format!("{group_id}.json")))
     }
 
-    fn load_existing_offsets(file_path: &PathBuf) -> Result<HashMap<String, u64>, std::io::Error> {
+    fn load_existing_offsets(
+        file_path: &PathBuf,
+    ) -> Result<HashMap<(String, PartitionId), u64>, std::io::Error> {
         if !file_path.exists() {
             return Ok(HashMap::new());
         }
@@ -71,7 +73,19 @@ impl FileConsumerGroup {
         }
 
         match serde_json::from_str::<ConsumerGroupData>(&contents) {
-            Ok(data) => Ok(data.topic_offsets),
+            Ok(data) => {
+                // Convert from string-based keys to tuple-based keys
+                let mut partition_offsets = HashMap::new();
+                for (key, offset) in data.partition_offsets {
+                    if let Some((topic, partition_str)) = key.split_once(':') {
+                        if let Ok(partition_id) = partition_str.parse::<u32>() {
+                            partition_offsets
+                                .insert((topic.to_string(), PartitionId(partition_id)), offset);
+                        }
+                    }
+                }
+                Ok(partition_offsets)
+            }
             Err(e) => {
                 warn!(
                     "Failed to parse consumer group file {}: {}",
@@ -84,9 +98,16 @@ impl FileConsumerGroup {
     }
 
     fn persist_to_disk(&self) -> Result<(), std::io::Error> {
+        // Convert from tuple-based keys to string-based keys for serialization
+        let mut serializable_offsets = HashMap::new();
+        for ((topic, partition_id), offset) in &self.partition_offsets {
+            let key = format!("{}:{}", topic, partition_id.0);
+            serializable_offsets.insert(key, *offset);
+        }
+
         let data = ConsumerGroupData {
             group_id: self.group_id.clone(),
-            topic_offsets: self.topic_offsets.clone(),
+            partition_offsets: serializable_offsets,
         };
 
         let json_data = serde_json::to_string_pretty(&data)
@@ -110,23 +131,26 @@ impl FileConsumerGroup {
 // ================================================================================================
 
 impl ConsumerGroup for FileConsumerGroup {
-    fn get_offset(&self, topic: &str) -> u64 {
-        self.topic_offsets.get(topic).copied().unwrap_or(0)
+    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64 {
+        self.partition_offsets
+            .get(&(topic.to_string(), partition_id))
+            .copied()
+            .unwrap_or(0)
     }
 
-    fn set_offset(&mut self, topic: String, offset: u64) {
-        self.topic_offsets.insert(topic, offset);
+    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64) {
+        self.partition_offsets.insert((topic, partition_id), offset);
 
         if let Err(e) = self.persist_to_disk() {
             warn!("Failed to persist consumer group state: {e}");
         }
     }
 
-    fn group_id(&self) -> &str {
-        &self.group_id
+    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64> {
+        self.partition_offsets.clone()
     }
 
-    fn get_all_offsets(&self) -> HashMap<String, u64> {
-        self.topic_offsets.clone()
+    fn group_id(&self) -> &str {
+        &self.group_id
     }
 }
