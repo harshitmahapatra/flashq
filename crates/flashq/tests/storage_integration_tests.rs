@@ -9,6 +9,8 @@ mod storage {
     pub mod file_io_integration_tests;
     pub mod file_topic_log_tests;
     pub mod index_tests;
+    pub mod partition_backward_compatibility_tests;
+    pub mod partition_tests;
     pub mod persistence_tests;
     pub mod segment_manager_tests;
     pub mod segment_tests;
