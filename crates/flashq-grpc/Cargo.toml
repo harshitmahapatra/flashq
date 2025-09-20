@@ -1,0 +1,36 @@
+[package]
+name = "flashq-grpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "grpc-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "grpc-client"
+path = "src/bin/client.rs"
+
+[dependencies]
+flashq = { path = "../flashq" }
+tonic = { version = "0.12", features = ["transport"] }
+prost = "0.13"
+tokio = { version = "1.47.1", features = ["full"] }
+tokio-stream = "0.1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap = { version = "4.5", features = ["derive"] }
+chrono.workspace = true
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+uuid = { version = "1.18.0", features = ["v4"] }
+tempfile = "3.13"
+tokio = { version = "1.47.1", features = ["full"] }
