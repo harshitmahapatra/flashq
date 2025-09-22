@@ -73,17 +73,14 @@ impl TestServer {
                 }
                 return Err("grpc-server exited".into());
             }
-            match flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
-                Ok(mut c) => {
-                    if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
-                        return Ok(Self {
-                            process,
-                            port,
-                            data_dir: None,
-                        });
-                    }
+            if let Ok(mut c) = flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
+                if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
+                    return Ok(Self {
+                        process,
+                        port,
+                        data_dir: None,
+                    });
                 }
-                Err(_) => {}
             }
             sleep(Duration::from_millis(300)).await;
         }
@@ -127,17 +124,14 @@ impl TestServer {
                 }
                 return Err("grpc-server exited".into());
             }
-            match flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
-                Ok(mut c) => {
-                    if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
-                        return Ok(Self {
-                            process,
-                            port,
-                            data_dir: Some(dir.to_path_buf()),
-                        });
-                    }
+            if let Ok(mut c) = flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
+                if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
+                    return Ok(Self {
+                        process,
+                        port,
+                        data_dir: Some(dir.to_path_buf()),
+                    });
                 }
-                Err(_) => {}
             }
             sleep(Duration::from_millis(300)).await;
         }

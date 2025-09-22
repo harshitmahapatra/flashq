@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut admin = clients.admin();
             let resp = admin.list_topics(proto::Empty {}).await?.into_inner();
             for t in resp.topics {
-                println!("{}", t);
+                println!("{t}");
             }
         }
         Commands::HighWaterMark(args) => {

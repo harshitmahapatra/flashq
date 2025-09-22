@@ -22,9 +22,7 @@ impl FlashqGrpcService {
 fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Record {
     let headers = if include_headers {
         record
-            .headers
-            .as_ref()
-            .map(|h| h.clone())
+            .headers.clone()
             .unwrap_or_default()
     } else {
         std::collections::HashMap::new()
@@ -147,7 +145,7 @@ impl Consumer for FlashqGrpcService {
         } else {
             req.max_records as usize
         };
-        let include_headers = if req.include_headers { true } else { false };
+        let include_headers = req.include_headers;
 
         let records = self
             .core
@@ -189,7 +187,7 @@ impl Consumer for FlashqGrpcService {
         } else {
             req.max_records as usize
         };
-        let include_headers = if req.include_headers { true } else { false };
+        let include_headers = req.include_headers;
         let records = self
             .core
             .poll_records_from_time(&req.topic, &req.from_time, Some(limit))
