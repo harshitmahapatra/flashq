@@ -27,7 +27,7 @@ chrono.workspace = true
 log.workspace = true
 tracing.workspace = true
 urlencoding = "2.1.3"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http.workspace = true
 
 [dev-dependencies]
 serde_yaml = "0.9"

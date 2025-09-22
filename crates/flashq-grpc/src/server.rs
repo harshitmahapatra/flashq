@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use tower_http::trace::TraceLayer;
 
 use crate::flashq::v1::admin_server::Admin;
 use crate::flashq::v1::consumer_server::Consumer;
@@ -336,6 +337,7 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let svc = FlashqGrpcService::new(core);
     tonic::transport::Server::builder()
+        .layer(TraceLayer::new_for_http())
         .add_service(crate::flashq::v1::producer_server::ProducerServer::new(
             svc.clone(),
         ))
