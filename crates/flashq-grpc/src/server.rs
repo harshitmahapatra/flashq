@@ -21,9 +21,7 @@ impl FlashqGrpcService {
 
 fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Record {
     let headers = if include_headers {
-        record
-            .headers.clone()
-            .unwrap_or_default()
+        record.headers.clone().unwrap_or_default()
     } else {
         std::collections::HashMap::new()
     };

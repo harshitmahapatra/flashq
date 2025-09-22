@@ -73,7 +73,9 @@ impl TestServer {
                 }
                 return Err("grpc-server exited".into());
             }
-            if let Ok(mut c) = flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
+            if let Ok(mut c) =
+                flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
+            {
                 if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
                     return Ok(Self {
                         process,
@@ -124,7 +126,9 @@ impl TestServer {
                 }
                 return Err("grpc-server exited".into());
             }
-            if let Ok(mut c) = flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await {
+            if let Ok(mut c) =
+                flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
+            {
                 if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
                     return Ok(Self {
                         process,
