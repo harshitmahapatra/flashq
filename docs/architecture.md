@@ -6,13 +6,20 @@ Internal architecture and design overview of FlashQ.
 
 ```mermaid
 graph TD
-    A[CLI Client] -->|HTTP| B[HTTP Broker]
+    A[HTTP CLI Client] -->|HTTP| B[HTTP Broker]
+    A2[gRPC CLI Client] -->|gRPC| B2[gRPC Server]
     C[Interactive Demo] --> D[FlashQ Core Library]
     B --> D
+    B2 --> D
 
     subgraph "flashq-http crate"
         B
         A
+    end
+
+    subgraph "flashq-grpc crate"
+        B2
+        A2
     end
 
     subgraph "flashq crate"
@@ -74,35 +81,36 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant B as Broker  
+    participant B as Broker/Server
     participant Q as FlashQ
     participant T as TopicLog
-    
-    Note over C,T: Write Operation (Batched)
-    C->>B: POST /topic/news/record (batch)
+
+    Note over C,T: Write Operation (HTTP/gRPC)
+    C->>B: POST /topic/news/record OR Producer.Produce()
     B->>Q: post_records(Vec<Record>)
     Q->>T: append_batch(records)
     Note over T: Chunked by batch_bytes config
     T-->>Q: last_offset
     Q-->>B: success response
-    B-->>C: {"offset": N, "timestamp": "..."}
-    
+    B-->>C: {"offset": N, "timestamp": "..."} OR ProduceResponse
+
     Note over C,T: Read Operation (Offset-Based)
-    C->>B: GET /consumer/group/topic/news/record/offset
-    B->>Q: poll_records_from_offset()  
+    C->>B: GET /consumer/.../offset OR Consumer.FetchByOffset()
+    B->>Q: poll_records_from_offset()
     Q->>T: get_records_from_offset()
     T-->>Q: Vec<RecordWithOffset>
     Q-->>B: records array
-    B-->>C: {"records": [...]}
-    
-    Note over C,T: Read Operation (Time-Based)
-    C->>B: GET /consumer/group/topic/news/record/time?from_time=2025-01-01T00:00:00Z
-    B->>Q: poll_records_from_time()
-    Q->>T: get_records_from_timestamp()
-    Note over T: Uses SparseTimeIndex for lookup
-    T-->>Q: Vec<RecordWithOffset>
-    Q-->>B: records array
-    B-->>C: {"records": [...]}
+    B-->>C: {"records": [...]} OR FetchResponse
+
+    Note over C,T: Streaming Subscription (gRPC Only)
+    C->>B: Consumer.Subscribe() → stream
+    loop Real-time updates
+        B->>Q: poll_records_from_offset()
+        Q->>T: get_records_from_offset()
+        T-->>Q: Vec<RecordWithOffset>
+        Q-->>B: new records
+        B-->>C: stream RecordWithOffset
+    end
 ```
 
 **Key Principles:**

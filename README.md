@@ -1,9 +1,10 @@
 # ⚡ FlashQ
 
-A Kafka-inspired record queue system built in Rust with HTTP REST API. The project consists of two crates in a Cargo workspace:
+A Kafka-inspired record queue system built in Rust with HTTP REST and gRPC APIs. The project consists of three crates in a Cargo workspace:
 
-- **`flashq`** - Core library with storage backends and queue management  
+- **`flashq`** - Core library with storage backends and queue management
 - **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
+- **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
 
 **Note: This is a hobby project for learning Rust - not for production use.**
 
@@ -13,7 +14,8 @@ A Kafka-inspired record queue system built in Rust with HTTP REST API. The proje
 - Partition-aware consumer groups with per-partition offset tracking
 - Time-based polling for historical data queries
 - Configurable batch operations for high-throughput processing
-- HTTP REST API with JSON
+- HTTP REST API with JSON and gRPC API with Protocol Buffers
+- Real-time streaming subscriptions (gRPC)
 - Thread-safe concurrent access
 - Kafka-aligned segment-based file storage with crash recovery
 - Error handling with structured logging
@@ -65,6 +67,31 @@ curl -X POST http://127.0.0.1:8080/topics/news/records \
 
 # Poll records  
 curl http://127.0.0.1:8080/topics/news/records
+```
+
+### gRPC Server & Client
+
+**Start gRPC server:**
+```bash
+# In-memory storage (default)
+cargo run -p flashq-grpc --bin grpc-server           # Default port 50051
+cargo run -p flashq-grpc --bin grpc-server -- --port=50052
+
+# File storage backend
+cargo run -p flashq-grpc --bin grpc-server -- --storage=file --data-dir=./data
+```
+
+**Basic gRPC client usage:**
+```bash
+# Post records
+cargo run -p flashq-grpc --bin grpc-client -- produce --topic=news --value="Hello gRPC!"
+
+# Create consumer group and fetch
+cargo run -p flashq-grpc --bin grpc-client -- create-group --group-id=my-group
+cargo run -p flashq-grpc --bin grpc-client -- fetch-offset --group-id=my-group --topic=news
+
+# Real-time streaming subscription
+cargo run -p flashq-grpc --bin grpc-client -- subscribe --group-id=my-group --topic=news
 ```
 
 ## Development
