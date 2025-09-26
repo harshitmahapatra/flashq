@@ -3,6 +3,7 @@ members = [
     "crates/flashq",
     "crates/flashq-http",
     "crates/flashq-grpc",
+    "crates/flashq-cluster",
 ]
 # Build only the core crate by default so `cargo build` remains lean
 default-members = ["crates/flashq"]
