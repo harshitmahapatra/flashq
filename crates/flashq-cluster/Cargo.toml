@@ -5,8 +5,10 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+flashq = { path = "../flashq" }
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 tokio = { version = "1.47.1", features = ["full"] }
 tonic = { version = "0.12", features = ["transport"] }
 prost = "0.13"

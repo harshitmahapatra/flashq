@@ -535,11 +535,13 @@ name = "flashq-cluster"
 version = "0.1.0"
 dependencies = [
  "derive_more",
+ "flashq",
  "log",
  "parking_lot",
  "prost",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "thiserror",
  "tokio",

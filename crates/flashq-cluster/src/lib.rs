@@ -5,6 +5,7 @@
 //! for broker communication.
 
 pub mod error;
+pub mod manifest;
 pub mod types;
 
 pub use error::ClusterError;
