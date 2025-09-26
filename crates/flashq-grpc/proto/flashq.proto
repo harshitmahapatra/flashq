@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package flashq.v1;
+
+// Local Empty message to avoid external well-known type include for now
+message Empty {}
+
+// ===========================
+// v1 API aligned with OpenAPI
+// ===========================
+
+message Record {
+  string key = 1; // optional
+  string value = 2; // UTF-8 payload
+  map<string, string> headers = 3; // optional
+}
+
+message RecordWithOffset {
+  Record record = 1;
+  uint64 offset = 2;
+  string timestamp = 3; // RFC3339
+}
+
+message ProduceRequest {
+  string topic = 1;
+  repeated Record records = 2;
+}
+
+message ProduceResponse {
+  uint64 offset = 1; // last record offset
+  string timestamp = 2; // server timestamp
+}
+
+message ConsumerGroupId { string group_id = 1; }
+message ConsumerGroupResponse { string group_id = 1; }
+
+message FetchByOffsetRequest {
+  string group_id = 1;
+  string topic = 2;
+  uint64 from_offset = 3; // 0 means use committed
+  uint32 max_records = 4; // default 100
+  bool include_headers = 5; // default true
+}
+
+message FetchByTimeRequest {
+  string group_id = 1;
+  string topic = 2;
+  string from_time = 3; // RFC3339
+  uint32 max_records = 4; // default 100
+  bool include_headers = 5; // default true
+}
+
+message FetchResponse {
+  repeated RecordWithOffset records = 1;
+  uint64 next_offset = 2;
+  uint64 high_water_mark = 3;
+  uint64 lag = 4; // optional: 0 if not computed
+}
+
+message CommitOffsetRequest { string group_id = 1; string topic = 2; uint64 offset = 3; }
+message CommitOffsetResponse { string topic = 1; uint64 committed_offset = 2; string timestamp = 3; }
+message GetOffsetRequest { string group_id = 1; string topic = 2; }
+message GetOffsetResponse { string group_id = 1; string topic = 2; uint64 offset = 3; }
+
+message ListTopicsResponse { repeated string topics = 1; }
+message HighWaterMarkRequest { string topic = 1; }
+message HighWaterMarkResponse { string topic = 1; uint64 high_water_mark = 2; }
+
+service Producer {
+  rpc Produce(ProduceRequest) returns (ProduceResponse);
+}
+
+service Consumer {
+  rpc CreateConsumerGroup(ConsumerGroupId) returns (ConsumerGroupResponse);
+  rpc DeleteConsumerGroup(ConsumerGroupId) returns (Empty);
+  rpc FetchByOffset(FetchByOffsetRequest) returns (FetchResponse);
+  rpc FetchByTime(FetchByTimeRequest) returns (FetchResponse);
+  rpc CommitOffset(CommitOffsetRequest) returns (CommitOffsetResponse);
+  rpc GetConsumerGroupOffset(GetOffsetRequest) returns (GetOffsetResponse);
+  rpc Subscribe(FetchByOffsetRequest) returns (stream RecordWithOffset);
+}
+
+service Admin {
+  rpc ListTopics(Empty) returns (ListTopicsResponse);
+  rpc HighWaterMark(HighWaterMarkRequest) returns (HighWaterMarkResponse);
+  rpc Health(Empty) returns (Empty);
+}

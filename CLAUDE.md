@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with two crates:
+FlashQ is a Kafka-inspired record queue implementation with HTTP REST and gRPC API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with three crates:
 
-- **`flashq`** - Core library with storage backends and queue management  
+- **`flashq`** - Core library with storage backends and queue management
 - **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
+- **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
 
 The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
 
@@ -17,15 +18,20 @@ The project includes enhanced record structure with keys, headers, and offsets, 
 - `cargo build` - Build the project workspace (debug mode)
 - `cargo run -p flashq --bin flashq` - Build and run the interactive demo
 - `cargo run -p flashq-http --bin broker` - Build and run the HTTP broker (in-memory storage)
-- `cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./data` - Run broker with file storage
+- `cargo run -p flashq-grpc --bin grpc-server` - Build and run the gRPC server (in-memory storage)
+- `cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./data` - Run HTTP broker with file storage
+- `cargo run -p flashq-grpc --bin grpc-server -- --storage=file --data-dir=./data` - Run gRPC server with file storage
 - `cargo run -p flashq-http --bin broker -- --batch-bytes=65536` - Configure batch size (64KB batches)
 - `cargo run -p flashq-http --bin broker -- --storage=file --batch-bytes=131072` - File storage with 128KB batches
-- `cargo run -p flashq-http --bin client` - Build and run the CLI client
+- `cargo run -p flashq-http --bin client` - Build and run the HTTP CLI client
+- `cargo run -p flashq-grpc --bin grpc-client` - Build and run the gRPC CLI client
 - `cargo build --release` - Build optimized release version
 
 ### Production Binary Building
-- `cargo build --release -p flashq-http --bin broker` - Build optimized broker binary
-- `cargo build --release -p flashq-http --bin client` - Build optimized client binary
+- `cargo build --release -p flashq-http --bin broker` - Build optimized HTTP broker binary
+- `cargo build --release -p flashq-grpc --bin grpc-server` - Build optimized gRPC server binary
+- `cargo build --release -p flashq-http --bin client` - Build optimized HTTP client binary
+- `cargo build --release -p flashq-grpc --bin grpc-client` - Build optimized gRPC client binary
 - `cargo build --release` - Build all optimized binaries
 - Binaries located in `target/release/` directory
 
@@ -34,6 +40,7 @@ The project includes enhanced record structure with keys, headers, and offsets, 
 - `cargo test --test '*'` - Run only integration tests
 - `cargo test -p flashq --test storage_integration_tests` - Run storage tests
 - `cargo test -p flashq-http --test http_integration_tests` - Run HTTP tests
+- `cargo test -p flashq-grpc --test grpc_integration_tests` - Run gRPC tests
 - `cargo test <test_name>` - Run a specific test
 - `cargo clippy` - Run Rust linter for code quality checks
 - `cargo fmt` - Format code according to Rust style guidelines
@@ -63,6 +70,7 @@ Following Rust best practices with a workspace containing two library and binary
 - `Cargo.toml` - Workspace configuration using Rust 2024 edition
 - `crates/flashq/` - Core library crate with storage backends
 - `crates/flashq-http/` - HTTP broker, producer, consumer, and client crate
+- `crates/flashq-grpc/` - gRPC broker, producer, consumer, and client crate
 
 ### Core Library Crate (`crates/flashq/`)
 - `src/lib.rs` - Library crate containing core record queue functionality
@@ -78,6 +86,17 @@ Following Rust best practices with a workspace containing two library and binary
 - `src/bin/client.rs` - CLI client for interacting with the broker
 - `src/http/` - HTTP components (broker, client, common types)
 - `tests/http/` - HTTP integration test suite
+
+### gRPC Crate (`crates/flashq-grpc/`)
+- `Cargo.toml` - gRPC dependencies (tonic, prost, protoc-bin-vendored)
+- `build.rs` - Protocol Buffer code generation with vendored protoc
+- `proto/flashq.proto` - Protocol Buffer schema definition
+- `src/lib.rs` - gRPC library exports and generated code
+- `src/bin/server.rs` - gRPC server implementation
+- `src/bin/client.rs` - CLI client for gRPC operations
+- `src/server.rs` - Producer/Consumer/Admin service implementations
+- `src/client.rs` - gRPC client connection utilities
+- `tests/grpc/` - gRPC integration test suite
 
 ### Core Library Components
 - `Record` struct - Record payload with optional key and headers
