@@ -8,6 +8,48 @@ use crate::flashq::v1::consumer_server::Consumer;
 use crate::flashq::v1::producer_server::Producer;
 use crate::flashq::v1::*;
 
+mod validation {
+    use tonic::Status;
+
+    pub const MAX_KEY_SIZE: usize = 1024;
+    pub const MAX_VALUE_SIZE: usize = 1_048_576; // 1MB
+    pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
+
+    pub fn validate_record_for_grpc(record: &flashq::Record) -> Result<(), Status> {
+        // Validate key size
+        if let Some(key) = &record.key {
+            if key.len() > MAX_KEY_SIZE {
+                return Err(Status::invalid_argument(
+                    format!("Key exceeds maximum length of {} characters (got {})",
+                           MAX_KEY_SIZE, key.len())
+                ));
+            }
+        }
+
+        // Validate value size
+        if record.value.len() > MAX_VALUE_SIZE {
+            return Err(Status::invalid_argument(
+                format!("Value exceeds maximum length of {} bytes (got {})",
+                       MAX_VALUE_SIZE, record.value.len())
+            ));
+        }
+
+        // Validate header values
+        if let Some(headers) = &record.headers {
+            for (header_key, header_value) in headers {
+                if header_value.len() > MAX_HEADER_VALUE_SIZE {
+                    return Err(Status::invalid_argument(
+                        format!("Header '{}' value exceeds maximum length of {} characters (got {})",
+                               header_key, MAX_HEADER_VALUE_SIZE, header_value.len())
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct FlashqGrpcService {
     pub core: Arc<flashq::FlashQ>,
@@ -19,25 +61,29 @@ impl FlashqGrpcService {
     }
 }
 
-fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Record {
+fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Result<Record, Status> {
+    // Validate record before conversion
+    validation::validate_record_for_grpc(record)?;
+
     let headers = if include_headers {
         record.headers.clone().unwrap_or_default()
     } else {
         std::collections::HashMap::new()
     };
-    Record {
+
+    Ok(Record {
         key: record.key.clone().unwrap_or_default(),
         value: record.value.clone(),
         headers,
-    }
+    })
 }
 
-fn to_proto_rwo(r: &flashq::RecordWithOffset, include_headers: bool) -> RecordWithOffset {
-    RecordWithOffset {
-        record: Some(to_proto_record(&r.record, include_headers)),
+fn to_proto_rwo(r: &flashq::RecordWithOffset, include_headers: bool) -> Result<RecordWithOffset, Status> {
+    Ok(RecordWithOffset {
+        record: Some(to_proto_record(&r.record, include_headers)?),
         offset: r.offset,
         timestamp: r.timestamp.clone(),
-    }
+    })
 }
 
 #[tonic::async_trait]
@@ -53,7 +99,8 @@ impl Producer for FlashqGrpcService {
         if req.records.is_empty() {
             return Err(Status::invalid_argument("records must be non-empty"));
         }
-        // Map records to core type
+        
+        // Map records to core type with validation
         let mut records = Vec::with_capacity(req.records.len());
         for (i, rec) in req.records.into_iter().enumerate() {
             if rec.value.is_empty() {
@@ -61,6 +108,31 @@ impl Producer for FlashqGrpcService {
                     "records[{i}].value must be non-empty"
                 )));
             }
+            
+            // Validate record sizes using the same limits as HTTP API
+            if !rec.key.is_empty() && rec.key.len() > validation::MAX_KEY_SIZE {
+                return Err(Status::invalid_argument(
+                    format!("Record at index {} key exceeds maximum length of {} characters (got {})",
+                           i, validation::MAX_KEY_SIZE, rec.key.len())
+                ));
+            }
+            
+            if rec.value.len() > validation::MAX_VALUE_SIZE {
+                return Err(Status::invalid_argument(
+                    format!("Record at index {} value exceeds maximum length of {} bytes (got {})",
+                           i, validation::MAX_VALUE_SIZE, rec.value.len())
+                ));
+            }
+            
+            for (header_key, header_value) in &rec.headers {
+                if header_value.len() > validation::MAX_HEADER_VALUE_SIZE {
+                    return Err(Status::invalid_argument(
+                        format!("Record at index {} header '{}' value exceeds maximum length of {} characters (got {})",
+                               i, header_key, validation::MAX_HEADER_VALUE_SIZE, header_value.len())
+                    ));
+                }
+            }
+            
             let key = if rec.key.is_empty() {
                 None
             } else {
@@ -77,6 +149,7 @@ impl Producer for FlashqGrpcService {
                 headers,
             });
         }
+        
         let last = self
             .core
             .post_records(req.topic.clone(), records)
@@ -157,10 +230,11 @@ impl Consumer for FlashqGrpcService {
         let high_water_mark = self.core.get_high_water_mark(&req.topic);
         let lag = high_water_mark.saturating_sub(next_offset);
 
-        let records = records
+        let records: Result<Vec<_>, _> = records
             .iter()
             .map(|r| to_proto_rwo(r, include_headers))
             .collect();
+        let records = records.map_err(|e| Status::internal(format!("Record validation failed: {e}")))?;
 
         Ok(Response::new(FetchResponse {
             records,
@@ -200,10 +274,11 @@ impl Consumer for FlashqGrpcService {
             });
         let high_water_mark = self.core.get_high_water_mark(&req.topic);
         let lag = high_water_mark.saturating_sub(next_offset);
-        let records = records
+        let records: Result<Vec<_>, _> = records
             .iter()
             .map(|r| to_proto_rwo(r, include_headers))
             .collect();
+        let records = records.map_err(|e| Status::internal(format!("Record validation failed: {e}")))?;
         Ok(Response::new(FetchResponse {
             records,
             next_offset,
@@ -260,8 +335,10 @@ impl Consumer for FlashqGrpcService {
         if req.group_id.is_empty() || req.topic.is_empty() {
             return Err(Status::invalid_argument("group_id and topic are required"));
         }
+        
         let (tx, rx) = tokio::sync::mpsc::channel(64);
         let core = self.core.clone();
+        
         tokio::spawn(async move {
             let mut current = if req.from_offset == 0 {
                 core.get_consumer_group_offset(&req.group_id, &req.topic)
@@ -269,29 +346,59 @@ impl Consumer for FlashqGrpcService {
             } else {
                 req.from_offset
             };
+            
+            // Circuit breaker state
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+            const INITIAL_RETRY_DELAY: u64 = 200;
+            const MAX_RETRY_DELAY: u64 = 5000;
+            
             loop {
                 match core.poll_records_from_offset(&req.topic, current, Some(100)) {
                     Ok(records) if !records.is_empty() => {
+                        consecutive_errors = 0; // Reset on success
+                        
                         for r in records.iter() {
-                            let msg = to_proto_rwo(r, req.include_headers);
+                            let msg = match to_proto_rwo(r, req.include_headers) {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    let _ = tx.send(Err(e)).await;
+                                    return;
+                                }
+                            };
                             if tx.send(Ok(msg)).await.is_err() {
-                                return; // receiver dropped
+                                return; // Client disconnected
                             }
                             current = r.offset.saturating_add(1);
                         }
                     }
                     Ok(_) => {
+                        // No records, wait before polling again
                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     }
-                    Err(_) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    Err(e) => {
+                        consecutive_errors += 1;
+                        
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            // Circuit breaker triggered
+                            let _ = tx.send(Err(Status::internal(
+                                format!("Too many consecutive errors ({}): {}", consecutive_errors, e)
+                            ))).await;
+                            return;
+                        }
+                        
+                        // Exponential backoff with jitter
+                        let delay = std::cmp::min(
+                            INITIAL_RETRY_DELAY * 2_u64.pow(consecutive_errors - 1),
+                            MAX_RETRY_DELAY
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     }
                 }
             }
         });
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
-            rx,
-        )))
+        
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
 }
 

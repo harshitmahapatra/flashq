@@ -11,4 +11,5 @@ mod grpc {
     pub mod producer_tests;
     pub mod storage_integration_tests;
     pub mod subscribe_tests;
+    pub mod validation_tests;
 }
