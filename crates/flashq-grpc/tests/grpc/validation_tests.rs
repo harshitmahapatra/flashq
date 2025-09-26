@@ -25,7 +25,11 @@ async fn test_record_key_size_validation() {
     assert!(result.is_err());
     let status = result.unwrap_err();
     assert_eq!(status.code(), Code::InvalidArgument);
-    assert!(status.message().contains("key exceeds maximum length of 1024 characters (got 1025)"));
+    assert!(
+        status
+            .message()
+            .contains("key exceeds maximum length of 1024 characters (got 1025)")
+    );
 }
 
 #[tokio::test]
@@ -51,7 +55,11 @@ async fn test_record_value_size_validation() {
     assert!(result.is_err());
     let status = result.unwrap_err();
     assert_eq!(status.code(), Code::InvalidArgument);
-    assert!(status.message().contains("value exceeds maximum length of 1048576 bytes (got 1048577)"));
+    assert!(
+        status
+            .message()
+            .contains("value exceeds maximum length of 1048576 bytes (got 1048577)")
+    );
 }
 
 #[tokio::test]
@@ -80,7 +88,9 @@ async fn test_record_header_size_validation() {
     assert!(result.is_err());
     let status = result.unwrap_err();
     assert_eq!(status.code(), Code::InvalidArgument);
-    assert!(status.message().contains("header 'test_header' value exceeds maximum length of 1024 characters (got 1025)"));
+    assert!(status.message().contains(
+        "header 'test_header' value exceeds maximum length of 1024 characters (got 1025)"
+    ));
 }
 
 #[tokio::test]
@@ -92,8 +102,8 @@ async fn test_valid_record_sizes_pass_validation() {
         .expect("connect producer");
 
     // Test maximum allowed sizes that should pass
-    let max_key = "x".repeat(1024);         // Exactly 1024 chars
-    let max_value = "y".repeat(1_048_576);  // Exactly 1MB
+    let max_key = "x".repeat(1024); // Exactly 1024 chars
+    let max_value = "y".repeat(1_048_576); // Exactly 1MB
     let mut headers = std::collections::HashMap::new();
     headers.insert("test_header".to_string(), "z".repeat(1024)); // Exactly 1024 chars
 
@@ -109,4 +119,3 @@ async fn test_valid_record_sizes_pass_validation() {
     let result = client.produce(request).await;
     assert!(result.is_ok(), "Valid record sizes should pass validation");
 }
-
