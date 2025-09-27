@@ -4,10 +4,11 @@ use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, Top
 use crate::warn;
 use fs4::fs_std::FileExt;
 use log::debug;
+use parking_lot::RwLock;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use sysinfo::{ProcessesToUpdate, System};
 
 #[derive(Debug)]
@@ -368,15 +369,15 @@ mod tests {
         let backend = StorageBackend::new_memory();
         let storage = backend.create("test_topic").unwrap();
 
-        assert_eq!(storage.read().unwrap().len(), 0);
-        assert!(storage.read().unwrap().is_empty());
-        assert_eq!(storage.read().unwrap().next_offset(), 0);
+        assert_eq!(storage.read().len(), 0);
+        assert!(storage.read().is_empty());
+        assert_eq!(storage.read().next_offset(), 0);
 
         let record = Record::new(None, "test".to_string(), None);
-        let offset = storage.write().unwrap().append(record).unwrap();
+        let offset = storage.write().append(record).unwrap();
         assert_eq!(offset, 0);
-        assert_eq!(storage.read().unwrap().len(), 1);
-        assert_eq!(storage.read().unwrap().next_offset(), 1);
+        assert_eq!(storage.read().len(), 1);
+        assert_eq!(storage.read().next_offset(), 1);
     }
 
     #[test]

@@ -7,12 +7,21 @@
 pub mod error;
 pub mod manifest;
 pub mod metadata_store;
+pub mod traits;
 pub mod types;
+
+// Generated protobuf/gRPC modules
+pub mod proto {
+    tonic::include_proto!("flashq.cluster");
+}
 
 pub use error::ClusterError;
 
 // Re-export commonly used metadata store types for ergonomics
 pub use metadata_store::{InMemoryMetadataStore, MetadataBackend, MetadataStore};
+
+// Re-export cluster service traits
+pub use traits::{ClusterService, FlashQBroker};
 
 // Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};

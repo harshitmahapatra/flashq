@@ -129,7 +129,7 @@ fn equal_timestamp_returns_full_count() {
 
     let topic = "time_polling_topic";
     let topic_log = backend.create(topic).expect("create topic");
-    let mut log = topic_log.write().unwrap();
+    let mut log = topic_log.write();
 
     // Setup: create and append a batch of records (single batch timestamp)
     let n = 100usize;
@@ -170,7 +170,7 @@ fn equal_timestamp_returns_full_offsets() {
 
     let topic = "time_polling_topic_offsets";
     let topic_log = backend.create(topic).expect("create topic");
-    let mut log = topic_log.write().unwrap();
+    let mut log = topic_log.write();
 
     // Setup: create and append a batch of records (single batch timestamp)
     let n = 100usize;
@@ -211,7 +211,7 @@ fn spans_segments_returns_only_second_batch_count() {
 
     let topic = "time_polling_multi_segment_topic";
     let topic_log = backend.create(topic).expect("create topic");
-    let mut log = topic_log.write().unwrap();
+    let mut log = topic_log.write();
 
     // Setup: first batch large enough so that two batches won't fit in one tiny segment
     let n1 = 4usize;
@@ -270,7 +270,7 @@ fn spans_segments_returns_only_second_batch_offsets() {
 
     let topic = "time_polling_multi_segment_topic_offsets";
     let topic_log = backend.create(topic).expect("create topic");
-    let mut log = topic_log.write().unwrap();
+    let mut log = topic_log.write();
 
     // Setup: first batch large enough so that two batches won't fit in one tiny segment
     let n1 = 4usize;
