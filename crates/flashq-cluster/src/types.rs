@@ -29,7 +29,6 @@ impl From<BrokerId> for u32 {
     }
 }
 
-
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Epoch(epoch)
@@ -42,13 +41,11 @@ impl From<Epoch> for u64 {
     }
 }
 
-
 impl fmt::Display for BrokerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "broker-{}", self.0)
     }
 }
-
 
 impl fmt::Display for Epoch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -70,7 +67,6 @@ mod tests {
 
         assert_eq!(id.to_string(), "broker-42");
     }
-
 
     #[test]
     fn test_epoch_conversions() {
@@ -100,7 +96,6 @@ mod tests {
         let json = serde_json::to_string(&broker_id).unwrap();
         let deserialized: BrokerId = serde_json::from_str(&json).unwrap();
         assert_eq!(broker_id, deserialized);
-
     }
 
     #[test]

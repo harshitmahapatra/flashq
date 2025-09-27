@@ -37,6 +37,12 @@ pub enum ClusterError {
         current_epoch: u64,
         new_epoch: u64,
     },
+    /// Attempted to operate on a replica that is not part of the replica set.
+    InvalidReplica {
+        topic: String,
+        partition_id: u32,
+        replica_id: u32,
+    },
 }
 
 impl fmt::Display for ClusterError {
@@ -48,7 +54,10 @@ impl fmt::Display for ClusterError {
             ClusterError::TopicNotFound { topic } => {
                 write!(f, "Topic '{topic}' not found")
             }
-            ClusterError::PartitionNotFound { topic, partition_id } => {
+            ClusterError::PartitionNotFound {
+                topic,
+                partition_id,
+            } => {
                 write!(f, "Partition {partition_id} not found for topic '{topic}'")
             }
             ClusterError::InvalidManifest { context, reason } => {
@@ -70,6 +79,16 @@ impl fmt::Display for ClusterError {
                     f,
                     "Invalid epoch for topic '{topic}' partition {partition_id}: \
                      attempted {new_epoch}, current {current_epoch} (epochs must increase)"
+                )
+            }
+            ClusterError::InvalidReplica {
+                topic,
+                partition_id,
+                replica_id,
+            } => {
+                write!(
+                    f,
+                    "Replica {replica_id} is not part of the replica set for topic '{topic}' partition {partition_id}"
                 )
             }
         }
@@ -96,6 +115,7 @@ impl ClusterError {
                 | ClusterError::PartitionNotFound { .. }
                 | ClusterError::InvalidManifest { .. }
                 | ClusterError::InvalidEpoch { .. }
+                | ClusterError::InvalidReplica { .. }
         )
     }
 

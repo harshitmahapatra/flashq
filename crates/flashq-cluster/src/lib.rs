@@ -6,9 +6,13 @@
 
 pub mod error;
 pub mod manifest;
+pub mod metadata_store;
 pub mod types;
 
 pub use error::ClusterError;
+
+// Re-export commonly used metadata store types for ergonomics
+pub use metadata_store::{InMemoryMetadataStore, MetadataBackend, MetadataStore};
 
 // Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};

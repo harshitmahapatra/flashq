@@ -1,6 +1,6 @@
 //! Cluster manifest data structures.
 
-use crate::{types::*, ClusterError};
+use crate::{ClusterError, types::*};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -136,7 +136,9 @@ mod tests {
         assert_eq!(topic.replication_factor, 3);
 
         // Test partition access
-        let partition = manifest.get_partition("orders", PartitionId::new(0)).unwrap();
+        let partition = manifest
+            .get_partition("orders", PartitionId::new(0))
+            .unwrap();
         assert_eq!(partition.leader, BrokerId(1));
         assert_eq!(partition.epoch, Epoch(4));
     }
@@ -155,6 +157,9 @@ mod tests {
 
         // Test partition not found
         let result = manifest.get_partition("orders", PartitionId::new(999));
-        assert!(matches!(result, Err(ClusterError::PartitionNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(ClusterError::PartitionNotFound { .. })
+        ));
     }
 }

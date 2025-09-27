@@ -1,8 +1,8 @@
 //! Cluster manifest loading and file I/O operations.
 
+use super::types::ClusterManifest;
 use crate::ClusterError;
 use std::path::Path;
-use super::types::ClusterManifest;
 
 pub struct ManifestLoader;
 
@@ -13,10 +13,7 @@ impl ManifestLoader {
         let content = std::fs::read_to_string(path)
             .map_err(|e| ClusterError::from_io_error(e, "manifest loading"))?;
 
-        let extension = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
 
         match extension.to_lowercase().as_str() {
             "json" => serde_json::from_str(&content)
@@ -27,7 +24,12 @@ impl ManifestLoader {
                 // Try JSON first, then YAML as fallback
                 serde_json::from_str(&content)
                     .or_else(|_| serde_yaml::from_str(&content))
-                    .map_err(|e| ClusterError::from_parse_error(e, "manifest parsing (tried both JSON and YAML)"))
+                    .map_err(|e| {
+                        ClusterError::from_parse_error(
+                            e,
+                            "manifest parsing (tried both JSON and YAML)",
+                        )
+                    })
             }
         }
     }

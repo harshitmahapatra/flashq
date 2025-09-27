@@ -1,9 +1,11 @@
 //! Integration tests for cluster manifest loading and parsing.
 
-use flashq_cluster::manifest::{ManifestLoader, ClusterManifest, BrokerSpec, TopicAssignment, PartitionAssignment};
-use flashq_cluster::types::{BrokerId, PartitionId, Epoch};
-use tempfile::NamedTempFile;
+use flashq_cluster::manifest::{
+    BrokerSpec, ClusterManifest, ManifestLoader, PartitionAssignment, TopicAssignment,
+};
+use flashq_cluster::types::{BrokerId, Epoch, PartitionId};
 use std::io::Write;
+use tempfile::NamedTempFile;
 
 #[test]
 fn test_manifest_load_save_round_trip() {
@@ -59,11 +61,19 @@ fn test_manifest_partition_lookup() {
     let manifest = create_test_manifest();
 
     // Test successful partition lookup
-    let partition = manifest.get_partition("orders", PartitionId::new(0)).unwrap();
+    let partition = manifest
+        .get_partition("orders", PartitionId::new(0))
+        .unwrap();
     assert_eq!(partition.leader, BrokerId(1));
     assert_eq!(partition.epoch, Epoch(4));
-    assert_eq!(partition.replicas, vec![BrokerId(1), BrokerId(2), BrokerId(3)]);
-    assert_eq!(partition.in_sync_replicas, vec![BrokerId(1), BrokerId(2), BrokerId(3)]);
+    assert_eq!(
+        partition.replicas,
+        vec![BrokerId(1), BrokerId(2), BrokerId(3)]
+    );
+    assert_eq!(
+        partition.in_sync_replicas,
+        vec![BrokerId(1), BrokerId(2), BrokerId(3)]
+    );
 
     // Test partition not found
     let result = manifest.get_partition("orders", PartitionId::new(999));
@@ -227,7 +237,6 @@ fn test_yaml_parsing_error() {
 }
 
 fn create_test_manifest() -> ClusterManifest {
-
     ClusterManifest {
         brokers: vec![
             BrokerSpec {
