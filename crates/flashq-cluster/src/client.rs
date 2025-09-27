@@ -12,16 +12,16 @@ use crate::proto::{
     ReportPartitionStatusResponse,
 };
 
-/// gRPC client for connecting to cluster services.
+/// Client for connecting to cluster services.
 ///
 /// This client provides convenient methods for brokers to communicate with
 /// cluster coordinators, handling connection management and error conversion.
 #[derive(Debug, Clone)]
-pub struct GrpcClusterClient {
+pub struct ClusterClient {
     client: TonicClusterClient<Channel>,
 }
 
-impl GrpcClusterClient {
+impl ClusterClient {
     /// Connect to a cluster service at the given endpoint.
     pub async fn connect<D>(dst: D) -> Result<Self, ClusterError>
     where
@@ -165,7 +165,7 @@ fn status_to_cluster_error(status: Status) -> ClusterError {
         tonic::Code::DeadlineExceeded => {
             ClusterError::from_transport_error(status.message(), "Request timeout")
         }
-        _ => ClusterError::from_transport_error(status.message(), "gRPC error"),
+        _ => ClusterError::from_transport_error(status.message(), "RPC error"),
     }
 }
 

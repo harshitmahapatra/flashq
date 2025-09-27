@@ -9,17 +9,17 @@ use crate::proto::{
 };
 use crate::traits::ClusterService;
 
-/// gRPC server adapter that implements the Cluster service.
+/// Server adapter that implements the Cluster service.
 ///
-/// This adapter converts tonic gRPC requests into ClusterService trait calls,
+/// This adapter converts tonic requests into ClusterService trait calls,
 /// providing the bridge between the network layer and business logic.
 #[derive(Debug)]
-pub struct GrpcClusterServer<T: ClusterService> {
+pub struct ClusterServer<T: ClusterService> {
     cluster_service: Arc<T>,
 }
 
-impl<T: ClusterService> GrpcClusterServer<T> {
-    /// Create a new gRPC cluster server with the given cluster service implementation.
+impl<T: ClusterService> ClusterServer<T> {
+    /// Create a new cluster server with the given cluster service implementation.
     pub fn new(cluster_service: Arc<T>) -> Self {
         Self { cluster_service }
     }
@@ -31,7 +31,7 @@ impl<T: ClusterService> GrpcClusterServer<T> {
 }
 
 #[tonic::async_trait]
-impl<T: ClusterService + 'static> Cluster for GrpcClusterServer<T> {
+impl<T: ClusterService + 'static> Cluster for ClusterServer<T> {
     async fn describe_cluster(
         &self,
         _request: Request<DescribeClusterRequest>,
@@ -198,7 +198,7 @@ mod tests {
     #[tokio::test]
     async fn test_describe_cluster() {
         let service = Arc::new(TestClusterService::new());
-        let server = GrpcClusterServer::new(service);
+        let server = ClusterServer::new(service);
 
         let request = Request::new(DescribeClusterRequest {});
         let response = server.describe_cluster(request).await.unwrap();
@@ -214,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_report_partition_status() {
         let service = Arc::new(TestClusterService::new());
-        let server = GrpcClusterServer::new(service);
+        let server = ClusterServer::new(service);
 
         let request = Request::new(ReportPartitionStatusRequest {
             topic: "test-topic".to_string(),

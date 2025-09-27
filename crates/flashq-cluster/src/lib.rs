@@ -26,8 +26,8 @@ pub use metadata_store::{InMemoryMetadataStore, MetadataBackend, MetadataStore};
 pub use traits::{ClusterService, FlashQBroker};
 
 // Re-export gRPC server and client adapters
-pub use client::GrpcClusterClient;
-pub use server::GrpcClusterServer;
+pub use client::ClusterClient;
+pub use server::ClusterServer;
 
 // Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};
