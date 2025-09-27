@@ -4,7 +4,7 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::error::ClusterError;
 use crate::proto::{
-    cluster_server::Cluster, BrokerStatus, DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest,
+    cluster_server::Cluster, DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest,
     HeartbeatResponse, ReportPartitionStatusRequest, ReportPartitionStatusResponse,
 };
 use crate::traits::ClusterService;
@@ -114,6 +114,8 @@ fn cluster_error_to_status(error: ClusterError) -> Status {
         ClusterError::InvalidManifest { .. } => Status::invalid_argument(error.to_string()),
         ClusterError::ManifestIo { .. } => Status::internal(error.to_string()),
         ClusterError::Transport { .. } => Status::internal(error.to_string()),
+        ClusterError::StaleEpoch { .. } => Status::invalid_argument(error.to_string()),
+        ClusterError::UnknownBroker { .. } => Status::not_found(error.to_string()),
     }
 }
 
@@ -121,7 +123,7 @@ fn cluster_error_to_status(error: ClusterError) -> Status {
 mod tests {
     use super::*;
     use crate::metadata_store::InMemoryMetadataStore;
-    use crate::proto::{BrokerInfo, PartitionInfo, TopicAssignment};
+    use crate::proto::{BrokerInfo, BrokerStatus, PartitionInfo, TopicAssignment};
     use crate::traits::ClusterService;
 
     /// Test implementation of ClusterService for testing the gRPC server.

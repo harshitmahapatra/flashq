@@ -6,6 +6,7 @@ use crate::{
     metadata_store::r#trait::MetadataStore,
     types::*,
 };
+use chrono::{DateTime, Duration, Utc};
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -28,6 +29,10 @@ struct ClusterState {
     brokers: HashMap<BrokerId, BrokerSpec>,
     /// Topic assignments indexed by topic name
     topics: HashMap<String, TopicAssignment>,
+    /// Broker runtime status indexed by broker ID
+    broker_runtime: HashMap<BrokerId, BrokerRuntimeStatus>,
+    /// Partition runtime state indexed by (topic, partition_id)
+    partition_runtime: HashMap<(String, PartitionId), PartitionRuntimeState>,
 }
 
 impl ClusterState {
@@ -35,6 +40,8 @@ impl ClusterState {
         Self {
             brokers: HashMap::new(),
             topics: HashMap::new(),
+            broker_runtime: HashMap::new(),
+            partition_runtime: HashMap::new(),
         }
     }
 
@@ -193,9 +200,11 @@ impl MetadataStore for InMemoryMetadataStore {
     fn load_from_manifest(&self, manifest: ClusterManifest) -> Result<(), ClusterError> {
         let mut state = self.state.write();
 
-        // Clear existing state
+        // Clear existing state including runtime state
         state.brokers.clear();
         state.topics.clear();
+        state.broker_runtime.clear();
+        state.partition_runtime.clear();
 
         // Load brokers
         for broker in manifest.brokers {
@@ -217,6 +226,155 @@ impl MetadataStore for InMemoryMetadataStore {
         let topics: HashMap<String, TopicAssignment> = state.topics.clone();
 
         Ok(ClusterManifest { brokers, topics })
+    }
+
+    // ===========================
+    // Broker Runtime Tracking
+    // ===========================
+
+    fn record_broker_heartbeat(
+        &self,
+        broker: BrokerId,
+        ts: DateTime<Utc>,
+        draining: bool,
+    ) -> Result<(), ClusterError> {
+        let mut state = self.state.write();
+
+        // Verify broker exists in the cluster
+        if !state.brokers.contains_key(&broker) {
+            return Err(ClusterError::UnknownBroker {
+                broker_id: broker.into(),
+            });
+        }
+
+        // Update or insert broker runtime status
+        state.broker_runtime.insert(
+            broker,
+            BrokerRuntimeStatus {
+                last_heartbeat: ts,
+                is_draining: draining,
+            },
+        );
+
+        Ok(())
+    }
+
+    fn list_brokers_with_status(&self) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError> {
+        let state = self.state.read();
+        let heartbeat_timeout = Duration::seconds(10); // 10 second timeout for testing
+
+        let mut result = Vec::new();
+        for broker_id in state.brokers.keys() {
+            let status = if let Some(runtime_status) = state.broker_runtime.get(broker_id) {
+                // Check if broker is alive based on heartbeat timeout
+                let _is_alive = Utc::now().signed_duration_since(runtime_status.last_heartbeat) < heartbeat_timeout;
+                BrokerRuntimeStatus {
+                    last_heartbeat: runtime_status.last_heartbeat,
+                    is_draining: runtime_status.is_draining,
+                }
+            } else {
+                // No heartbeat recorded yet - consider dead
+                BrokerRuntimeStatus {
+                    last_heartbeat: DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now()),
+                    is_draining: false,
+                }
+            };
+            result.push((*broker_id, status));
+        }
+
+        Ok(result)
+    }
+
+    // ===========================
+    // Enhanced Partition Operations
+    // ===========================
+
+    fn set_partition_leader(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        leader: BrokerId,
+        epoch: Epoch,
+    ) -> Result<(), ClusterError> {
+        let mut state = self.state.write();
+        let partition_assignment = state.get_partition_mut(topic, partition)?;
+
+        // Verify the new leader is in the replica set
+        if !partition_assignment.replicas.contains(&leader) {
+            return Err(ClusterError::InvalidReplica {
+                topic: topic.to_string(),
+                partition_id: partition.into(),
+                replica_id: leader.into(),
+            });
+        }
+
+        // Verify epoch is not going backwards
+        if epoch < partition_assignment.epoch {
+            return Err(ClusterError::InvalidEpoch {
+                topic: topic.to_string(),
+                partition_id: partition.into(),
+                current_epoch: partition_assignment.epoch.into(),
+                new_epoch: epoch.into(),
+            });
+        }
+
+        partition_assignment.leader = leader;
+        partition_assignment.epoch = epoch;
+
+        Ok(())
+    }
+
+    fn compare_and_set_epoch(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        expected: Epoch,
+        new: Epoch,
+    ) -> Result<bool, ClusterError> {
+        let mut state = self.state.write();
+        let partition_assignment = state.get_partition_mut(topic, partition)?;
+
+        if partition_assignment.epoch != expected {
+            return Ok(false); // CAS failed - epoch didn't match
+        }
+
+        // Verify new epoch is greater than current
+        if new <= expected {
+            return Err(ClusterError::InvalidEpoch {
+                topic: topic.to_string(),
+                partition_id: partition.into(),
+                current_epoch: expected.into(),
+                new_epoch: new.into(),
+            });
+        }
+
+        partition_assignment.epoch = new;
+        Ok(true)
+    }
+
+    fn update_partition_offsets(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        high_water_mark: u64,
+        log_start_offset: u64,
+    ) -> Result<(), ClusterError> {
+        let state = self.state.read();
+        // Verify partition exists
+        let _ = state.get_partition(topic, partition)?;
+        drop(state);
+
+        // Update partition runtime state
+        let mut state = self.state.write();
+        state.partition_runtime.insert(
+            (topic.to_string(), partition),
+            PartitionRuntimeState {
+                high_water_mark,
+                log_start_offset,
+            },
+        );
+
+        Ok(())
     }
 }
 
@@ -677,5 +835,290 @@ mod tests {
             .unwrap();
         assert!(final_epoch.0 > 5); // Should have been incremented
         assert!(final_epoch.0 <= 55); // But not more than initial + (10 threads * 5 increments)
+    }
+
+    // ===========================
+    // Tests for New API Methods
+    // ===========================
+
+    #[test]
+    fn test_record_broker_heartbeat() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Record heartbeat for existing broker
+        store
+            .record_broker_heartbeat(BrokerId(1), now, false)
+            .unwrap();
+
+        // Verify heartbeat was recorded
+        let brokers = store.list_brokers_with_status().unwrap();
+        let broker_1 = brokers.iter().find(|(id, _)| *id == BrokerId(1)).unwrap();
+        assert_eq!(broker_1.1.last_heartbeat, now);
+        assert!(!broker_1.1.is_draining);
+    }
+
+    #[test]
+    fn test_record_broker_heartbeat_draining() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Record heartbeat with draining status
+        store
+            .record_broker_heartbeat(BrokerId(2), now, true)
+            .unwrap();
+
+        // Verify draining status was recorded
+        let brokers = store.list_brokers_with_status().unwrap();
+        let broker_2 = brokers.iter().find(|(id, _)| *id == BrokerId(2)).unwrap();
+        assert_eq!(broker_2.1.last_heartbeat, now);
+        assert!(broker_2.1.is_draining);
+    }
+
+    #[test]
+    fn test_record_broker_heartbeat_unknown_broker() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Try to record heartbeat for unknown broker
+        let result = store.record_broker_heartbeat(BrokerId(999), now, false);
+        assert!(matches!(result, Err(ClusterError::UnknownBroker { .. })));
+    }
+
+    #[test]
+    fn test_list_brokers_with_status() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Record heartbeats for some brokers
+        store
+            .record_broker_heartbeat(BrokerId(1), now, false)
+            .unwrap();
+        store
+            .record_broker_heartbeat(BrokerId(2), now - Duration::seconds(5), true)
+            .unwrap();
+        // Don't record heartbeat for broker 3
+
+        let brokers = store.list_brokers_with_status().unwrap();
+        assert_eq!(brokers.len(), 3);
+
+        // Check broker 1 status
+        let broker_1 = brokers.iter().find(|(id, _)| *id == BrokerId(1)).unwrap();
+        assert_eq!(broker_1.1.last_heartbeat, now);
+        assert!(!broker_1.1.is_draining);
+
+        // Check broker 2 status
+        let broker_2 = brokers.iter().find(|(id, _)| *id == BrokerId(2)).unwrap();
+        assert_eq!(broker_2.1.last_heartbeat, now - Duration::seconds(5));
+        assert!(broker_2.1.is_draining);
+
+        // Check broker 3 status (no heartbeat recorded)
+        let broker_3 = brokers.iter().find(|(id, _)| *id == BrokerId(3)).unwrap();
+        assert_eq!(
+            broker_3.1.last_heartbeat,
+            DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now())
+        );
+        assert!(!broker_3.1.is_draining);
+    }
+
+    #[test]
+    fn test_set_partition_leader() {
+        let store = create_test_store();
+
+        // Change leader from broker 1 to broker 2 for partition 0
+        store
+            .set_partition_leader("test-topic", PartitionId::new(0), BrokerId(2), Epoch(6))
+            .unwrap();
+
+        // Verify leader was changed
+        let leader = store
+            .get_partition_leader("test-topic", PartitionId::new(0))
+            .unwrap();
+        assert_eq!(leader, BrokerId(2));
+
+        // Verify epoch was updated
+        let epoch = store
+            .get_partition_epoch("test-topic", PartitionId::new(0))
+            .unwrap();
+        assert_eq!(epoch, Epoch(6));
+    }
+
+    #[test]
+    fn test_set_partition_leader_invalid_replica() {
+        let store = create_test_store();
+
+        // Try to set leader to a broker not in replica set
+        let result = store.set_partition_leader(
+            "test-topic",
+            PartitionId::new(0),
+            BrokerId(999),
+            Epoch(6),
+        );
+        assert!(matches!(result, Err(ClusterError::InvalidReplica { .. })));
+    }
+
+    #[test]
+    fn test_set_partition_leader_backwards_epoch() {
+        let store = create_test_store();
+
+        // Try to set epoch backwards (current is 5, trying to set 4)
+        let result = store.set_partition_leader(
+            "test-topic",
+            PartitionId::new(0),
+            BrokerId(2),
+            Epoch(4),
+        );
+        assert!(matches!(result, Err(ClusterError::InvalidEpoch { .. })));
+    }
+
+    #[test]
+    fn test_compare_and_set_epoch_success() {
+        let store = create_test_store();
+
+        // Get current epoch for partition 0 (should be 5)
+        let current_epoch = store
+            .get_partition_epoch("test-topic", PartitionId::new(0))
+            .unwrap();
+        assert_eq!(current_epoch, Epoch(5));
+
+        // Successfully CAS from 5 to 6
+        let success = store
+            .compare_and_set_epoch("test-topic", PartitionId::new(0), Epoch(5), Epoch(6))
+            .unwrap();
+        assert!(success);
+
+        // Verify epoch was updated
+        let new_epoch = store
+            .get_partition_epoch("test-topic", PartitionId::new(0))
+            .unwrap();
+        assert_eq!(new_epoch, Epoch(6));
+    }
+
+    #[test]
+    fn test_compare_and_set_epoch_failure() {
+        let store = create_test_store();
+
+        // Try CAS with wrong expected epoch
+        let success = store
+            .compare_and_set_epoch("test-topic", PartitionId::new(0), Epoch(999), Epoch(6))
+            .unwrap();
+        assert!(!success);
+
+        // Verify epoch was not changed
+        let epoch = store
+            .get_partition_epoch("test-topic", PartitionId::new(0))
+            .unwrap();
+        assert_eq!(epoch, Epoch(5));
+    }
+
+    #[test]
+    fn test_compare_and_set_epoch_invalid_new_epoch() {
+        let store = create_test_store();
+
+        // Try CAS with new epoch <= expected epoch
+        let result = store.compare_and_set_epoch(
+            "test-topic",
+            PartitionId::new(0),
+            Epoch(5),
+            Epoch(5), // same epoch
+        );
+        assert!(matches!(result, Err(ClusterError::InvalidEpoch { .. })));
+
+        let result = store.compare_and_set_epoch(
+            "test-topic",
+            PartitionId::new(0),
+            Epoch(5),
+            Epoch(4), // lower epoch
+        );
+        assert!(matches!(result, Err(ClusterError::InvalidEpoch { .. })));
+    }
+
+    #[test]
+    fn test_update_partition_offsets() {
+        let store = create_test_store();
+
+        // Update offsets for partition 0
+        store
+            .update_partition_offsets("test-topic", PartitionId::new(0), 100, 50)
+            .unwrap();
+
+        // Note: We can't directly verify the offsets since there's no getter method
+        // in the trait yet, but the operation should succeed without error
+    }
+
+    #[test]
+    fn test_update_partition_offsets_nonexistent_partition() {
+        let store = create_test_store();
+
+        // Try to update offsets for non-existent partition
+        let result = store.update_partition_offsets("test-topic", PartitionId::new(999), 100, 50);
+        assert!(matches!(
+            result,
+            Err(ClusterError::PartitionNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn test_update_partition_offsets_nonexistent_topic() {
+        let store = create_test_store();
+
+        // Try to update offsets for non-existent topic
+        let result = store.update_partition_offsets("nonexistent", PartitionId::new(0), 100, 50);
+        assert!(matches!(result, Err(ClusterError::TopicNotFound { .. })));
+    }
+
+    #[test]
+    fn test_runtime_state_persistence_across_operations() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Record heartbeat
+        store
+            .record_broker_heartbeat(BrokerId(1), now, true)
+            .unwrap();
+
+        // Update partition offsets
+        store
+            .update_partition_offsets("test-topic", PartitionId::new(0), 1000, 500)
+            .unwrap();
+
+        // Perform other metadata operations
+        store
+            .update_in_sync_replica("test-topic", PartitionId::new(0), BrokerId(1), false)
+            .unwrap();
+
+        // Verify runtime state persists
+        let brokers = store.list_brokers_with_status().unwrap();
+        let broker_1 = brokers.iter().find(|(id, _)| *id == BrokerId(1)).unwrap();
+        assert_eq!(broker_1.1.last_heartbeat, now);
+        assert!(broker_1.1.is_draining);
+    }
+
+    #[test]
+    fn test_load_from_manifest_clears_runtime_state() {
+        let store = create_test_store();
+        let now = Utc::now();
+
+        // Record some runtime state
+        store
+            .record_broker_heartbeat(BrokerId(1), now, true)
+            .unwrap();
+        store
+            .update_partition_offsets("test-topic", PartitionId::new(0), 1000, 500)
+            .unwrap();
+
+        // Load a new manifest
+        let new_manifest = create_test_manifest();
+        store.load_from_manifest(new_manifest).unwrap();
+
+        // Verify runtime state was cleared
+        let brokers = store.list_brokers_with_status().unwrap();
+        for (_, status) in brokers {
+            assert_eq!(
+                status.last_heartbeat,
+                DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now())
+            );
+            assert!(!status.is_draining);
+        }
     }
 }

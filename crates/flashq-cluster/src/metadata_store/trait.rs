@@ -1,6 +1,7 @@
 //! Metadata store trait definitions.
 
 use crate::{ClusterError, manifest::types::ClusterManifest, types::*};
+use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 
 /// Trait for storing and managing cluster metadata.
@@ -59,4 +60,53 @@ pub trait MetadataStore: Send + Sync {
     /// Export current cluster state as a manifest.
     /// This allows persisting the current state back to storage.
     fn export_to_manifest(&self) -> Result<ClusterManifest, ClusterError>;
+
+    // ===========================
+    // Broker Runtime Tracking
+    // ===========================
+
+    /// Record a broker heartbeat with timestamp and draining status.
+    fn record_broker_heartbeat(
+        &self,
+        broker: BrokerId,
+        ts: DateTime<Utc>,
+        draining: bool,
+    ) -> Result<(), ClusterError>;
+
+    /// List all brokers with their runtime status information.
+    /// Returns broker ID and runtime status pairs.
+    fn list_brokers_with_status(&self) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError>;
+
+    // ===========================
+    // Enhanced Partition Operations
+    // ===========================
+
+    /// Set the partition leader explicitly.
+    /// This is used when leadership changes are reported.
+    fn set_partition_leader(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        leader: BrokerId,
+        epoch: Epoch,
+    ) -> Result<(), ClusterError>;
+
+    /// Compare-and-set operation for partition epoch.
+    /// Returns true if the epoch was successfully updated, false if the expected epoch didn't match.
+    fn compare_and_set_epoch(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        expected: Epoch,
+        new: Epoch,
+    ) -> Result<bool, ClusterError>;
+
+    /// Update partition offsets (high water mark and log start offset).
+    fn update_partition_offsets(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        high_water_mark: u64,
+        log_start_offset: u64,
+    ) -> Result<(), ClusterError>;
 }

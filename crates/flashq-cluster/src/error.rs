@@ -43,6 +43,17 @@ pub enum ClusterError {
         partition_id: u32,
         replica_id: u32,
     },
+    /// Epoch compare-and-set operation failed due to epoch mismatch.
+    StaleEpoch {
+        topic: String,
+        partition_id: u32,
+        expected_epoch: u64,
+        current_epoch: u64,
+    },
+    /// Unknown broker ID encountered.
+    UnknownBroker {
+        broker_id: u32,
+    },
 }
 
 impl fmt::Display for ClusterError {
@@ -91,6 +102,21 @@ impl fmt::Display for ClusterError {
                     "Replica {replica_id} is not part of the replica set for topic '{topic}' partition {partition_id}"
                 )
             }
+            ClusterError::StaleEpoch {
+                topic,
+                partition_id,
+                expected_epoch,
+                current_epoch,
+            } => {
+                write!(
+                    f,
+                    "Stale epoch for topic '{topic}' partition {partition_id}: \
+                     expected {expected_epoch}, current {current_epoch}"
+                )
+            }
+            ClusterError::UnknownBroker { broker_id } => {
+                write!(f, "Unknown broker ID {broker_id}")
+            }
         }
     }
 }
@@ -104,6 +130,7 @@ impl ClusterError {
             ClusterError::BrokerNotFound { .. }
                 | ClusterError::TopicNotFound { .. }
                 | ClusterError::PartitionNotFound { .. }
+                | ClusterError::UnknownBroker { .. }
         )
     }
 
@@ -116,6 +143,8 @@ impl ClusterError {
                 | ClusterError::InvalidManifest { .. }
                 | ClusterError::InvalidEpoch { .. }
                 | ClusterError::InvalidReplica { .. }
+                | ClusterError::StaleEpoch { .. }
+                | ClusterError::UnknownBroker { .. }
         )
     }
 

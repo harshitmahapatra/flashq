@@ -1,5 +1,6 @@
 //! Core types for cluster metadata management.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -15,6 +16,20 @@ pub struct BrokerId(pub u32);
 /// split-brain scenarios in distributed cluster management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(pub u64);
+
+/// Runtime status information for a broker in the cluster.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrokerRuntimeStatus {
+    pub last_heartbeat: DateTime<Utc>,
+    pub is_draining: bool,
+}
+
+/// Runtime state for a partition, tracking high water mark and log start offset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartitionRuntimeState {
+    pub high_water_mark: u64,
+    pub log_start_offset: u64,
+}
 
 // Implement From/Into traits for ergonomic conversion
 impl From<u32> for BrokerId {
