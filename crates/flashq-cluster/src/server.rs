@@ -4,7 +4,7 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::error::ClusterError;
 use crate::proto::{
-    cluster_server::Cluster, DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest,
+    cluster_server::Cluster, BrokerStatus, DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest,
     HeartbeatResponse, ReportPartitionStatusRequest, ReportPartitionStatusResponse,
 };
 use crate::traits::ClusterService;
@@ -147,6 +147,11 @@ mod tests {
                 port: 9092,
                 is_alive: true,
                 last_heartbeat: "2024-01-01T00:00:00Z".to_string(),
+                status: Some(BrokerStatus {
+                    is_alive: true,
+                    last_heartbeat: "2024-01-01T00:00:00Z".to_string(),
+                    is_draining: false,
+                }),
             }];
 
             let topics = vec![TopicAssignment {
@@ -175,8 +180,8 @@ mod tests {
             // Echo back a simple response
             Ok(HeartbeatResponse {
                 epoch_updates: vec![],
-                should_shutdown: false,
                 timestamp: "2024-01-01T00:00:00Z".to_string(),
+                directives: vec![],
             })
         }
 

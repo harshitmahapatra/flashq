@@ -11,7 +11,7 @@ use crate::{
     client::ClusterClient,
     metadata_store::MetadataStore,
     proto::{
-        BrokerInfo, DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse,
+        BrokerInfo, BrokerStatus, DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse,
         PartitionInfo, ReportPartitionStatusRequest, ReportPartitionStatusResponse,
         TopicAssignment,
     },
@@ -71,12 +71,18 @@ impl ClusterServiceImpl {
         let manifest = self.metadata_store.export_to_manifest()?;
 
         let brokers: Vec<BrokerInfo> = manifest.brokers.into_iter().map(|broker| {
+            let now = chrono::Utc::now().to_rfc3339();
             BrokerInfo {
                 broker_id: broker.id.into(),
                 host: broker.host,
                 port: broker.port as u32,
                 is_alive: true, // TODO: Implement broker liveness tracking
-                last_heartbeat: chrono::Utc::now().to_rfc3339(),
+                last_heartbeat: now.clone(),
+                status: Some(BrokerStatus {
+                    is_alive: true, // TODO: Implement broker liveness tracking
+                    last_heartbeat: now,
+                    is_draining: false, // TODO: Implement draining state tracking
+                }),
             }
         }).collect();
 
@@ -148,8 +154,8 @@ impl ClusterService for ClusterServiceImpl {
 
         Ok(HeartbeatResponse {
             epoch_updates,
-            should_shutdown: false, // TODO: Implement shutdown coordination
             timestamp: chrono::Utc::now().to_rfc3339(),
+            directives: Vec::new(), // TODO: Implement broker directives
         })
     }
 
@@ -223,7 +229,7 @@ mod tests {
 
         let response = service.handle_heartbeat(request).await.unwrap();
         assert_eq!(response.epoch_updates.len(), 0);
-        assert!(!response.should_shutdown);
+        assert_eq!(response.directives.len(), 0);
     }
 
     #[tokio::test]

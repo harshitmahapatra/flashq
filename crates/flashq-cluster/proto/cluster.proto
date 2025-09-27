@@ -7,9 +7,23 @@ package flashq.cluster;
 // Local Empty message to avoid external well-known type include for now
 message Empty {}
 
+// Directives that can be sent to brokers
+enum BrokerDirective {
+  NONE = 0;
+  SHUTDOWN = 1;
+  DRAIN = 2;
+  RESYNC = 3;
+}
+
 // ===========================
 // Broker and Cluster Information
 // ===========================
+
+message BrokerStatus {
+  bool is_alive = 1;
+  string last_heartbeat = 2; // RFC3339 timestamp
+  bool is_draining = 3;
+}
 
 message BrokerInfo {
   uint32 broker_id = 1;
@@ -17,6 +31,7 @@ message BrokerInfo {
   uint32 port = 3;
   bool is_alive = 4;
   string last_heartbeat = 5; // RFC3339 timestamp
+  BrokerStatus status = 6;
 }
 
 message PartitionInfo {
@@ -56,6 +71,8 @@ message PartitionHeartbeat {
   uint64 log_start_offset = 4;
   bool is_leader = 5;
   repeated uint32 current_in_sync_replicas = 6;
+  uint64 leader_epoch = 7;
+  optional uint32 leader_override = 8;
 }
 
 message HeartbeatRequest {
@@ -73,8 +90,8 @@ message PartitionEpochUpdate {
 
 message HeartbeatResponse {
   repeated PartitionEpochUpdate epoch_updates = 1;
-  bool should_shutdown = 2; // signal broker to gracefully shutdown
-  string timestamp = 3; // RFC3339
+  string timestamp = 2; // RFC3339
+  repeated BrokerDirective directives = 3;
 }
 
 // ===========================
