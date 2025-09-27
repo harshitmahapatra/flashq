@@ -9,6 +9,7 @@ pub mod error;
 pub mod manifest;
 pub mod metadata_store;
 pub mod server;
+pub mod service;
 pub mod traits;
 pub mod types;
 
@@ -25,9 +26,12 @@ pub use metadata_store::{InMemoryMetadataStore, MetadataBackend, MetadataStore};
 // Re-export cluster service traits
 pub use traits::{ClusterService, FlashQBroker};
 
-// Re-export gRPC server and client adapters
+// Re-export cluster server and client adapters
 pub use client::ClusterClient;
 pub use server::ClusterServer;
+
+// Re-export cluster service implementation
+pub use service::ClusterServiceImpl;
 
 // Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};

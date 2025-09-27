@@ -55,7 +55,7 @@ message PartitionHeartbeat {
   uint64 high_water_mark = 3;
   uint64 log_start_offset = 4;
   bool is_leader = 5;
-  repeated uint32 current_isr = 6;
+  repeated uint32 current_in_sync_replicas = 6;
 }
 
 message HeartbeatRequest {
