@@ -4,8 +4,8 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::error::ClusterError;
 use crate::proto::{
-    cluster_server::Cluster, DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest,
-    HeartbeatResponse, ReportPartitionStatusRequest, ReportPartitionStatusResponse,
+    DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse,
+    ReportPartitionStatusRequest, ReportPartitionStatusResponse, cluster_server::Cluster,
 };
 use crate::traits::ClusterService;
 

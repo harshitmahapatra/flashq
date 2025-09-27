@@ -259,7 +259,9 @@ impl MetadataStore for InMemoryMetadataStore {
         Ok(())
     }
 
-    fn list_brokers_with_status(&self) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError> {
+    fn list_brokers_with_status(
+        &self,
+    ) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError> {
         let state = self.state.read();
         let heartbeat_timeout = Duration::seconds(10); // 10 second timeout for testing
 
@@ -267,7 +269,8 @@ impl MetadataStore for InMemoryMetadataStore {
         for broker_id in state.brokers.keys() {
             let status = if let Some(runtime_status) = state.broker_runtime.get(broker_id) {
                 // Check if broker is alive based on heartbeat timeout
-                let _is_alive = Utc::now().signed_duration_since(runtime_status.last_heartbeat) < heartbeat_timeout;
+                let _is_alive = Utc::now().signed_duration_since(runtime_status.last_heartbeat)
+                    < heartbeat_timeout;
                 BrokerRuntimeStatus {
                     last_heartbeat: runtime_status.last_heartbeat,
                     is_draining: runtime_status.is_draining,
@@ -275,7 +278,7 @@ impl MetadataStore for InMemoryMetadataStore {
             } else {
                 // No heartbeat recorded yet - consider dead
                 BrokerRuntimeStatus {
-                    last_heartbeat: DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now()),
+                    last_heartbeat: DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now),
                     is_draining: false,
                 }
             };
@@ -916,7 +919,7 @@ mod tests {
         let broker_3 = brokers.iter().find(|(id, _)| *id == BrokerId(3)).unwrap();
         assert_eq!(
             broker_3.1.last_heartbeat,
-            DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now())
+            DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now)
         );
         assert!(!broker_3.1.is_draining);
     }
@@ -948,12 +951,8 @@ mod tests {
         let store = create_test_store();
 
         // Try to set leader to a broker not in replica set
-        let result = store.set_partition_leader(
-            "test-topic",
-            PartitionId::new(0),
-            BrokerId(999),
-            Epoch(6),
-        );
+        let result =
+            store.set_partition_leader("test-topic", PartitionId::new(0), BrokerId(999), Epoch(6));
         assert!(matches!(result, Err(ClusterError::InvalidReplica { .. })));
     }
 
@@ -962,12 +961,8 @@ mod tests {
         let store = create_test_store();
 
         // Try to set epoch backwards (current is 5, trying to set 4)
-        let result = store.set_partition_leader(
-            "test-topic",
-            PartitionId::new(0),
-            BrokerId(2),
-            Epoch(4),
-        );
+        let result =
+            store.set_partition_leader("test-topic", PartitionId::new(0), BrokerId(2), Epoch(4));
         assert!(matches!(result, Err(ClusterError::InvalidEpoch { .. })));
     }
 
@@ -1116,7 +1111,7 @@ mod tests {
         for (_, status) in brokers {
             assert_eq!(
                 status.last_heartbeat,
-                DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now())
+                DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now)
             );
             assert!(!status.is_draining);
         }

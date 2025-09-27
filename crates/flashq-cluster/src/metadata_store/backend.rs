@@ -3,9 +3,14 @@
 use crate::{
     ClusterError,
     manifest::types::ClusterManifest,
-    metadata_store::{memory::InMemoryMetadataStore, r#trait::MetadataStore},
+    metadata_store::{
+        file::FileMetadataStore, memory::InMemoryMetadataStore, r#trait::MetadataStore,
+    },
 };
-use std::sync::{Arc, RwLock};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
 /// Backend storage configuration for cluster metadata.
 #[derive(Debug)]
@@ -15,6 +20,13 @@ pub enum MetadataBackend {
     /// Fast but ephemeral - all metadata is lost on restart.
     /// Suitable for development, testing, and single-node deployments.
     Memory,
+
+    /// File-based storage backend.
+    ///
+    /// Persistent storage that survives restarts. Uses the same data directory
+    /// as the broker to avoid directory locking conflicts. Stores metadata in
+    /// a JSON file following the consumer group pattern.
+    File { data_dir: String },
 }
 
 impl MetadataBackend {
@@ -23,10 +35,21 @@ impl MetadataBackend {
         MetadataBackend::Memory
     }
 
+    /// Create a new file-based metadata backend.
+    pub fn new_file<P: AsRef<Path>>(data_dir: P) -> Self {
+        MetadataBackend::File {
+            data_dir: data_dir.as_ref().to_string_lossy().to_string(),
+        }
+    }
+
     /// Create a metadata store instance from this backend configuration.
     pub fn create(&self) -> Result<Arc<RwLock<dyn MetadataStore + Send + Sync>>, ClusterError> {
         match self {
             MetadataBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryMetadataStore::new()))),
+            MetadataBackend::File { data_dir } => {
+                let store = FileMetadataStore::new(data_dir)?;
+                Ok(Arc::new(RwLock::new(store)))
+            }
         }
     }
 
@@ -38,6 +61,10 @@ impl MetadataBackend {
         match self {
             MetadataBackend::Memory => {
                 let store = InMemoryMetadataStore::new_with_manifest(manifest)?;
+                Ok(Arc::new(RwLock::new(store)))
+            }
+            MetadataBackend::File { data_dir } => {
+                let store = FileMetadataStore::new_with_manifest(data_dir, manifest)?;
                 Ok(Arc::new(RwLock::new(store)))
             }
         }

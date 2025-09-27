@@ -1,4 +1,4 @@
-//! Integration tests for cluster manifest loading and parsing.
+//! Integration tests for metadata_store manifest loading and parsing.
 
 use flashq_cluster::manifest::{
     BrokerSpec, ClusterManifest, ManifestLoader, PartitionAssignment, TopicAssignment,

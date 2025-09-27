@@ -1,15 +1,15 @@
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Status};
 
 use crate::error::ClusterError;
 use crate::proto::{
-    cluster_client::ClusterClient as TonicClusterClient, DescribeClusterRequest,
-    DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse, ReportPartitionStatusRequest,
-    ReportPartitionStatusResponse,
+    DescribeClusterRequest, DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse,
+    ReportPartitionStatusRequest, ReportPartitionStatusResponse,
+    cluster_client::ClusterClient as TonicClusterClient,
 };
 
 /// Client for connecting to cluster services.
@@ -32,10 +32,7 @@ impl ClusterClient {
     }
 
     /// Connect to a cluster service with custom connection timeout.
-    pub async fn connect_with_timeout<D>(
-        dst: D,
-        timeout: Duration,
-    ) -> Result<Self, ClusterError>
+    pub async fn connect_with_timeout<D>(dst: D, timeout: Duration) -> Result<Self, ClusterError>
     where
         D: TryInto<Endpoint>,
         D::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -44,10 +41,7 @@ impl ClusterClient {
     }
 
     /// Internal helper method to reduce duplication between connect methods.
-    async fn connect_with_endpoint_config<D, F>(
-        dst: D,
-        config_fn: F,
-    ) -> Result<Self, ClusterError>
+    async fn connect_with_endpoint_config<D, F>(dst: D, config_fn: F) -> Result<Self, ClusterError>
     where
         D: TryInto<Endpoint>,
         D::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -158,7 +152,9 @@ fn status_to_cluster_error(status: Status) -> ClusterError {
         tonic::Code::InvalidArgument => {
             ClusterError::from_transport_error(status.message(), "Invalid argument")
         }
-        tonic::Code::Internal => ClusterError::from_transport_error(status.message(), "Internal error"),
+        tonic::Code::Internal => {
+            ClusterError::from_transport_error(status.message(), "Internal error")
+        }
         tonic::Code::Unavailable => {
             ClusterError::from_transport_error(status.message(), "Service unavailable")
         }

@@ -3,18 +3,18 @@
 //! This module provides the main implementation of the `ClusterService` trait,
 //! integrating the metadata store with cluster client functionality.
 
+use async_trait::async_trait;
 use std::collections::HashSet;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 use crate::{
     ClusterError,
     client::ClusterClient,
     metadata_store::MetadataStore,
     proto::{
-        BrokerDirective, BrokerInfo, BrokerStatus, DescribeClusterResponse, HeartbeatRequest, HeartbeatResponse,
-        PartitionEpochUpdate, PartitionInfo, ReportPartitionStatusRequest, ReportPartitionStatusResponse,
-        TopicAssignment,
+        BrokerDirective, BrokerInfo, BrokerStatus, DescribeClusterResponse, HeartbeatRequest,
+        HeartbeatResponse, PartitionEpochUpdate, PartitionInfo, ReportPartitionStatusRequest,
+        ReportPartitionStatusResponse, TopicAssignment,
     },
     traits::ClusterService,
     types::*,
@@ -66,71 +66,84 @@ impl ClusterServiceImpl {
     pub fn cluster_client(&self) -> Option<&ClusterClient> {
         self.cluster_client.as_ref()
     }
-
 }
 
 #[async_trait]
 impl ClusterService for ClusterServiceImpl {
     async fn describe_cluster(&self) -> Result<DescribeClusterResponse, ClusterError> {
         let manifest = self.metadata_store.export_to_manifest()?;
-        
+
         // Get broker runtime status information
         let broker_statuses = self.metadata_store.list_brokers_with_status()?;
-        let broker_status_map: std::collections::HashMap<BrokerId, BrokerRuntimeStatus> = 
+        let broker_status_map: std::collections::HashMap<BrokerId, BrokerRuntimeStatus> =
             broker_statuses.into_iter().collect();
 
-        let brokers: Vec<BrokerInfo> = manifest.brokers.into_iter().map(|broker| {
-            let broker_id = broker.id;
-            let status = broker_status_map.get(&broker_id);
-            
-            let (is_alive, last_heartbeat, is_draining) = if let Some(runtime_status) = status {
-                // Consider a broker alive if we have recent heartbeat data
-                // This logic can be enhanced with configurable heartbeat timeout
-                let now = chrono::Utc::now();
-                let heartbeat_age = now.signed_duration_since(runtime_status.last_heartbeat);
-                let is_alive = heartbeat_age.num_seconds() < 30; // 30 second timeout
-                
-                (
-                    is_alive,
-                    runtime_status.last_heartbeat.to_rfc3339(),
-                    runtime_status.is_draining,
-                )
-            } else {
-                // Fallback for brokers without runtime status
-                (false, chrono::Utc::now().to_rfc3339(), false)
-            };
+        let brokers: Vec<BrokerInfo> = manifest
+            .brokers
+            .into_iter()
+            .map(|broker| {
+                let broker_id = broker.id;
+                let status = broker_status_map.get(&broker_id);
 
-            BrokerInfo {
-                broker_id: broker_id.into(),
-                host: broker.host,
-                port: broker.port as u32,
-                is_alive,
-                last_heartbeat: last_heartbeat.clone(),
-                status: Some(BrokerStatus {
-                    is_alive,
-                    last_heartbeat,
-                    is_draining,
-                }),
-            }
-        }).collect();
+                let (is_alive, last_heartbeat, is_draining) = if let Some(runtime_status) = status {
+                    // Consider a broker alive if we have recent heartbeat data
+                    // This logic can be enhanced with configurable heartbeat timeout
+                    let now = chrono::Utc::now();
+                    let heartbeat_age = now.signed_duration_since(runtime_status.last_heartbeat);
+                    let is_alive = heartbeat_age.num_seconds() < 30; // 30 second timeout
 
-        let topics: Vec<TopicAssignment> = manifest.topics.into_iter().map(|(topic_name, topic_assignment)| {
-            let partitions: Vec<PartitionInfo> = topic_assignment.partitions.into_iter().map(|partition| {
-                PartitionInfo {
-                    topic: topic_name.clone(),
-                    partition: partition.id.into(),
-                    leader: partition.leader.into(),
-                    replicas: partition.replicas.into_iter().map(|id| id.into()).collect(),
-                    in_sync_replicas: partition.in_sync_replicas.into_iter().map(|id| id.into()).collect(),
-                    epoch: partition.epoch.into(),
+                    (
+                        is_alive,
+                        runtime_status.last_heartbeat.to_rfc3339(),
+                        runtime_status.is_draining,
+                    )
+                } else {
+                    // Fallback for brokers without runtime status
+                    (false, chrono::Utc::now().to_rfc3339(), false)
+                };
+
+                BrokerInfo {
+                    broker_id: broker_id.into(),
+                    host: broker.host,
+                    port: broker.port as u32,
+                    is_alive,
+                    last_heartbeat: last_heartbeat.clone(),
+                    status: Some(BrokerStatus {
+                        is_alive,
+                        last_heartbeat,
+                        is_draining,
+                    }),
                 }
-            }).collect();
+            })
+            .collect();
 
-            TopicAssignment {
-                topic: topic_name,
-                partitions,
-            }
-        }).collect();
+        let topics: Vec<TopicAssignment> = manifest
+            .topics
+            .into_iter()
+            .map(|(topic_name, topic_assignment)| {
+                let partitions: Vec<PartitionInfo> = topic_assignment
+                    .partitions
+                    .into_iter()
+                    .map(|partition| PartitionInfo {
+                        topic: topic_name.clone(),
+                        partition: partition.id.into(),
+                        leader: partition.leader.into(),
+                        replicas: partition.replicas.into_iter().map(|id| id.into()).collect(),
+                        in_sync_replicas: partition
+                            .in_sync_replicas
+                            .into_iter()
+                            .map(|id| id.into())
+                            .collect(),
+                        epoch: partition.epoch.into(),
+                    })
+                    .collect();
+
+                TopicAssignment {
+                    topic: topic_name,
+                    partitions,
+                }
+            })
+            .collect();
 
         Ok(DescribeClusterResponse {
             brokers,
@@ -144,14 +157,15 @@ impl ClusterService for ClusterServiceImpl {
         request: HeartbeatRequest,
     ) -> Result<HeartbeatResponse, ClusterError> {
         let broker_id = BrokerId::from(request.broker_id);
-        
+
         // Parse timestamp and record broker heartbeat
         let timestamp = chrono::DateTime::parse_from_rfc3339(&request.timestamp)
             .map_err(|e| ClusterError::from_parse_error(e, "parsing heartbeat timestamp"))?
             .with_timezone(&chrono::Utc);
-        
+
         // Record broker heartbeat (assume not draining unless explicitly specified)
-        self.metadata_store.record_broker_heartbeat(broker_id, timestamp, false)?;
+        self.metadata_store
+            .record_broker_heartbeat(broker_id, timestamp, false)?;
 
         let mut epoch_updates = Vec::new();
         let mut directives = Vec::new();
@@ -163,31 +177,32 @@ impl ClusterService for ClusterServiceImpl {
             let reported_epoch = Epoch::from(partition_hb.leader_epoch);
 
             // Get current epoch and validate
-            if let Ok(current_epoch) = self.metadata_store.get_partition_epoch(topic, partition_id) {
+            if let Ok(current_epoch) = self.metadata_store.get_partition_epoch(topic, partition_id)
+            {
                 // Check for epoch staleness - reject if reported epoch is behind
                 if reported_epoch < current_epoch {
                     // Stale partition data - emit RESYNC directive
                     directives.push(BrokerDirective::Resync as i32);
                     continue;
                 }
-                
+
                 // Check if epoch has advanced and needs update
                 if reported_epoch > current_epoch {
                     // Try to advance the epoch using compare-and-set
                     if self.metadata_store.compare_and_set_epoch(
-                        topic, 
-                        partition_id, 
-                        current_epoch, 
-                        reported_epoch
+                        topic,
+                        partition_id,
+                        current_epoch,
+                        reported_epoch,
                     )? {
                         // Epoch successfully updated
                         epoch_updates.push(PartitionEpochUpdate {
                             topic: topic.clone(),
                             partition: partition_id.into(),
                             new_epoch: reported_epoch.into(),
-                            new_leader: if partition_hb.is_leader { 
-                                broker_id.into() 
-                            } else { 
+                            new_leader: if partition_hb.is_leader {
+                                broker_id.into()
+                            } else {
                                 0 // No leader change indicated
                             },
                         });
@@ -208,8 +223,12 @@ impl ClusterService for ClusterServiceImpl {
             )?;
 
             // Update in_sync_replicas based on current_in_sync_replicas list from heartbeat
-            if let Ok(current_isr) = self.metadata_store.get_in_sync_replicas(topic, partition_id) {
-                let reported_isr: HashSet<BrokerId> = partition_hb.current_in_sync_replicas
+            if let Ok(current_isr) = self
+                .metadata_store
+                .get_in_sync_replicas(topic, partition_id)
+            {
+                let reported_isr: HashSet<BrokerId> = partition_hb
+                    .current_in_sync_replicas
                     .iter()
                     .map(|&id| BrokerId::from(id))
                     .collect();
@@ -256,16 +275,14 @@ impl ClusterService for ClusterServiceImpl {
         let new_leader_id = BrokerId::from(request.leader);
 
         // Get current partition epoch for CAS operation
-        let current_epoch = self.metadata_store.get_partition_epoch(topic, partition_id)?;
+        let current_epoch = self
+            .metadata_store
+            .get_partition_epoch(topic, partition_id)?;
         let new_epoch = Epoch::from(current_epoch.0 + 1);
 
         // Update partition leader using the new epoch
-        self.metadata_store.set_partition_leader(
-            topic,
-            partition_id,
-            new_leader_id,
-            new_epoch,
-        )?;
+        self.metadata_store
+            .set_partition_leader(topic, partition_id, new_leader_id, new_epoch)?;
 
         // Try to persist the new epoch using compare-and-set to ensure atomicity
         let epoch_updated = self.metadata_store.compare_and_set_epoch(
@@ -284,25 +301,40 @@ impl ClusterService for ClusterServiceImpl {
         }
 
         // Update in_sync_replicas based on the report
-        let in_sync_replica_broker_ids: Vec<BrokerId> = request.in_sync_replicas.into_iter()
+        let in_sync_replica_broker_ids: Vec<BrokerId> = request
+            .in_sync_replicas
+            .into_iter()
             .map(BrokerId::from)
             .collect();
 
         // Get current ISR to determine which replicas to add/remove
-        if let Ok(current_isr) = self.metadata_store.get_in_sync_replicas(topic, partition_id) {
+        if let Ok(current_isr) = self
+            .metadata_store
+            .get_in_sync_replicas(topic, partition_id)
+        {
             let new_isr: HashSet<BrokerId> = in_sync_replica_broker_ids.into_iter().collect();
 
             // Add newly in-sync replicas
             for &broker_id in &new_isr {
                 if !current_isr.contains(&broker_id) {
-                    self.metadata_store.update_in_sync_replica(topic, partition_id, broker_id, true)?;
+                    self.metadata_store.update_in_sync_replica(
+                        topic,
+                        partition_id,
+                        broker_id,
+                        true,
+                    )?;
                 }
             }
 
             // Remove out-of-sync replicas
             for &broker_id in &current_isr {
                 if !new_isr.contains(&broker_id) {
-                    self.metadata_store.update_in_sync_replica(topic, partition_id, broker_id, false)?;
+                    self.metadata_store.update_in_sync_replica(
+                        topic,
+                        partition_id,
+                        broker_id,
+                        false,
+                    )?;
                 }
             }
         }
@@ -329,8 +361,8 @@ impl ClusterService for ClusterServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::{BrokerSpec, ClusterManifest};
     use crate::metadata_store::InMemoryMetadataStore;
-    use crate::manifest::{ClusterManifest, BrokerSpec};
 
     fn create_test_service() -> ClusterServiceImpl {
         let metadata_store = Arc::new(InMemoryMetadataStore::new());
@@ -360,7 +392,10 @@ mod tests {
             }],
             topics: std::collections::HashMap::new(),
         };
-        service.metadata_store().load_from_manifest(manifest).unwrap();
+        service
+            .metadata_store()
+            .load_from_manifest(manifest)
+            .unwrap();
 
         let request = HeartbeatRequest {
             broker_id: 1,

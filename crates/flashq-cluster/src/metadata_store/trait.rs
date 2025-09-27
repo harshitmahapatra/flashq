@@ -75,7 +75,9 @@ pub trait MetadataStore: Send + Sync {
 
     /// List all brokers with their runtime status information.
     /// Returns broker ID and runtime status pairs.
-    fn list_brokers_with_status(&self) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError>;
+    fn list_brokers_with_status(
+        &self,
+    ) -> Result<Vec<(BrokerId, BrokerRuntimeStatus)>, ClusterError>;
 
     // ===========================
     // Enhanced Partition Operations
