@@ -5,53 +5,36 @@ use std::fmt;
 /// Main error type for cluster metadata operations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClusterError {
-    /// Broker not found in cluster metadata.
     BrokerNotFound {
-        /// The broker ID that was not found.
         broker_id: u32,
     },
-    /// Topic not found in cluster metadata.
     TopicNotFound {
-        /// The topic name that was not found.
         topic: String,
     },
-    /// Partition not found for the given topic.
     PartitionNotFound {
-        /// The topic name.
         topic: String,
-        /// The partition ID that was not found.
         partition_id: u32,
     },
     /// Invalid manifest structure or data.
     InvalidManifest {
-        /// Context about what was invalid.
         context: String,
-        /// The underlying error message.
         reason: String,
     },
     /// Manifest file I/O error.
     ManifestIo {
-        /// Context about the operation.
         context: String,
-        /// The underlying error message.
         reason: String,
     },
     /// gRPC transport error.
     Transport {
-        /// Context about the operation.
         context: String,
-        /// The underlying error message.
         reason: String,
     },
     /// Invalid leader epoch (must be monotonically increasing).
     InvalidEpoch {
-        /// The topic name.
         topic: String,
-        /// The partition ID.
         partition_id: u32,
-        /// The current epoch.
         current_epoch: u64,
-        /// The attempted new epoch.
         new_epoch: u64,
     },
 }
@@ -96,7 +79,6 @@ impl fmt::Display for ClusterError {
 impl std::error::Error for ClusterError {}
 
 impl ClusterError {
-    /// Check if the error represents a "not found" condition.
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
@@ -106,7 +88,6 @@ impl ClusterError {
         )
     }
 
-    /// Check if the error represents a client-side error.
     pub fn is_client_error(&self) -> bool {
         matches!(
             self,
@@ -118,7 +99,6 @@ impl ClusterError {
         )
     }
 
-    /// Create a manifest I/O error from an std::io::Error.
     pub fn from_io_error(e: std::io::Error, context: &str) -> Self {
         ClusterError::ManifestIo {
             context: context.to_string(),
@@ -126,7 +106,6 @@ impl ClusterError {
         }
     }
 
-    /// Create a manifest parsing error.
     pub fn from_parse_error(e: impl std::fmt::Display, context: &str) -> Self {
         ClusterError::InvalidManifest {
             context: context.to_string(),
@@ -134,7 +113,6 @@ impl ClusterError {
         }
     }
 
-    /// Create a transport error from a tonic error.
     pub fn from_transport_error(e: impl std::fmt::Display, context: &str) -> Self {
         ClusterError::Transport {
             context: context.to_string(),

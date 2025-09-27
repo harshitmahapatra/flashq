@@ -10,7 +10,9 @@ pub use flashq::storage::PartitionId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BrokerId(pub u32);
 
-/// Leader epoch for a partition.
+/// Monotonically increasing version number that tracks leadership changes for a partition.
+/// Higher epochs indicate more recent leadership assignments and are used to prevent
+/// split-brain scenarios in distributed cluster management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(pub u64);
 
@@ -40,7 +42,7 @@ impl From<Epoch> for u64 {
     }
 }
 
-// Implement Display for better formatting
+
 impl fmt::Display for BrokerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "broker-{}", self.0)
