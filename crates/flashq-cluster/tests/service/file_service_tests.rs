@@ -6,11 +6,11 @@
 
 use chrono::Utc;
 use flashq_cluster::{
+    ClusterService,
     metadata_store::FileMetadataStore,
     proto::{HeartbeatRequest, PartitionHeartbeat, ReportPartitionStatusRequest},
     service::ClusterServiceImpl,
     types::*,
-    ClusterService,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -34,7 +34,11 @@ async fn test_describe_cluster_with_file_store() {
     assert_eq!(broker_1.port, 6001);
 
     // Verify topic information
-    let topic = response.topics.iter().find(|t| t.topic == "test-topic").unwrap();
+    let topic = response
+        .topics
+        .iter()
+        .find(|t| t.topic == "test-topic")
+        .unwrap();
     assert_eq!(topic.partitions.len(), 2);
 }
 
@@ -107,7 +111,11 @@ async fn test_report_partition_status_with_file_persistence() {
     );
 
     let describe_response = service2.describe_cluster().await.unwrap();
-    let topic = describe_response.topics.iter().find(|t| t.topic == "test-topic").unwrap();
+    let topic = describe_response
+        .topics
+        .iter()
+        .find(|t| t.topic == "test-topic")
+        .unwrap();
     let partition = topic.partitions.iter().find(|p| p.partition == 0).unwrap();
 
     assert_eq!(partition.leader, 1);
@@ -200,7 +208,11 @@ async fn test_service_restart_preserves_cluster_state() {
         assert_eq!(describe_response.controller_id, 1);
 
         // Verify partition state preserved
-        let topic = describe_response.topics.iter().find(|t| t.topic == "test-topic").unwrap();
+        let topic = describe_response
+            .topics
+            .iter()
+            .find(|t| t.topic == "test-topic")
+            .unwrap();
         let partition = topic.partitions.iter().find(|p| p.partition == 0).unwrap();
 
         assert_eq!(partition.leader, 1);
@@ -212,7 +224,11 @@ async fn test_service_restart_preserves_cluster_state() {
 #[tokio::test]
 async fn test_concurrent_operations_with_file_persistence() {
     let temp_dir = TempDir::new().unwrap();
-    let service = Arc::new(create_test_service_with_file_store(&temp_dir, BrokerId(1), None));
+    let service = Arc::new(create_test_service_with_file_store(
+        &temp_dir,
+        BrokerId(1),
+        None,
+    ));
 
     // Spawn concurrent heartbeat tasks
     let mut handles = vec![];
@@ -259,7 +275,11 @@ async fn test_concurrent_operations_with_file_persistence() {
     assert_eq!(describe_response.topics.len(), 1);
 
     // All operations should have been properly serialized and persisted
-    let topic = describe_response.topics.iter().find(|t| t.topic == "test-topic").unwrap();
+    let topic = describe_response
+        .topics
+        .iter()
+        .find(|t| t.topic == "test-topic")
+        .unwrap();
     let partition = topic.partitions.iter().find(|p| p.partition == 0).unwrap();
 
     // Epoch should be consistent

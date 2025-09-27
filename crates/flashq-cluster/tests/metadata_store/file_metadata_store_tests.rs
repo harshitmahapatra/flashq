@@ -9,7 +9,7 @@ use flashq_cluster::{
 use std::collections::HashMap;
 use tempfile::TempDir;
 
-use crate::test_utilities::{create_test_manifest, TestManifestConfig};
+use crate::test_utilities::{TestManifestConfig, create_test_manifest};
 
 fn create_test_store() -> (FileMetadataStore, TempDir) {
     let temp_dir = TempDir::new().unwrap();
