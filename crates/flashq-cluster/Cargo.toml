@@ -8,16 +8,18 @@ license.workspace = true
 flashq = { path = "../flashq" }
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml = "0.9"
+serde_yaml.workspace = true
 tonic.workspace = true
 prost.workspace = true
 parking_lot.workspace = true
 log.workspace = true
 async-trait = "0.1"
+tokio.workspace = true
+tokio-stream.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
 protoc-bin-vendored.workspace = true
 
 [dev-dependencies]
-tempfile = "3.13"
+tempfile.workspace = true

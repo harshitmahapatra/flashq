@@ -33,3 +33,9 @@ tonic = { version = "0.12", features = ["transport"] }
 prost = "0.13"
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
+tokio = { version = "1.47.1", features = ["full"] }
+tokio-stream = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+uuid = { version = "1.18.0", features = ["v4"] }
+tempfile = "3.13"
+serde_yaml = "0.9"
