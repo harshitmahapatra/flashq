@@ -4,52 +4,35 @@ use crate::{types::*, ClusterError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Broker specification in the cluster manifest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrokerSpec {
-    /// Unique broker identifier.
     pub id: BrokerId,
-    /// Hostname or IP address.
     pub host: String,
-    /// Port number.
     pub port: u16,
 }
 
-/// Assignment of a single partition within a topic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartitionAssignment {
-    /// Partition identifier.
     pub id: PartitionId,
-    /// Current leader broker.
     pub leader: BrokerId,
-    /// All replica brokers.
     pub replicas: Vec<BrokerId>,
-    /// In-sync replica brokers.
     pub in_sync_replicas: Vec<BrokerId>,
-    /// Current leader epoch.
     pub epoch: Epoch,
 }
 
-/// Topic assignment configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopicAssignment {
-    /// Partition assignments for this topic.
     pub partitions: Vec<PartitionAssignment>,
-    /// Replication factor for new partitions.
     pub replication_factor: u8,
 }
 
-/// Root cluster manifest structure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClusterManifest {
-    /// All brokers in the cluster.
     pub brokers: Vec<BrokerSpec>,
-    /// Topic assignments by topic name.
     pub topics: HashMap<String, TopicAssignment>,
 }
 
 impl ClusterManifest {
-    /// Create a new empty cluster manifest.
     pub fn new() -> Self {
         Self {
             brokers: Vec::new(),
@@ -57,7 +40,6 @@ impl ClusterManifest {
         }
     }
 
-    /// Get broker by ID.
     pub fn get_broker(&self, broker_id: BrokerId) -> Result<&BrokerSpec, ClusterError> {
         self.brokers
             .iter()
@@ -67,14 +49,12 @@ impl ClusterManifest {
             })
     }
 
-    /// Get topic assignment.
     pub fn get_topic(&self, topic: &str) -> Result<&TopicAssignment, ClusterError> {
         self.topics.get(topic).ok_or(ClusterError::TopicNotFound {
             topic: topic.to_string(),
         })
     }
 
-    /// Get partition assignment for a specific topic and partition.
     pub fn get_partition(
         &self,
         topic: &str,
