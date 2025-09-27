@@ -9,55 +9,14 @@ use flashq_cluster::{
 use std::collections::HashMap;
 use tempfile::TempDir;
 
-fn create_test_manifest() -> ClusterManifest {
-    let brokers = vec![
-        BrokerSpec {
-            id: BrokerId(1),
-            host: "127.0.0.1".to_string(),
-            port: 6001,
-        },
-        BrokerSpec {
-            id: BrokerId(2),
-            host: "127.0.0.1".to_string(),
-            port: 6002,
-        },
-        BrokerSpec {
-            id: BrokerId(3),
-            host: "127.0.0.1".to_string(),
-            port: 6003,
-        },
-    ];
-
-    let mut topics = HashMap::new();
-    topics.insert(
-        "test-topic".to_string(),
-        TopicAssignment {
-            replication_factor: 3,
-            partitions: vec![
-                PartitionAssignment {
-                    id: PartitionId::new(0),
-                    leader: BrokerId(1),
-                    replicas: vec![BrokerId(1), BrokerId(2), BrokerId(3)],
-                    in_sync_replicas: vec![BrokerId(1), BrokerId(2), BrokerId(3)],
-                    epoch: Epoch(5),
-                },
-                PartitionAssignment {
-                    id: PartitionId::new(1),
-                    leader: BrokerId(2),
-                    replicas: vec![BrokerId(1), BrokerId(2), BrokerId(3)],
-                    in_sync_replicas: vec![BrokerId(2), BrokerId(3)],
-                    epoch: Epoch(2),
-                },
-            ],
-        },
-    );
-
-    ClusterManifest { brokers, topics }
-}
+use crate::test_utilities::{create_test_manifest, TestManifestConfig};
 
 fn create_test_store() -> (FileMetadataStore, TempDir) {
     let temp_dir = TempDir::new().unwrap();
-    let manifest = create_test_manifest();
+    let manifest = create_test_manifest(Some(TestManifestConfig {
+        partition_epochs: Some(vec![5, 2]), // For metadata store tests
+        ..Default::default()
+    }));
     let store = FileMetadataStore::new_with_manifest(temp_dir.path(), manifest).unwrap();
     (store, temp_dir)
 }
@@ -89,7 +48,10 @@ fn test_file_store_with_manifest() {
 #[test]
 fn test_persistence_across_restarts() {
     let temp_dir = TempDir::new().unwrap();
-    let manifest = create_test_manifest();
+    let manifest = create_test_manifest(Some(TestManifestConfig {
+        partition_epochs: Some(vec![5, 2]), // For metadata store tests
+        ..Default::default()
+    }));
 
     // Create store and load manifest
     {
@@ -378,7 +340,7 @@ fn test_file_permissions() {
 #[test]
 fn test_runtime_state_persistence() {
     let temp_dir = TempDir::new().unwrap();
-    let manifest = create_test_manifest();
+    let manifest = create_test_manifest(None);
     let now = Utc::now();
 
     // Create store and set up runtime state
