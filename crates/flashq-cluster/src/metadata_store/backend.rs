@@ -7,10 +7,7 @@ use crate::{
         file::FileMetadataStore, memory::InMemoryMetadataStore, r#trait::MetadataStore,
     },
 };
-use std::{
-    path::Path,
-    sync::{Arc, RwLock},
-};
+use std::{path::Path, sync::Arc};
 
 /// Backend storage configuration for cluster metadata.
 #[derive(Debug)]
@@ -43,12 +40,12 @@ impl MetadataBackend {
     }
 
     /// Create a metadata store instance from this backend configuration.
-    pub fn create(&self) -> Result<Arc<RwLock<dyn MetadataStore + Send + Sync>>, ClusterError> {
+    pub fn create(&self) -> Result<Arc<dyn MetadataStore>, ClusterError> {
         match self {
-            MetadataBackend::Memory => Ok(Arc::new(RwLock::new(InMemoryMetadataStore::new()))),
+            MetadataBackend::Memory => Ok(Arc::new(InMemoryMetadataStore::new())),
             MetadataBackend::File { data_dir } => {
                 let store = FileMetadataStore::new(data_dir)?;
-                Ok(Arc::new(RwLock::new(store)))
+                Ok(Arc::new(store))
             }
         }
     }
@@ -57,15 +54,15 @@ impl MetadataBackend {
     pub fn create_with_manifest(
         &self,
         manifest: ClusterManifest,
-    ) -> Result<Arc<RwLock<dyn MetadataStore + Send + Sync>>, ClusterError> {
+    ) -> Result<Arc<dyn MetadataStore>, ClusterError> {
         match self {
             MetadataBackend::Memory => {
                 let store = InMemoryMetadataStore::new_with_manifest(manifest)?;
-                Ok(Arc::new(RwLock::new(store)))
+                Ok(Arc::new(store))
             }
             MetadataBackend::File { data_dir } => {
                 let store = FileMetadataStore::new_with_manifest(data_dir, manifest)?;
-                Ok(Arc::new(RwLock::new(store)))
+                Ok(Arc::new(store))
             }
         }
     }
@@ -124,8 +121,7 @@ mod tests {
         let store = backend.create().unwrap();
 
         // Should be able to access the store
-        let store_guard = store.read().unwrap();
-        let manifest = store_guard.export_to_manifest().unwrap();
+        let manifest = store.export_to_manifest().unwrap();
         assert!(manifest.brokers.is_empty());
         assert!(manifest.topics.is_empty());
     }
@@ -136,8 +132,7 @@ mod tests {
         let backend = MetadataBackend::new_memory();
         let store = backend.create_with_manifest(manifest.clone()).unwrap();
 
-        let store_guard = store.read().unwrap();
-        let exported_manifest = store_guard.export_to_manifest().unwrap();
+        let exported_manifest = store.export_to_manifest().unwrap();
 
         assert_eq!(exported_manifest.brokers.len(), 2);
         assert_eq!(exported_manifest.topics.len(), 1);

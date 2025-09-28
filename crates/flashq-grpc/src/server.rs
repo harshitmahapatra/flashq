@@ -460,6 +460,7 @@ impl Admin for FlashqGrpcService {
 pub async fn serve(
     addr: SocketAddr,
     core: Arc<flashq_cluster::FlashQ>,
+    cluster_service: Arc<flashq_cluster::service::ClusterServiceImpl>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let svc = FlashqGrpcService::new(core);
     tonic::transport::Server::builder()
@@ -471,6 +472,9 @@ pub async fn serve(
             svc.clone(),
         ))
         .add_service(crate::flashq::v1::admin_server::AdminServer::new(svc))
+        .add_service(crate::ClusterServer::new(
+            flashq_cluster::ClusterServer::new(cluster_service),
+        ))
         .serve(addr)
         .await?;
     Ok(())
