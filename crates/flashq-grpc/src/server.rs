@@ -455,6 +455,101 @@ impl Admin for FlashqGrpcService {
         Ok(Response::new(Empty {}))
     }
 }
+// FlashQBroker trait implementation
+#[async_trait::async_trait]
+impl flashq_cluster::FlashQBroker for FlashqGrpcService {
+    async fn get_high_water_mark(
+        &self,
+        topic: &str,
+        partition: flashq_cluster::types::PartitionId,
+    ) -> Result<u64, flashq_cluster::ClusterError> {
+        // For now, FlashQ only supports single partition (partition 0)
+        if partition.0 != 0 {
+            return Err(flashq_cluster::ClusterError::PartitionNotFound {
+                topic: topic.to_string(),
+                partition_id: partition.0,
+            });
+        }
+
+        Ok(self.core.get_high_water_mark(topic))
+    }
+
+    async fn get_log_start_offset(
+        &self,
+        topic: &str,
+        partition: flashq_cluster::types::PartitionId,
+    ) -> Result<u64, flashq_cluster::ClusterError> {
+        // For now, FlashQ only supports single partition (partition 0)
+        if partition.0 != 0 {
+            return Err(flashq_cluster::ClusterError::PartitionNotFound {
+                topic: topic.to_string(),
+                partition_id: partition.0,
+            });
+        }
+
+        // FlashQ currently starts at offset 0 for all topics
+        Ok(0)
+    }
+
+    async fn is_partition_leader(
+        &self,
+        _topic: &str,
+        partition: flashq_cluster::types::PartitionId,
+    ) -> Result<bool, flashq_cluster::ClusterError> {
+        // For now, FlashQ only supports single partition (partition 0)
+        if partition.0 != 0 {
+            return Err(flashq_cluster::ClusterError::PartitionNotFound {
+                topic: _topic.to_string(),
+                partition_id: partition.0,
+            });
+        }
+
+        // In standalone mode, this broker is always the leader
+        // TODO: Implement proper leadership logic when cluster mode is fully supported
+        Ok(true)
+    }
+
+    async fn get_assigned_partitions(
+        &self,
+    ) -> Result<Vec<(String, flashq_cluster::types::PartitionId)>, flashq_cluster::ClusterError>
+    {
+        let topics = self.core.get_topics();
+        let mut partitions = Vec::new();
+
+        for topic in topics {
+            // For now, FlashQ only supports single partition (partition 0) per topic
+            partitions.push((topic, flashq_cluster::types::PartitionId(0)));
+        }
+
+        Ok(partitions)
+    }
+
+    async fn acknowledge_replication(
+        &self,
+        topic: &str,
+        partition: flashq_cluster::types::PartitionId,
+        _offset: u64,
+    ) -> Result<(), flashq_cluster::ClusterError> {
+        // For now, FlashQ only supports single partition (partition 0)
+        if partition.0 != 0 {
+            return Err(flashq_cluster::ClusterError::PartitionNotFound {
+                topic: topic.to_string(),
+                partition_id: partition.0,
+            });
+        }
+
+        // TODO: Implement replication acknowledgment logic
+        // For now, we'll just return success since FlashQ doesn't have replication yet
+        Ok(())
+    }
+
+    async fn initiate_shutdown(&self) -> Result<(), flashq_cluster::ClusterError> {
+        // TODO: Implement graceful shutdown logic
+        // This should signal the broker to stop accepting new requests and drain existing ones
+        tracing::info!("Graceful shutdown initiated");
+        Ok(())
+    }
+}
 
 /// Run a gRPC server with the FlashQ services on the given address.
 pub async fn serve(

@@ -40,3 +40,4 @@ clap = { version = "4.5", features = ["derive"] }
 uuid = { version = "1.18.0", features = ["v4"] }
 tempfile = "3.13"
 serde_yaml = "0.9"
+async-trait = "0.1"

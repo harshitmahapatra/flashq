@@ -20,6 +20,15 @@ use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 
+/// Partition metadata: (high_water_mark, log_start_offset, is_leader)
+type PartitionMetadata = (u64, u64, bool);
+
+/// Partition key: (topic, partition_id)
+type PartitionKey = (String, PartitionId);
+
+/// Collection of partition assignments for a broker
+type PartitionMap = HashMap<PartitionKey, PartitionMetadata>;
+
 /// Mock FlashQ broker for testing cluster service integration.
 ///
 /// This mock implementation allows tests to simulate broker behavior
@@ -27,9 +36,16 @@ use tonic::transport::Server;
 #[derive(Debug)]
 pub struct MockFlashQBroker {
     /// Partitions assigned to this broker: (topic, partition_id) -> (high_water_mark, log_start_offset, is_leader)
-    pub partitions: Mutex<HashMap<(String, PartitionId), (u64, u64, bool)>>,
+    pub partitions: Mutex<PartitionMap>,
     /// Whether the broker should return errors for testing failure scenarios
     pub should_error: Mutex<bool>,
+}
+
+#[allow(dead_code)]
+impl Default for MockFlashQBroker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[allow(dead_code)]

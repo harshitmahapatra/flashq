@@ -110,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let broker_id = BrokerId(args.broker_id);
 
+    // Create FlashQBroker implementation from the gRPC service
+    let flashq_service = Arc::new(flashq_grpc::server::FlashqGrpcService::new(core.clone()));
+
     // Create cluster service with optional cluster client
     let cluster_service = if let Some(controller_endpoint) = args.cluster_controller {
         tracing::info!(%controller_endpoint, "Connecting to cluster controller");
@@ -123,10 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
         tracing::info!("Successfully connected to cluster controller");
-        let service = Arc::new(ClusterServiceImpl::with_client(
+        let service = Arc::new(ClusterServiceImpl::with_client_and_broker(
             metadata_store,
             cluster_client,
             broker_id,
+            flashq_service.clone(),
         ));
 
         // Start follower heartbeat task
@@ -138,7 +142,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         service
     } else {
         tracing::info!("Running in standalone mode (no cluster controller)");
-        Arc::new(ClusterServiceImpl::new(metadata_store, broker_id))
+        Arc::new(ClusterServiceImpl::with_broker(
+            metadata_store,
+            broker_id,
+            flashq_service.clone(),
+        ))
     };
 
     tracing::info!(%addr, broker_id = %args.broker_id, "Starting FlashQ gRPC server with cluster support");
