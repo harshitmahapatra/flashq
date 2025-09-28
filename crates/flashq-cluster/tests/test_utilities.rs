@@ -105,6 +105,7 @@ pub fn create_test_manifest(config: Option<TestManifestConfig>) -> ClusterManife
 ///
 /// # Returns
 /// Configured ClusterServiceImpl ready for testing
+#[allow(dead_code)]
 pub fn create_test_service_with_file_store(
     temp_dir: &TempDir,
     controller_id: BrokerId,
@@ -125,6 +126,7 @@ pub fn create_test_service_with_file_store(
 ///
 /// # Returns
 /// Configured ClusterServiceImpl ready for testing
+#[allow(dead_code)]
 pub fn create_test_service_with_memory_store(
     controller_id: BrokerId,
     config: Option<TestManifestConfig>,
@@ -139,6 +141,7 @@ pub fn create_test_service_with_memory_store(
 }
 
 /// Test server configuration for gRPC testing
+#[allow(dead_code)]
 pub struct TestServerConfig {
     /// The service implementation to use
     pub service: ClusterServiceImpl,
@@ -153,6 +156,7 @@ pub struct TestServerConfig {
 ///
 /// # Returns
 /// Tuple of (server_address, shutdown_handle)
+#[allow(dead_code)]
 pub async fn start_test_server(config: TestServerConfig) -> (String, tokio::task::JoinHandle<()>) {
     use flashq_cluster::proto::cluster_server::ClusterServer as ClusterGrpcService;
 
@@ -193,6 +197,7 @@ pub async fn start_test_server(config: TestServerConfig) -> (String, tokio::task
 ///
 /// # Returns
 /// Connected ClusterClient
+#[allow(dead_code)]
 pub async fn create_test_client(server_addr: &str) -> ClusterClient {
     ClusterClient::connect(server_addr.to_string())
         .await

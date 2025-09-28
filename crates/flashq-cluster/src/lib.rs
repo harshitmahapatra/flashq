@@ -33,5 +33,11 @@ pub use server::ClusterServer;
 // Re-export cluster service implementation
 pub use service::ClusterServiceImpl;
 
+// Re-export core flashq types and services for flashq-grpc
+pub use flashq::{FlashQ, Record, RecordWithOffset};
+pub mod storage {
+    pub use flashq::storage::*;
+}
+
 // Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};

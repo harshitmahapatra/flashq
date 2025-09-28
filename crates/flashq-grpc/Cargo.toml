@@ -16,7 +16,7 @@ name = "grpc-client"
 path = "src/bin/client.rs"
 
 [dependencies]
-flashq = { path = "../flashq" }
+flashq-cluster = { path = "../flashq-cluster" }
 tonic.workspace = true
 prost.workspace = true
 tokio.workspace = true

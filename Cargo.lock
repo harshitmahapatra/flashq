@@ -537,7 +537,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
- "flashq",
+ "flashq-cluster",
  "prost",
  "protoc-bin-vendored",
  "tempfile",

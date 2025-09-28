@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use clap::{Parser, ValueEnum};
-use flashq::storage::{StorageBackend, file::SyncMode};
+use flashq_cluster::storage::{StorageBackend, file::SyncMode};
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum StorageKind {
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         StorageKind::File => StorageBackend::new_file_with_path(args.sync.into(), &args.data_dir)?,
     };
 
-    let core = Arc::new(flashq::FlashQ::with_storage_backend(backend));
+    let core = Arc::new(flashq_cluster::FlashQ::with_storage_backend(backend));
     tracing::info!(%addr, "Starting FlashQ gRPC server");
     flashq_grpc::server::serve(addr, core).await?;
     Ok(())

@@ -7,6 +7,10 @@ pub mod flashq {
     pub mod v1 {
         tonic::include_proto!("flashq.v1");
     }
+    // Re-export cluster proto modules from flashq-cluster
+    pub mod cluster {
+        pub use flashq_cluster::proto::*;
+    }
 }
 
 pub use flashq::v1::*;
@@ -21,3 +25,7 @@ pub use flashq::v1::consumer_client::ConsumerClient;
 pub use flashq::v1::consumer_server::ConsumerServer;
 pub use flashq::v1::producer_client::ProducerClient;
 pub use flashq::v1::producer_server::ProducerServer;
+
+// Re-export cluster API service clients/servers for ergonomics
+pub use flashq::cluster::cluster_client::ClusterClient;
+pub use flashq::cluster::cluster_server::ClusterServer;

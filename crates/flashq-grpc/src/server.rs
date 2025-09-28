@@ -15,7 +15,7 @@ mod validation {
     pub const MAX_VALUE_SIZE: usize = 1_048_576; // 1MB
     pub const MAX_HEADER_VALUE_SIZE: usize = 1024;
 
-    pub fn validate_record_for_grpc(record: &flashq::Record) -> Result<(), Box<Status>> {
+    pub fn validate_record_for_grpc(record: &flashq_cluster::Record) -> Result<(), Box<Status>> {
         // Validate key size
         if let Some(key) = &record.key {
             if key.len() > MAX_KEY_SIZE {
@@ -56,16 +56,19 @@ mod validation {
 
 #[derive(Clone)]
 pub struct FlashqGrpcService {
-    pub core: Arc<flashq::FlashQ>,
+    pub core: Arc<flashq_cluster::FlashQ>,
 }
 
 impl FlashqGrpcService {
-    pub fn new(core: Arc<flashq::FlashQ>) -> Self {
+    pub fn new(core: Arc<flashq_cluster::FlashQ>) -> Self {
         Self { core }
     }
 }
 
-fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Result<Record, Box<Status>> {
+fn to_proto_record(
+    record: &flashq_cluster::Record,
+    include_headers: bool,
+) -> Result<Record, Box<Status>> {
     // Validate record before conversion
     validation::validate_record_for_grpc(record)?;
 
@@ -83,7 +86,7 @@ fn to_proto_record(record: &flashq::Record, include_headers: bool) -> Result<Rec
 }
 
 fn to_proto_rwo(
-    r: &flashq::RecordWithOffset,
+    r: &flashq_cluster::RecordWithOffset,
     include_headers: bool,
 ) -> Result<RecordWithOffset, Box<Status>> {
     Ok(RecordWithOffset {
@@ -157,7 +160,7 @@ impl Producer for FlashqGrpcService {
             } else {
                 Some(rec.headers)
             };
-            records.push(flashq::Record {
+            records.push(flashq_cluster::Record {
                 key,
                 value: rec.value,
                 headers,
@@ -456,7 +459,7 @@ impl Admin for FlashqGrpcService {
 /// Run a gRPC server with the FlashQ services on the given address.
 pub async fn serve(
     addr: SocketAddr,
-    core: Arc<flashq::FlashQ>,
+    core: Arc<flashq_cluster::FlashQ>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let svc = FlashqGrpcService::new(core);
     tonic::transport::Server::builder()
@@ -478,7 +481,7 @@ mod tests {
     use super::*;
 
     fn service() -> FlashqGrpcService {
-        let core = Arc::new(flashq::FlashQ::new()); // defaults to in-memory storage
+        let core = Arc::new(flashq_cluster::FlashQ::new()); // defaults to in-memory storage
         FlashqGrpcService::new(core)
     }
 
