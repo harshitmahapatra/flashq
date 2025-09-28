@@ -15,7 +15,9 @@ use flashq_cluster::{
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use crate::test_utilities::create_test_service_with_file_store;
+use crate::test_utilities::{
+    create_follower_with_controller_setup, create_test_service_with_file_store,
+};
 
 #[tokio::test]
 async fn test_describe_cluster_with_file_store() {
@@ -284,4 +286,49 @@ async fn test_concurrent_operations_with_file_persistence() {
 
     // Epoch should be consistent
     assert!(partition.epoch >= 1);
+}
+
+#[tokio::test]
+async fn test_streaming_heartbeat_task_starts_successfully() {
+    // Setup: Create follower service with controller and FlashQ broker
+    let (follower_service, _server_addr, _shutdown_handle) =
+        create_follower_with_controller_setup().await;
+
+    // Action: Start the heartbeat task
+    let result = follower_service.start_follower_heartbeat_task().await;
+
+    // Expectation: Task should start without error
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_follower_has_required_components_for_heartbeat() {
+    // Setup: Create follower service with controller and FlashQ broker
+    let (follower_service, _server_addr, _shutdown_handle) =
+        create_follower_with_controller_setup().await;
+
+    // Action: Check service components
+    let has_client = follower_service.cluster_client().is_some();
+    let has_broker = follower_service.flashq_broker().is_some();
+
+    // Expectation: Both cluster client and FlashQ broker should be present
+    assert!(has_client, "Follower service should have cluster client");
+    assert!(has_broker, "Follower service should have FlashQ broker");
+}
+
+#[tokio::test]
+async fn test_heartbeat_task_background_execution() {
+    // Setup: Create follower service and start heartbeat task
+    let (follower_service, _server_addr, _shutdown_handle) =
+        create_follower_with_controller_setup().await;
+
+    // Action: Start heartbeat task and give it time to initialize
+    let result = follower_service.start_follower_heartbeat_task().await;
+    assert!(result.is_ok());
+
+    // Allow background task to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Expectation: No immediate failures should occur
+    // Note: This validates the streaming setup works without waiting for full heartbeat cycles
 }

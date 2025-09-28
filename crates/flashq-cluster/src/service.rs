@@ -13,22 +13,23 @@ use crate::{
     metadata_store::MetadataStore,
     proto::{
         BrokerDirective, BrokerInfo, BrokerStatus, DescribeClusterResponse, HeartbeatRequest,
-        HeartbeatResponse, PartitionEpochUpdate, PartitionHeartbeat, PartitionInfo, ReportPartitionStatusRequest,
-        ReportPartitionStatusResponse, TopicAssignment,
+        HeartbeatResponse, PartitionEpochUpdate, PartitionHeartbeat, PartitionInfo,
+        ReportPartitionStatusRequest, ReportPartitionStatusResponse, TopicAssignment,
     },
-    traits::ClusterService,
+    traits::{ClusterService, FlashQBroker},
     types::*,
 };
 
-
 /// Implementation of ClusterService that coordinates cluster metadata operations.
 ///
-/// This service wraps a metadata store and optionally uses a cluster client
-/// for inter-node communication in distributed scenarios.
+/// This service wraps a metadata store, optionally uses a cluster client
+/// for inter-node communication, and integrates with a FlashQ broker instance
+/// to collect real-time partition status data.
 pub struct ClusterServiceImpl {
     metadata_store: Arc<dyn MetadataStore>,
     cluster_client: Option<ClusterClient>,
     broker_id: BrokerId,
+    flashq_broker: Option<Arc<dyn FlashQBroker>>,
 }
 
 impl ClusterServiceImpl {
@@ -40,6 +41,7 @@ impl ClusterServiceImpl {
             metadata_store,
             cluster_client: None,
             broker_id,
+            flashq_broker: None,
         }
     }
 
@@ -55,6 +57,40 @@ impl ClusterServiceImpl {
             metadata_store,
             cluster_client: Some(cluster_client),
             broker_id,
+            flashq_broker: None,
+        }
+    }
+
+    /// Create a new cluster service with metadata store and FlashQ broker.
+    ///
+    /// This creates a service that can collect real-time partition data from the broker.
+    pub fn with_broker(
+        metadata_store: Arc<dyn MetadataStore>,
+        broker_id: BrokerId,
+        flashq_broker: Arc<dyn FlashQBroker>,
+    ) -> Self {
+        Self {
+            metadata_store,
+            cluster_client: None,
+            broker_id,
+            flashq_broker: Some(flashq_broker),
+        }
+    }
+
+    /// Create a new cluster service with metadata store, cluster client, and FlashQ broker.
+    ///
+    /// This creates a fully-featured distributed service with real-time broker integration.
+    pub fn with_client_and_broker(
+        metadata_store: Arc<dyn MetadataStore>,
+        cluster_client: ClusterClient,
+        broker_id: BrokerId,
+        flashq_broker: Arc<dyn FlashQBroker>,
+    ) -> Self {
+        Self {
+            metadata_store,
+            cluster_client: Some(cluster_client),
+            broker_id,
+            flashq_broker: Some(flashq_broker),
         }
     }
 
@@ -68,36 +104,218 @@ impl ClusterServiceImpl {
         self.cluster_client.as_ref()
     }
 
+    /// Get a reference to the FlashQ broker, if available.
+    pub fn flashq_broker(&self) -> Option<&Arc<dyn FlashQBroker>> {
+        self.flashq_broker.as_ref()
+    }
+
     /// Start a background heartbeat task if this is a follower broker.
     ///
-    /// This logs that the cluster client integration is available.
-    /// TODO: Implement actual streaming heartbeat once Rust 2024 lifetime issues are resolved
+    /// This creates a periodic task that sends heartbeats to the controller
+    /// using real partition data from the FlashQ broker.
     pub async fn start_follower_heartbeat_task(&self) -> Result<(), ClusterError> {
-        if self.cluster_client.is_some() {
+        if let Some(client) = self.cluster_client.as_ref() {
             let broker_id = self.broker_id;
-            tracing::info!(%broker_id, "Cluster client integration available - heartbeat task ready");
-            // TODO: For now, we just confirm the integration works
-            // In the future, implement streaming heartbeat here
+            tracing::info!(%broker_id, "Starting follower heartbeat task");
+
+            // Clone necessary components for the background task
+            let mut client = client.clone();
+            let metadata_store = self.metadata_store.clone();
+            let flashq_broker = self.flashq_broker.clone();
+
+            // Spawn the periodic heartbeat task
+            tokio::spawn(async move {
+                if let Err(e) = Self::run_streaming_heartbeat_task(
+                    broker_id,
+                    &mut client,
+                    &metadata_store,
+                    flashq_broker.as_ref(),
+                )
+                .await
+                {
+                    tracing::error!(%broker_id, error = %e, "Heartbeat task failed");
+                }
+            });
+
+            tracing::info!(%broker_id, "Follower heartbeat task started successfully");
             Ok(())
         } else {
             tracing::debug!("No cluster client available, skipping heartbeat task");
             Ok(())
         }
     }
-    
+
+    /// Run the streaming heartbeat task in the background.
+    ///
+    /// This task establishes a bidirectional stream with the controller
+    /// and sends periodic heartbeats while processing responses.
+    async fn run_streaming_heartbeat_task(
+        broker_id: BrokerId,
+        client: &mut ClusterClient,
+        metadata_store: &Arc<dyn MetadataStore>,
+        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+    ) -> Result<(), ClusterError> {
+        use tokio_stream::StreamExt;
+
+        // Start the heartbeat stream
+        let (sender, mut receiver) = client.start_heartbeat_stream().await?;
+        tracing::info!(%broker_id, "Heartbeat stream established with controller");
+
+        // Create a periodic timer for sending heartbeats
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10)); // 10-second heartbeat interval
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                // Send periodic heartbeats
+                _ = interval.tick() => {
+                    match Self::send_heartbeat_on_stream(
+                        broker_id,
+                        &sender,
+                        metadata_store,
+                        flashq_broker,
+                    ).await {
+                        Ok(()) => {
+                            tracing::trace!(%broker_id, "Heartbeat sent on stream");
+                        }
+                        Err(e) => {
+                            tracing::warn!(%broker_id, error = %e, "Failed to send heartbeat on stream");
+                            // Continue the loop - don't exit on send failures
+                        }
+                    }
+                }
+
+                // Process responses from controller
+                response = receiver.next() => {
+                    match response {
+                        Some(Ok(heartbeat_response)) => {
+                            tracing::debug!(
+                                broker_id = %broker_id,
+                                epoch_updates = heartbeat_response.epoch_updates.len(),
+                                directives = heartbeat_response.directives.len(),
+                                "Received heartbeat response from controller"
+                            );
+
+                            if let Err(e) = Self::process_heartbeat_response(
+                                metadata_store,
+                                flashq_broker,
+                                heartbeat_response,
+                            ).await {
+                                tracing::error!(%broker_id, error = %e, "Failed to process heartbeat response");
+                            }
+                        }
+                        Some(Err(e)) => {
+                            tracing::warn!(%broker_id, error = %e, "Received error from heartbeat stream");
+                            // Continue the loop - don't exit on response errors
+                        }
+                        None => {
+                            tracing::info!(%broker_id, "Heartbeat stream closed by controller");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Send a single heartbeat on the established stream.
+    async fn send_heartbeat_on_stream(
+        broker_id: BrokerId,
+        sender: &tokio::sync::mpsc::Sender<HeartbeatRequest>,
+        metadata_store: &Arc<dyn MetadataStore>,
+        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+    ) -> Result<(), ClusterError> {
+        // 1. Collect current partition status
+        let partition_heartbeats =
+            Self::collect_partition_heartbeats(metadata_store, broker_id, flashq_broker).await;
+
+        // 2. Create and send HeartbeatRequest
+        let request = HeartbeatRequest {
+            broker_id: broker_id.into(),
+            partitions: partition_heartbeats,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        tracing::debug!(
+            broker_id = %broker_id,
+            partition_count = request.partitions.len(),
+            "Sending heartbeat on stream"
+        );
+
+        sender
+            .send(request)
+            .await
+            .map_err(|_| ClusterError::Transport {
+                context: "Failed to send heartbeat".to_string(),
+                reason: "Channel closed".to_string(),
+            })?;
+
+        Ok(())
+    }
+
     /// Collect partition status for heartbeat messages.
     async fn collect_partition_heartbeats(
-        _metadata_store: &Arc<dyn MetadataStore>,
-        _broker_id: BrokerId,
+        metadata_store: &Arc<dyn MetadataStore>,
+        broker_id: BrokerId,
+        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
     ) -> Vec<PartitionHeartbeat> {
-        // TODO: This should collect actual partition status from the broker's storage backend
-        // For now, return empty vector as placeholder
-        Vec::new()
+        let mut heartbeats = Vec::new();
+
+        if let Some(broker) = flashq_broker {
+            // Get all partitions assigned to this broker
+            if let Ok(partitions) = broker.get_assigned_partitions().await {
+                for (topic, partition_id) in partitions {
+                    // Get current epoch from metadata store
+                    let leader_epoch = metadata_store
+                        .get_partition_epoch(&topic, partition_id)
+                        .unwrap_or_else(|_| Epoch::from(0));
+
+                    // Check if this broker is the leader for the partition
+                    let is_leader = broker
+                        .is_partition_leader(&topic, partition_id)
+                        .await
+                        .unwrap_or(false);
+
+                    // Get high water mark and log start offset
+                    let high_water_mark = broker
+                        .get_high_water_mark(&topic, partition_id)
+                        .await
+                        .unwrap_or(0);
+
+                    let log_start_offset = broker
+                        .get_log_start_offset(&topic, partition_id)
+                        .await
+                        .unwrap_or(0);
+
+                    // Get current in-sync replicas from metadata store
+                    let current_in_sync_replicas = metadata_store
+                        .get_in_sync_replicas(&topic, partition_id)
+                        .map(|isr| isr.into_iter().map(|id| id.into()).collect())
+                        .unwrap_or_else(|_| vec![broker_id.into()]);
+
+                    heartbeats.push(PartitionHeartbeat {
+                        topic: topic.clone(),
+                        partition: partition_id.into(),
+                        leader_epoch: leader_epoch.into(),
+                        is_leader,
+                        high_water_mark,
+                        log_start_offset,
+                        current_in_sync_replicas,
+                        leader_override: None, // No leader override for normal heartbeats
+                    });
+                }
+            }
+        }
+
+        heartbeats
     }
-    
+
     /// Process heartbeat response from controller.
     async fn process_heartbeat_response(
         metadata_store: &Arc<dyn MetadataStore>,
+        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
         response: HeartbeatResponse,
     ) -> Result<(), ClusterError> {
         // Process epoch updates
@@ -105,17 +323,22 @@ impl ClusterServiceImpl {
             let topic = &epoch_update.topic;
             let partition_id = PartitionId::from(epoch_update.partition);
             let new_epoch = Epoch::from(epoch_update.new_epoch);
-            
+
             // Apply epoch update if it's newer than current
             if let Ok(current_epoch) = metadata_store.get_partition_epoch(topic, partition_id) {
                 if new_epoch > current_epoch {
                     // Update the epoch in metadata store
-                    metadata_store.compare_and_set_epoch(topic, partition_id, current_epoch, new_epoch)?;
+                    metadata_store.compare_and_set_epoch(
+                        topic,
+                        partition_id,
+                        current_epoch,
+                        new_epoch,
+                    )?;
                     tracing::info!(%topic, %partition_id, old_epoch = %current_epoch, new_epoch = %new_epoch, "Applied epoch update from controller");
                 }
             }
         }
-        
+
         // Process directives
         for directive in response.directives {
             match BrokerDirective::try_from(directive) {
@@ -125,24 +348,34 @@ impl ClusterServiceImpl {
                 Ok(BrokerDirective::Resync) => {
                     tracing::info!("Received RESYNC directive from controller");
                     // TODO: Implement resync logic - fetch fresh cluster state
+                    // This would typically involve refreshing partition assignments
+                    // and synchronizing with the controller's view of the cluster
                 }
                 Ok(BrokerDirective::Drain) => {
                     tracing::info!("Received DRAIN directive from controller");
                     // TODO: Implement drain logic - stop accepting new requests
+                    // This would involve gracefully stopping new producer requests
+                    // while allowing existing operations to complete
                 }
                 Ok(BrokerDirective::Shutdown) => {
                     tracing::warn!("Received SHUTDOWN directive from controller");
-                    // TODO: Implement graceful shutdown
+                    if let Some(broker) = flashq_broker {
+                        if let Err(e) = broker.initiate_shutdown().await {
+                            tracing::error!("Failed to initiate broker shutdown: {}", e);
+                        }
+                    } else {
+                        tracing::info!("No FlashQ broker instance available for shutdown");
+                    }
                 }
                 Err(_) => {
                     tracing::warn!("Received unknown directive: {}", directive);
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Report partition status change to the controller.
     pub async fn report_partition_status_to_controller(
         &self,
@@ -164,16 +397,19 @@ impl ClusterServiceImpl {
                 log_start_offset,
                 timestamp: chrono::Utc::now().to_rfc3339(),
             };
-            
+
             let response = client.report_partition_status(request).await?;
-            
+
             if !response.accepted {
-                tracing::warn!("Controller rejected partition status report: {}", response.message);
+                tracing::warn!(
+                    "Controller rejected partition status report: {}",
+                    response.message
+                );
             } else {
                 tracing::debug!("Partition status report accepted by controller");
             }
         }
-        
+
         Ok(())
     }
 }

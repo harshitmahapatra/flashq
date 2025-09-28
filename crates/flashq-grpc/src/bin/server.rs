@@ -80,7 +80,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::time::Duration;
-    
+
     // Logging via tracing-subscriber with env filter support
     tracing_subscriber::fmt::init();
 
@@ -113,23 +113,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create cluster service with optional cluster client
     let cluster_service = if let Some(controller_endpoint) = args.cluster_controller {
         tracing::info!(%controller_endpoint, "Connecting to cluster controller");
-        
+
         // Create cluster client with timeout
         let timeout = Duration::from_secs(args.cluster_timeout);
         let cluster_client = flashq_cluster::client::ClusterClient::connect_with_timeout(
             controller_endpoint,
             timeout,
-        ).await?;
-        
+        )
+        .await?;
+
         tracing::info!("Successfully connected to cluster controller");
-        let service = Arc::new(ClusterServiceImpl::with_client(metadata_store, cluster_client, broker_id));
-        
+        let service = Arc::new(ClusterServiceImpl::with_client(
+            metadata_store,
+            cluster_client,
+            broker_id,
+        ));
+
         // Start follower heartbeat task
         if let Err(e) = service.start_follower_heartbeat_task().await {
             tracing::error!("Failed to start follower heartbeat task: {}", e);
             return Err(e.into());
         }
-        
+
         service
     } else {
         tracing::info!("Running in standalone mode (no cluster controller)");
