@@ -16,7 +16,7 @@ use crate::{
         HeartbeatResponse, PartitionEpochUpdate, PartitionHeartbeat, PartitionInfo,
         ReportPartitionStatusRequest, ReportPartitionStatusResponse, TopicAssignment,
     },
-    traits::{ClusterService, FlashQBroker},
+    traits::{ClusterBroker, ClusterService},
     types::*,
 };
 
@@ -29,7 +29,7 @@ pub struct ClusterServiceImpl {
     metadata_store: Arc<dyn MetadataStore>,
     cluster_client: Option<ClusterClient>,
     broker_id: BrokerId,
-    flashq_broker: Option<Arc<dyn FlashQBroker>>,
+    flashq_broker: Option<Arc<dyn ClusterBroker>>,
 }
 
 impl ClusterServiceImpl {
@@ -67,7 +67,7 @@ impl ClusterServiceImpl {
     pub fn with_broker(
         metadata_store: Arc<dyn MetadataStore>,
         broker_id: BrokerId,
-        flashq_broker: Arc<dyn FlashQBroker>,
+        flashq_broker: Arc<dyn ClusterBroker>,
     ) -> Self {
         Self {
             metadata_store,
@@ -84,7 +84,7 @@ impl ClusterServiceImpl {
         metadata_store: Arc<dyn MetadataStore>,
         cluster_client: ClusterClient,
         broker_id: BrokerId,
-        flashq_broker: Arc<dyn FlashQBroker>,
+        flashq_broker: Arc<dyn ClusterBroker>,
     ) -> Self {
         Self {
             metadata_store,
@@ -105,7 +105,7 @@ impl ClusterServiceImpl {
     }
 
     /// Get a reference to the FlashQ broker, if available.
-    pub fn flashq_broker(&self) -> Option<&Arc<dyn FlashQBroker>> {
+    pub fn flashq_broker(&self) -> Option<&Arc<dyn ClusterBroker>> {
         self.flashq_broker.as_ref()
     }
 
@@ -153,7 +153,7 @@ impl ClusterServiceImpl {
         broker_id: BrokerId,
         client: &mut ClusterClient,
         metadata_store: &Arc<dyn MetadataStore>,
-        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+        flashq_broker: Option<&Arc<dyn ClusterBroker>>,
     ) -> Result<(), ClusterError> {
         use tokio_stream::StreamExt;
 
@@ -225,7 +225,7 @@ impl ClusterServiceImpl {
         broker_id: BrokerId,
         sender: &tokio::sync::mpsc::Sender<HeartbeatRequest>,
         metadata_store: &Arc<dyn MetadataStore>,
-        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+        flashq_broker: Option<&Arc<dyn ClusterBroker>>,
     ) -> Result<(), ClusterError> {
         // 1. Collect current partition status
         let partition_heartbeats =
@@ -259,7 +259,7 @@ impl ClusterServiceImpl {
     async fn collect_partition_heartbeats(
         metadata_store: &Arc<dyn MetadataStore>,
         broker_id: BrokerId,
-        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+        flashq_broker: Option<&Arc<dyn ClusterBroker>>,
     ) -> Vec<PartitionHeartbeat> {
         let mut heartbeats = Vec::new();
 
@@ -315,7 +315,7 @@ impl ClusterServiceImpl {
     /// Process heartbeat response from controller.
     async fn process_heartbeat_response(
         metadata_store: &Arc<dyn MetadataStore>,
-        flashq_broker: Option<&Arc<dyn FlashQBroker>>,
+        flashq_broker: Option<&Arc<dyn ClusterBroker>>,
         response: HeartbeatResponse,
     ) -> Result<(), ClusterError> {
         // Process epoch updates

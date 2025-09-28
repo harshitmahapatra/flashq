@@ -24,7 +24,7 @@ pub use error::ClusterError;
 pub use metadata_store::{InMemoryMetadataStore, MetadataBackend, MetadataStore};
 
 // Re-export cluster service traits
-pub use traits::{ClusterService, FlashQBroker};
+pub use traits::{ClusterBroker, ClusterService};
 
 // Re-export cluster server and client adapters
 pub use client::ClusterClient;

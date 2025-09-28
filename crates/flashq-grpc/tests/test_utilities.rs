@@ -16,7 +16,7 @@ pub use flashq_cluster::{
     storage::{StorageBackend, file::SyncMode},
     types::*,
 };
-pub use flashq_grpc::server::FlashqGrpcService;
+pub use flashq_grpc::server::FlashQGrpcBroker;
 
 static SERVER_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -165,7 +165,7 @@ impl TestServer {
 pub fn create_test_broker_with_cluster_service(
     temp_dir: &TempDir,
     broker_id: BrokerId,
-) -> (Arc<FlashqGrpcService>, Arc<ClusterServiceImpl>) {
+) -> (Arc<FlashQGrpcBroker>, Arc<ClusterServiceImpl>) {
     // Create FlashQ core with file storage backend (following server.rs pattern)
     let storage_backend = StorageBackend::new_file_with_path(
         SyncMode::None, // Use no sync for tests to avoid performance overhead
@@ -181,7 +181,7 @@ pub fn create_test_broker_with_cluster_service(
     let metadata_store = Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
 
     // Create FlashQ gRPC service
-    let grpc_service = Arc::new(FlashqGrpcService::new(core));
+    let grpc_service = Arc::new(FlashQGrpcBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
     let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
@@ -196,7 +196,7 @@ pub fn create_test_broker_with_cluster_service(
 /// Create a test topic with sample records for integration testing
 #[allow(dead_code)]
 pub fn create_test_topic_with_records(
-    grpc_service: &FlashqGrpcService,
+    grpc_service: &FlashQGrpcBroker,
     topic: &str,
     record_count: usize,
 ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {

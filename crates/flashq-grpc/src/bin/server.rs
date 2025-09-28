@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broker_id = BrokerId(args.broker_id);
 
     // Create FlashQBroker implementation from the gRPC service
-    let flashq_service = Arc::new(flashq_grpc::server::FlashqGrpcService::new(core.clone()));
+    let flashq_service = Arc::new(flashq_grpc::server::FlashQGrpcBroker::new(core.clone()));
 
     // Create cluster service with optional cluster client
     let cluster_service = if let Some(controller_endpoint) = args.cluster_controller {

@@ -55,11 +55,11 @@ mod validation {
 }
 
 #[derive(Clone)]
-pub struct FlashqGrpcService {
+pub struct FlashQGrpcBroker {
     pub core: Arc<flashq_cluster::FlashQ>,
 }
 
-impl FlashqGrpcService {
+impl FlashQGrpcBroker {
     pub fn new(core: Arc<flashq_cluster::FlashQ>) -> Self {
         Self { core }
     }
@@ -97,7 +97,7 @@ fn to_proto_rwo(
 }
 
 #[tonic::async_trait]
-impl Producer for FlashqGrpcService {
+impl Producer for FlashQGrpcBroker {
     async fn produce(
         &self,
         request: Request<ProduceRequest>,
@@ -181,7 +181,7 @@ impl Producer for FlashqGrpcService {
 }
 
 #[tonic::async_trait]
-impl Consumer for FlashqGrpcService {
+impl Consumer for FlashQGrpcBroker {
     async fn create_consumer_group(
         &self,
         request: Request<ConsumerGroupId>,
@@ -426,7 +426,7 @@ impl Consumer for FlashqGrpcService {
 }
 
 #[tonic::async_trait]
-impl Admin for FlashqGrpcService {
+impl Admin for FlashQGrpcBroker {
     async fn list_topics(
         &self,
         _request: Request<Empty>,
@@ -457,7 +457,7 @@ impl Admin for FlashqGrpcService {
 }
 // FlashQBroker trait implementation
 #[async_trait::async_trait]
-impl flashq_cluster::FlashQBroker for FlashqGrpcService {
+impl flashq_cluster::ClusterBroker for FlashQGrpcBroker {
     async fn get_high_water_mark(
         &self,
         topic: &str,
@@ -557,7 +557,7 @@ pub async fn serve(
     core: Arc<flashq_cluster::FlashQ>,
     cluster_service: Arc<flashq_cluster::service::ClusterServiceImpl>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let svc = FlashqGrpcService::new(core);
+    let svc = FlashQGrpcBroker::new(core);
     tonic::transport::Server::builder()
         .layer(TraceLayer::new_for_http())
         .add_service(crate::flashq::v1::producer_server::ProducerServer::new(
@@ -579,9 +579,9 @@ pub async fn serve(
 mod tests {
     use super::*;
 
-    fn service() -> FlashqGrpcService {
+    fn service() -> FlashQGrpcBroker {
         let core = Arc::new(flashq_cluster::FlashQ::new()); // defaults to in-memory storage
-        FlashqGrpcService::new(core)
+        FlashQGrpcBroker::new(core)
     }
 
     #[tokio::test]

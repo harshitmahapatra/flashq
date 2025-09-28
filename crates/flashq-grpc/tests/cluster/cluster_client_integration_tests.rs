@@ -13,7 +13,7 @@ use flashq_cluster::{
     service::ClusterServiceImpl,
     types::*,
 };
-use flashq_grpc::{ClusterServer, server::FlashqGrpcService};
+use flashq_grpc::{ClusterServer, server::FlashQGrpcBroker};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -64,7 +64,7 @@ async fn setup_cluster_server() -> (String, TempDir, tokio::task::JoinHandle<()>
 
     // Create FlashQ core
     let core = Arc::new(flashq_cluster::FlashQ::new());
-    let grpc_service = Arc::new(FlashqGrpcService::new(core));
+    let grpc_service = Arc::new(FlashQGrpcBroker::new(core));
 
     // Create file-based metadata store
     let metadata_store: Arc<dyn MetadataStore> = {

@@ -5,14 +5,14 @@
 
 use chrono::Utc;
 use flashq_cluster::{
-    ClusterService, FlashQBroker, Record,
+    ClusterBroker, ClusterService, Record,
     manifest::types::{BrokerSpec, ClusterManifest, PartitionAssignment, TopicAssignment},
     metadata_store::{FileMetadataStore, MetadataStore},
     proto::{HeartbeatRequest, PartitionHeartbeat, ReportPartitionStatusRequest},
     service::ClusterServiceImpl,
     types::*,
 };
-use flashq_grpc::server::FlashqGrpcService;
+use flashq_grpc::server::FlashQGrpcBroker;
 use std::{collections::HashMap, sync::Arc};
 use tempfile::TempDir;
 
@@ -58,7 +58,7 @@ fn seeded_manifest() -> ClusterManifest {
 
 /// Setup function that creates a FlashQ broker with file storage and cluster service
 async fn setup_broker_with_cluster_service()
--> (Arc<FlashqGrpcService>, Arc<ClusterServiceImpl>, TempDir) {
+-> (Arc<FlashQGrpcBroker>, Arc<ClusterServiceImpl>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
 
     // Create FlashQ core with memory storage for simplicity
@@ -71,23 +71,23 @@ async fn setup_broker_with_cluster_service()
         store
     };
 
-    // Create FlashQ gRPC service
-    let grpc_service = Arc::new(FlashqGrpcService::new(core));
+    // Create FlashQ gRPC broker
+    let broker = Arc::new(FlashQGrpcBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
     let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
         metadata_store,
         BrokerId(1),
-        grpc_service.clone(),
+        broker.clone(),
     ));
 
-    (grpc_service, cluster_service, temp_dir)
+    (broker, cluster_service, temp_dir)
 }
 
 #[tokio::test]
 async fn test_describe_cluster_returns_correct_metadata() {
     // Setup
-    let (_grpc_service, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (_broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
 
     // Action
     let response = cluster_service.describe_cluster().await.unwrap();
@@ -100,11 +100,11 @@ async fn test_describe_cluster_returns_correct_metadata() {
 #[tokio::test]
 async fn test_broker_heartbeat_updates_high_water_mark() {
     // Setup
-    let (grpc_service, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "test-topic";
 
     // Post some records to create high water mark
-    grpc_service
+    broker
         .core
         .post_records(
             topic.to_string(),
@@ -121,7 +121,7 @@ async fn test_broker_heartbeat_updates_high_water_mark() {
             topic: topic.to_string(),
             partition: 0,
             leader_epoch: 1,
-            high_water_mark: grpc_service.core.get_high_water_mark(topic),
+            high_water_mark: broker.core.get_high_water_mark(topic),
             log_start_offset: 0,
             is_leader: true,
             current_in_sync_replicas: vec![1],
@@ -141,11 +141,11 @@ async fn test_broker_heartbeat_updates_high_water_mark() {
 #[tokio::test]
 async fn test_partition_status_reporting_with_real_data() {
     // Setup
-    let (grpc_service, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "status-topic";
 
     // Create some records to establish real partition status
-    grpc_service
+    broker
         .core
         .post_records(
             topic.to_string(),
@@ -157,7 +157,7 @@ async fn test_partition_status_reporting_with_real_data() {
         )
         .unwrap();
 
-    let high_water_mark = grpc_service.core.get_high_water_mark(topic);
+    let high_water_mark = broker.core.get_high_water_mark(topic);
     let request = ReportPartitionStatusRequest {
         topic: topic.to_string(),
         partition: 0,
@@ -179,11 +179,11 @@ async fn test_partition_status_reporting_with_real_data() {
 #[tokio::test]
 async fn test_flashq_broker_get_high_water_mark_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "water-mark-topic";
 
     // Post records to create high water mark
-    grpc_service
+    broker
         .core
         .post_records(
             topic.to_string(),
@@ -195,7 +195,7 @@ async fn test_flashq_broker_get_high_water_mark_integration() {
         .unwrap();
 
     // Action
-    let high_water_mark = grpc_service
+    let high_water_mark = broker
         .get_high_water_mark(topic, PartitionId(0))
         .await
         .unwrap();
@@ -207,11 +207,11 @@ async fn test_flashq_broker_get_high_water_mark_integration() {
 #[tokio::test]
 async fn test_flashq_broker_get_log_start_offset_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "start-offset-topic";
 
     // Action
-    let log_start_offset = grpc_service
+    let log_start_offset = broker
         .get_log_start_offset(topic, PartitionId(0))
         .await
         .unwrap();
@@ -223,11 +223,11 @@ async fn test_flashq_broker_get_log_start_offset_integration() {
 #[tokio::test]
 async fn test_flashq_broker_is_partition_leader_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "leadership-topic";
 
     // Action
-    let is_leader = grpc_service
+    let is_leader = broker
         .is_partition_leader(topic, PartitionId(0))
         .await
         .unwrap();
@@ -239,17 +239,17 @@ async fn test_flashq_broker_is_partition_leader_integration() {
 #[tokio::test]
 async fn test_flashq_broker_get_assigned_partitions_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
 
     // Create topics by posting records
-    grpc_service
+    broker
         .core
         .post_records(
             "topic1".to_string(),
             vec![Record::new(None, "data1".to_string(), None)],
         )
         .unwrap();
-    grpc_service
+    broker
         .core
         .post_records(
             "topic2".to_string(),
@@ -258,7 +258,7 @@ async fn test_flashq_broker_get_assigned_partitions_integration() {
         .unwrap();
 
     // Action
-    let partitions = grpc_service.get_assigned_partitions().await.unwrap();
+    let partitions = broker.get_assigned_partitions().await.unwrap();
 
     // Expectation
     assert!(partitions.len() >= 2);
@@ -269,11 +269,11 @@ async fn test_flashq_broker_get_assigned_partitions_integration() {
 #[tokio::test]
 async fn test_flashq_broker_acknowledge_replication_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "replication-topic";
 
     // Action
-    let result = grpc_service
+    let result = broker
         .acknowledge_replication(topic, PartitionId(0), 10)
         .await;
 
@@ -284,10 +284,10 @@ async fn test_flashq_broker_acknowledge_replication_integration() {
 #[tokio::test]
 async fn test_flashq_broker_initiate_shutdown_integration() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
 
     // Action
-    let result = grpc_service.initiate_shutdown().await;
+    let result = broker.initiate_shutdown().await;
 
     // Expectation
     assert!(result.is_ok());
@@ -296,13 +296,11 @@ async fn test_flashq_broker_initiate_shutdown_integration() {
 #[tokio::test]
 async fn test_flashq_broker_invalid_partition_returns_error() {
     // Setup
-    let (grpc_service, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
     let topic = "invalid-partition-topic";
 
     // Action
-    let result = grpc_service
-        .get_high_water_mark(topic, PartitionId(1))
-        .await;
+    let result = broker.get_high_water_mark(topic, PartitionId(1)).await;
 
     // Expectation
     assert!(result.is_err());
@@ -321,10 +319,10 @@ async fn test_cluster_service_heartbeat_persistence() {
     // Create first service instance and process heartbeat
     let _cluster_service = {
         let core = Arc::new(flashq_cluster::FlashQ::new());
-        let grpc_service = Arc::new(FlashqGrpcService::new(core));
+        let broker = Arc::new(FlashQGrpcBroker::new(core));
 
         // Post some records
-        grpc_service
+        broker
             .core
             .post_records(
                 topic.to_string(),
@@ -341,7 +339,7 @@ async fn test_cluster_service_heartbeat_persistence() {
         let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
             metadata_store,
             BrokerId(1),
-            grpc_service.clone(),
+            broker.clone(),
         ));
 
         let request = HeartbeatRequest {
@@ -350,7 +348,7 @@ async fn test_cluster_service_heartbeat_persistence() {
                 topic: topic.to_string(),
                 partition: 0,
                 leader_epoch: 1,
-                high_water_mark: grpc_service.core.get_high_water_mark(topic),
+                high_water_mark: broker.core.get_high_water_mark(topic),
                 log_start_offset: 0,
                 is_leader: true,
                 current_in_sync_replicas: vec![1],
@@ -378,7 +376,7 @@ async fn test_cluster_service_heartbeat_persistence() {
 #[tokio::test]
 async fn test_cluster_service_with_multiple_brokers() {
     // Setup
-    let (_grpc_service, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (_broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
 
     // Send heartbeats from multiple brokers
     for broker_id in 1..=3 {

@@ -13,13 +13,13 @@ use crate::{
     types::*,
 };
 use async_trait::async_trait;
-
-/// Trait that a FlashQ broker must implement to integrate with cluster services.
+/// Defines the cluster integration interface for FlashQ brokers.
 ///
-/// This trait captures the essential operations that the cluster management layer
-/// needs to coordinate with individual broker instances.
+/// Any broker implementation (gRPC, HTTP, etc.) must implement this trait
+/// to participate in cluster coordination and provide runtime state to the
+/// cluster management layer.
 #[async_trait]
-pub trait FlashQBroker: Send + Sync {
+pub trait ClusterBroker: Send + Sync {
     /// Fetch the current high water mark for a partition.
     async fn get_high_water_mark(
         &self,
@@ -56,11 +56,12 @@ pub trait FlashQBroker: Send + Sync {
     async fn initiate_shutdown(&self) -> Result<(), ClusterError>;
 }
 
-/// Trait that maps gRPC cluster service operations to metadata store operations.
+/// Defines the cluster coordination service interface for broker communication.
 ///
-/// This trait provides the business logic layer between the gRPC service endpoints
-/// and the underlying metadata store, handling the conversion between proto messages
-/// and internal data structures.
+/// This trait exposes the core operations needed for inter-broker coordination,
+/// such as cluster discovery, heartbeat management, and partition status reporting.
+/// Implementations use ClusterBroker methods and persistent state management
+/// to orchestrate distributed broker behavior.
 #[async_trait]
 pub trait ClusterService: Send + Sync {
     /// Get a snapshot of the current cluster state.

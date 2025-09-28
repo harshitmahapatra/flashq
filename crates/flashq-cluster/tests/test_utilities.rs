@@ -11,7 +11,7 @@ use flashq_cluster::{
     metadata_store::FileMetadataStore,
     server::ClusterServer,
     service::ClusterServiceImpl,
-    traits::FlashQBroker,
+    traits::ClusterBroker,
     types::*,
 };
 use std::collections::HashMap;
@@ -114,7 +114,7 @@ impl MockFlashQBroker {
 
 #[allow(dead_code)]
 #[async_trait]
-impl FlashQBroker for MockFlashQBroker {
+impl ClusterBroker for MockFlashQBroker {
     async fn get_high_water_mark(
         &self,
         topic: &str,
@@ -359,7 +359,7 @@ pub fn create_test_service_with_memory_store(
 pub fn create_test_service_with_memory_store_and_broker(
     controller_id: BrokerId,
     config: Option<TestManifestConfig>,
-    flashq_broker: Arc<dyn FlashQBroker>,
+    flashq_broker: Arc<dyn ClusterBroker>,
 ) -> ClusterServiceImpl {
     use flashq_cluster::metadata_store::InMemoryMetadataStore;
 
@@ -385,7 +385,7 @@ pub fn create_test_service_with_file_store_and_broker(
     temp_dir: &TempDir,
     controller_id: BrokerId,
     config: Option<TestManifestConfig>,
-    flashq_broker: Arc<dyn FlashQBroker>,
+    flashq_broker: Arc<dyn ClusterBroker>,
 ) -> ClusterServiceImpl {
     let manifest = create_test_manifest(config);
     let file_store = FileMetadataStore::new_with_manifest(temp_dir.path(), manifest)
