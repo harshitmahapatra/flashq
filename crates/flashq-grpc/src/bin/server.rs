@@ -67,10 +67,20 @@ struct Args {
     /// Broker ID for cluster operations
     #[arg(long, default_value_t = 1)]
     broker_id: u32,
+
+    /// Cluster controller endpoint (for follower brokers)
+    #[arg(long)]
+    cluster_controller: Option<String>,
+
+    /// Connection timeout for cluster client in seconds
+    #[arg(long, default_value_t = 10)]
+    cluster_timeout: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::time::Duration;
+    
     // Logging via tracing-subscriber with env filter support
     tracing_subscriber::fmt::init();
 
@@ -98,9 +108,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata_backend.create()?
     };
 
-    // Create cluster service
     let broker_id = BrokerId(args.broker_id);
-    let cluster_service = Arc::new(ClusterServiceImpl::new(metadata_store, broker_id));
+
+    // Create cluster service with optional cluster client
+    let cluster_service = if let Some(controller_endpoint) = args.cluster_controller {
+        tracing::info!(%controller_endpoint, "Connecting to cluster controller");
+        
+        // Create cluster client with timeout
+        let timeout = Duration::from_secs(args.cluster_timeout);
+        let cluster_client = flashq_cluster::client::ClusterClient::connect_with_timeout(
+            controller_endpoint,
+            timeout,
+        ).await?;
+        
+        tracing::info!("Successfully connected to cluster controller");
+        let service = Arc::new(ClusterServiceImpl::with_client(metadata_store, cluster_client, broker_id));
+        
+        // Start follower heartbeat task
+        if let Err(e) = service.start_follower_heartbeat_task().await {
+            tracing::error!("Failed to start follower heartbeat task: {}", e);
+            return Err(e.into());
+        }
+        
+        service
+    } else {
+        tracing::info!("Running in standalone mode (no cluster controller)");
+        Arc::new(ClusterServiceImpl::new(metadata_store, broker_id))
+    };
 
     tracing::info!(%addr, broker_id = %args.broker_id, "Starting FlashQ gRPC server with cluster support");
     flashq_grpc::server::serve(addr, core, cluster_service).await?;

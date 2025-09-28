@@ -13,12 +13,13 @@ use crate::{
     metadata_store::MetadataStore,
     proto::{
         BrokerDirective, BrokerInfo, BrokerStatus, DescribeClusterResponse, HeartbeatRequest,
-        HeartbeatResponse, PartitionEpochUpdate, PartitionInfo, ReportPartitionStatusRequest,
+        HeartbeatResponse, PartitionEpochUpdate, PartitionHeartbeat, PartitionInfo, ReportPartitionStatusRequest,
         ReportPartitionStatusResponse, TopicAssignment,
     },
     traits::ClusterService,
     types::*,
 };
+
 
 /// Implementation of ClusterService that coordinates cluster metadata operations.
 ///
@@ -65,6 +66,115 @@ impl ClusterServiceImpl {
     /// Get a reference to the cluster client, if available.
     pub fn cluster_client(&self) -> Option<&ClusterClient> {
         self.cluster_client.as_ref()
+    }
+
+    /// Start a background heartbeat task if this is a follower broker.
+    ///
+    /// This logs that the cluster client integration is available.
+    /// TODO: Implement actual streaming heartbeat once Rust 2024 lifetime issues are resolved
+    pub async fn start_follower_heartbeat_task(&self) -> Result<(), ClusterError> {
+        if self.cluster_client.is_some() {
+            let broker_id = self.broker_id;
+            tracing::info!(%broker_id, "Cluster client integration available - heartbeat task ready");
+            // TODO: For now, we just confirm the integration works
+            // In the future, implement streaming heartbeat here
+            Ok(())
+        } else {
+            tracing::debug!("No cluster client available, skipping heartbeat task");
+            Ok(())
+        }
+    }
+    
+    /// Collect partition status for heartbeat messages.
+    async fn collect_partition_heartbeats(
+        _metadata_store: &Arc<dyn MetadataStore>,
+        _broker_id: BrokerId,
+    ) -> Vec<PartitionHeartbeat> {
+        // TODO: This should collect actual partition status from the broker's storage backend
+        // For now, return empty vector as placeholder
+        Vec::new()
+    }
+    
+    /// Process heartbeat response from controller.
+    async fn process_heartbeat_response(
+        metadata_store: &Arc<dyn MetadataStore>,
+        response: HeartbeatResponse,
+    ) -> Result<(), ClusterError> {
+        // Process epoch updates
+        for epoch_update in response.epoch_updates {
+            let topic = &epoch_update.topic;
+            let partition_id = PartitionId::from(epoch_update.partition);
+            let new_epoch = Epoch::from(epoch_update.new_epoch);
+            
+            // Apply epoch update if it's newer than current
+            if let Ok(current_epoch) = metadata_store.get_partition_epoch(topic, partition_id) {
+                if new_epoch > current_epoch {
+                    // Update the epoch in metadata store
+                    metadata_store.compare_and_set_epoch(topic, partition_id, current_epoch, new_epoch)?;
+                    tracing::info!(%topic, %partition_id, old_epoch = %current_epoch, new_epoch = %new_epoch, "Applied epoch update from controller");
+                }
+            }
+        }
+        
+        // Process directives
+        for directive in response.directives {
+            match BrokerDirective::try_from(directive) {
+                Ok(BrokerDirective::None) => {
+                    // No directive - ignore
+                }
+                Ok(BrokerDirective::Resync) => {
+                    tracing::info!("Received RESYNC directive from controller");
+                    // TODO: Implement resync logic - fetch fresh cluster state
+                }
+                Ok(BrokerDirective::Drain) => {
+                    tracing::info!("Received DRAIN directive from controller");
+                    // TODO: Implement drain logic - stop accepting new requests
+                }
+                Ok(BrokerDirective::Shutdown) => {
+                    tracing::warn!("Received SHUTDOWN directive from controller");
+                    // TODO: Implement graceful shutdown
+                }
+                Err(_) => {
+                    tracing::warn!("Received unknown directive: {}", directive);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Report partition status change to the controller.
+    pub async fn report_partition_status_to_controller(
+        &self,
+        topic: &str,
+        partition: PartitionId,
+        leader: BrokerId,
+        in_sync_replicas: Vec<BrokerId>,
+        high_water_mark: u64,
+        log_start_offset: u64,
+    ) -> Result<(), ClusterError> {
+        if let Some(mut client) = self.cluster_client.as_ref().cloned() {
+            let request = ReportPartitionStatusRequest {
+                topic: topic.to_string(),
+                partition: partition.into(),
+                leader: leader.into(),
+                replicas: vec![], // TODO: Pass actual replicas list
+                in_sync_replicas: in_sync_replicas.into_iter().map(|id| id.into()).collect(),
+                high_water_mark,
+                log_start_offset,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            
+            let response = client.report_partition_status(request).await?;
+            
+            if !response.accepted {
+                tracing::warn!("Controller rejected partition status report: {}", response.message);
+            } else {
+                tracing::debug!("Partition status report accepted by controller");
+            }
+        }
+        
+        Ok(())
     }
 }
 
