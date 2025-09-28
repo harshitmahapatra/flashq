@@ -1,4 +1,4 @@
-use super::test_utilities::TestServer;
+use crate::test_utilities::TestServer;
 use flashq_grpc::flashq::v1 as proto;
 
 #[tokio::test]

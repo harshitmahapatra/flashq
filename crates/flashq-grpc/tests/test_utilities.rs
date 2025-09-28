@@ -10,8 +10,11 @@ use tokio::time::sleep;
 
 // Re-export cluster types for test convenience
 pub use flashq_cluster::{
-    Record, metadata_store::FileMetadataStore, service::ClusterServiceImpl, types::*,
+    Record,
+    metadata_store::FileMetadataStore,
+    service::ClusterServiceImpl,
     storage::{StorageBackend, file::SyncMode},
+    types::*,
 };
 pub use flashq_grpc::server::FlashqGrpcService;
 
@@ -38,7 +41,8 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        *SERVER_BINARY_PATH.lock().unwrap() = Some(PathBuf::from("target/debug/grpc-server"));
+        *SERVER_BINARY_PATH.lock().unwrap() =
+            Some(PathBuf::from("../../../target/debug/grpc-server"));
     });
     Ok(SERVER_BINARY_PATH
         .lock()
@@ -166,14 +170,15 @@ pub fn create_test_broker_with_cluster_service(
     let storage_backend = StorageBackend::new_file_with_path(
         SyncMode::None, // Use no sync for tests to avoid performance overhead
         temp_dir.path().join("flashq_data"),
-    ).expect("Failed to create file storage backend");
+    )
+    .expect("Failed to create file storage backend");
 
-    let core = Arc::new(flashq_cluster::FlashQ::with_storage_backend(storage_backend));
+    let core = Arc::new(flashq_cluster::FlashQ::with_storage_backend(
+        storage_backend,
+    ));
 
     // Create file-based metadata store for cluster
-    let metadata_store = Arc::new(
-        FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap()
-    );
+    let metadata_store = Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
 
     // Create FlashQ gRPC service
     let grpc_service = Arc::new(FlashqGrpcService::new(core));

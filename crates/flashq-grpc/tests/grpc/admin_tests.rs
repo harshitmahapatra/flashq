@@ -1,4 +1,4 @@
-use super::test_utilities::TestServer;
+use crate::test_utilities::TestServer;
 
 #[tokio::test]
 async fn test_admin_health_and_topics() {

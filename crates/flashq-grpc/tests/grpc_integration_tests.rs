@@ -3,9 +3,9 @@
 // Organizes all gRPC-related integration tests into a single test target.
 // Individual test modules are located in the tests/grpc/ directory.
 
-mod grpc {
-    pub mod test_utilities;
+pub mod test_utilities;
 
+mod grpc {
     pub mod admin_tests;
     pub mod consumer_tests;
     pub mod producer_tests;
