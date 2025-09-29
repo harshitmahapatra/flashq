@@ -555,21 +555,19 @@ impl flashq_cluster::ClusterBroker for FlashQGrpcBroker {
 pub async fn serve(
     addr: SocketAddr,
     core: Arc<flashq_cluster::FlashQ>,
-    cluster_service: Arc<flashq_cluster::service::ClusterServiceImpl>,
+    cluster_server: flashq_cluster::ClusterServer<flashq_cluster::service::ClusterServiceImpl>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let svc = FlashQGrpcBroker::new(core);
     tonic::transport::Server::builder()
         .layer(TraceLayer::new_for_http())
-        .add_service(crate::flashq::v1::producer_server::ProducerServer::new(
+        .add_service(producer_server::ProducerServer::new(
             svc.clone(),
         ))
-        .add_service(crate::flashq::v1::consumer_server::ConsumerServer::new(
+        .add_service(consumer_server::ConsumerServer::new(
             svc.clone(),
         ))
-        .add_service(crate::flashq::v1::admin_server::AdminServer::new(svc))
-        .add_service(crate::ClusterServer::new(
-            flashq_cluster::ClusterServer::new(cluster_service),
-        ))
+        .add_service(admin_server::AdminServer::new(svc))
+        .add_service(crate::ClusterServer::new(cluster_server))
         .serve(addr)
         .await?;
     Ok(())

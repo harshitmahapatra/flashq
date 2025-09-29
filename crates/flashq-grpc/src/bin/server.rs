@@ -150,6 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     tracing::info!(%addr, broker_id = %args.broker_id, "Starting FlashQ gRPC server with cluster support");
-    flashq_grpc::server::serve(addr, core, cluster_service).await?;
+    let cluster_server = flashq_cluster::ClusterServer::new(cluster_service);
+    flashq_grpc::server::serve(addr, core, cluster_server).await?;
     Ok(())
 }
