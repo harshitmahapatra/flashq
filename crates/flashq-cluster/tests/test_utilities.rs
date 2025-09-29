@@ -159,40 +159,6 @@ impl ClusterBroker for MockFlashQBroker {
             })
     }
 
-    async fn is_partition_leader(
-        &self,
-        topic: &str,
-        partition: PartitionId,
-    ) -> Result<bool, ClusterError> {
-        if *self.should_error.lock().unwrap() {
-            return Err(ClusterError::Transport {
-                context: "Mock broker error".to_string(),
-                reason: "Simulated failure".to_string(),
-            });
-        }
-
-        let partitions = self.partitions.lock().unwrap();
-        partitions
-            .get(&(topic.to_string(), partition))
-            .map(|(_, _, is_leader)| *is_leader)
-            .ok_or_else(|| ClusterError::PartitionNotFound {
-                topic: topic.to_string(),
-                partition_id: partition.0,
-            })
-    }
-
-    async fn get_assigned_partitions(&self) -> Result<Vec<(String, PartitionId)>, ClusterError> {
-        if *self.should_error.lock().unwrap() {
-            return Err(ClusterError::Transport {
-                context: "Mock broker error".to_string(),
-                reason: "Simulated failure".to_string(),
-            });
-        }
-
-        let partitions = self.partitions.lock().unwrap();
-        Ok(partitions.keys().cloned().collect())
-    }
-
     async fn acknowledge_replication(
         &self,
         _topic: &str,

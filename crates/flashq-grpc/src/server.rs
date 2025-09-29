@@ -491,39 +491,6 @@ impl flashq_cluster::ClusterBroker for FlashQGrpcBroker {
         Ok(0)
     }
 
-    async fn is_partition_leader(
-        &self,
-        _topic: &str,
-        partition: flashq_cluster::types::PartitionId,
-    ) -> Result<bool, flashq_cluster::ClusterError> {
-        // For now, FlashQ only supports single partition (partition 0)
-        if partition.0 != 0 {
-            return Err(flashq_cluster::ClusterError::PartitionNotFound {
-                topic: _topic.to_string(),
-                partition_id: partition.0,
-            });
-        }
-
-        // In standalone mode, this broker is always the leader
-        // TODO: Implement proper leadership logic when cluster mode is fully supported
-        Ok(true)
-    }
-
-    async fn get_assigned_partitions(
-        &self,
-    ) -> Result<Vec<(String, flashq_cluster::types::PartitionId)>, flashq_cluster::ClusterError>
-    {
-        let topics = self.core.get_topics();
-        let mut partitions = Vec::new();
-
-        for topic in topics {
-            // For now, FlashQ only supports single partition (partition 0) per topic
-            partitions.push((topic, flashq_cluster::types::PartitionId(0)));
-        }
-
-        Ok(partitions)
-    }
-
     async fn acknowledge_replication(
         &self,
         topic: &str,

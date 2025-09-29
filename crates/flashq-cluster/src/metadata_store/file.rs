@@ -480,4 +480,20 @@ impl MetadataStore for FileMetadataStore {
         self.persist_to_disk()?;
         Ok(())
     }
+
+    fn get_broker_partitions(&self, broker: BrokerId) -> Result<Vec<(String, PartitionId)>, ClusterError> {
+        let state = self.state.read();
+        let mut partitions = Vec::new();
+
+        for (topic_name, topic) in &state.manifest.topics {
+            for partition_assignment in &topic.partitions {
+                // Check if this broker is in the replica set for this partition
+                if partition_assignment.replicas.contains(&broker) {
+                    partitions.push((topic_name.clone(), partition_assignment.id));
+                }
+            }
+        }
+
+        Ok(partitions)
+    }
 }

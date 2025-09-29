@@ -263,50 +263,58 @@ impl ClusterServiceImpl {
     ) -> Vec<PartitionHeartbeat> {
         let mut heartbeats = Vec::new();
 
-        if let Some(broker) = flashq_broker {
-            // Get all partitions assigned to this broker
-            if let Ok(partitions) = broker.get_assigned_partitions().await {
-                for (topic, partition_id) in partitions {
-                    // Get current epoch from metadata store
-                    let leader_epoch = metadata_store
-                        .get_partition_epoch(&topic, partition_id)
-                        .unwrap_or_else(|_| Epoch::from(0));
-
-                    // Check if this broker is the leader for the partition
-                    let is_leader = broker
-                        .is_partition_leader(&topic, partition_id)
-                        .await
-                        .unwrap_or(false);
-
-                    // Get high water mark and log start offset
-                    let high_water_mark = broker
-                        .get_high_water_mark(&topic, partition_id)
-                        .await
-                        .unwrap_or(0);
-
-                    let log_start_offset = broker
-                        .get_log_start_offset(&topic, partition_id)
-                        .await
-                        .unwrap_or(0);
-
-                    // Get current in-sync replicas from metadata store
-                    let current_in_sync_replicas = metadata_store
-                        .get_in_sync_replicas(&topic, partition_id)
-                        .map(|isr| isr.into_iter().map(|id| id.into()).collect())
-                        .unwrap_or_else(|_| vec![broker_id.into()]);
-
-                    heartbeats.push(PartitionHeartbeat {
-                        topic: topic.clone(),
-                        partition: partition_id.into(),
-                        leader_epoch: leader_epoch.into(),
-                        is_leader,
-                        high_water_mark,
-                        log_start_offset,
-                        current_in_sync_replicas,
-                        leader_override: None, // No leader override for normal heartbeats
-                    });
-                }
+        // Get all partitions assigned to this broker from metadata store (cluster state)
+        let partitions = match metadata_store.get_broker_partitions(broker_id) {
+            Ok(partitions) => partitions,
+            Err(e) => {
+                tracing::warn!("Failed to get broker partitions from metadata store: {}", e);
+                return heartbeats;
             }
+        };
+
+        for (topic, partition_id) in partitions {
+            // Get current epoch from metadata store
+            let leader_epoch = metadata_store
+                .get_partition_epoch(&topic, partition_id)
+                .unwrap_or_else(|_| Epoch::from(0));
+
+            // Check if this broker is the leader for the partition (from cluster metadata)
+            let is_leader = metadata_store
+                .get_partition_leader(&topic, partition_id)
+                .map(|leader| leader == broker_id)
+                .unwrap_or(false);
+
+            // Get broker runtime metrics (high water mark and log start offset)
+            let (high_water_mark, log_start_offset) = if let Some(broker) = flashq_broker {
+                let hwm = broker
+                    .get_high_water_mark(&topic, partition_id)
+                    .await
+                    .unwrap_or(0);
+                let lso = broker
+                    .get_log_start_offset(&topic, partition_id)
+                    .await
+                    .unwrap_or(0);
+                (hwm, lso)
+            } else {
+                (0, 0)
+            };
+
+            // Get current in-sync replicas from metadata store
+            let current_in_sync_replicas = metadata_store
+                .get_in_sync_replicas(&topic, partition_id)
+                .map(|isr| isr.into_iter().map(|id| id.into()).collect())
+                .unwrap_or_else(|_| vec![broker_id.into()]);
+
+            heartbeats.push(PartitionHeartbeat {
+                topic: topic.clone(),
+                partition: partition_id.into(),
+                leader_epoch: leader_epoch.into(),
+                is_leader,
+                high_water_mark,
+                log_start_offset,
+                current_in_sync_replicas,
+                leader_override: None, // No leader override for normal heartbeats
+            });
         }
 
         heartbeats

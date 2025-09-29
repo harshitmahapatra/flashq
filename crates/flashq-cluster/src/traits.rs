@@ -16,33 +16,24 @@ use async_trait::async_trait;
 /// Defines the cluster integration interface for FlashQ brokers.
 ///
 /// Any broker implementation (gRPC, HTTP, etc.) must implement this trait
-/// to participate in cluster coordination and provide runtime state to the
-/// cluster management layer.
+/// to provide runtime state (not cluster metadata) to the cluster management layer.
+/// Cluster metadata queries (partition assignments, leadership) are handled directly
+/// by the MetadataStore.
 #[async_trait]
 pub trait ClusterBroker: Send + Sync {
-    /// Fetch the current high water mark for a partition.
+    /// Fetch the current high water mark for a partition from the broker's local log.
     async fn get_high_water_mark(
         &self,
         topic: &str,
         partition: PartitionId,
     ) -> Result<u64, ClusterError>;
 
-    /// Get the log start offset for a partition.
+    /// Get the log start offset for a partition from the broker's local log.
     async fn get_log_start_offset(
         &self,
         topic: &str,
         partition: PartitionId,
     ) -> Result<u64, ClusterError>;
-
-    /// Check if this broker is the leader for a given partition.
-    async fn is_partition_leader(
-        &self,
-        topic: &str,
-        partition: PartitionId,
-    ) -> Result<bool, ClusterError>;
-
-    /// Get the list of partitions this broker is responsible for.
-    async fn get_assigned_partitions(&self) -> Result<Vec<(String, PartitionId)>, ClusterError>;
 
     /// Acknowledge that a record batch has been successfully replicated.
     async fn acknowledge_replication(

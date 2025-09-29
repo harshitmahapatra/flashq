@@ -221,49 +221,37 @@ async fn test_flashq_broker_get_log_start_offset_integration() {
 }
 
 #[tokio::test]
-async fn test_flashq_broker_is_partition_leader_integration() {
+async fn test_metadata_store_partition_leader_query() {
     // Setup
-    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
-    let topic = "leadership-topic";
+    let (_broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let topic = "test-topic";
 
-    // Action
-    let is_leader = broker
-        .is_partition_leader(topic, PartitionId(0))
-        .await
+    // Action - Query leadership from metadata store (new architecture)
+    let leader = cluster_service
+        .metadata_store()
+        .get_partition_leader(topic, PartitionId(0))
         .unwrap();
 
-    // Expectation
-    assert!(is_leader);
+    // Expectation - Broker 1 is the leader according to the manifest
+    assert_eq!(leader, BrokerId(1));
 }
 
 #[tokio::test]
-async fn test_flashq_broker_get_assigned_partitions_integration() {
+async fn test_metadata_store_broker_partitions_query() {
     // Setup
-    let (broker, _cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
+    let (_broker, cluster_service, _temp_dir) = setup_broker_with_cluster_service().await;
 
-    // Create topics by posting records
-    broker
-        .core
-        .post_records(
-            "topic1".to_string(),
-            vec![Record::new(None, "data1".to_string(), None)],
-        )
-        .unwrap();
-    broker
-        .core
-        .post_records(
-            "topic2".to_string(),
-            vec![Record::new(None, "data2".to_string(), None)],
-        )
+    // Action - Query partition assignments from metadata store (new architecture)
+    let partitions = cluster_service
+        .metadata_store()
+        .get_broker_partitions(BrokerId(1))
         .unwrap();
 
-    // Action
-    let partitions = broker.get_assigned_partitions().await.unwrap();
-
-    // Expectation
-    assert!(partitions.len() >= 2);
-    assert!(partitions.contains(&("topic1".to_string(), PartitionId(0))));
-    assert!(partitions.contains(&("topic2".to_string(), PartitionId(0))));
+    // Expectation - Broker 1 should be assigned partitions for all test topics
+    assert!(partitions.len() >= 3); // At least 3 topics in the manifest
+    assert!(partitions.contains(&("test-topic".to_string(), PartitionId(0))));
+    assert!(partitions.contains(&("status-topic".to_string(), PartitionId(0))));
+    assert!(partitions.contains(&("heartbeat-topic".to_string(), PartitionId(0))));
 }
 
 #[tokio::test]
