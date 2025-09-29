@@ -9,7 +9,6 @@ use flashq_cluster::{
     manifest::types::{BrokerSpec, ClusterManifest, PartitionAssignment, TopicAssignment},
     metadata_store::{FileMetadataStore, MetadataStore},
     proto::{HeartbeatRequest, PartitionHeartbeat, ReportPartitionStatusRequest},
-    service::ClusterServiceImpl,
     types::*,
 };
 use flashq_grpc::server::FlashQGrpcBroker;
@@ -58,7 +57,7 @@ fn seeded_manifest() -> ClusterManifest {
 
 /// Setup function that creates a FlashQ broker with file storage and cluster service
 async fn setup_broker_with_cluster_service()
--> (Arc<FlashQGrpcBroker>, Arc<ClusterServiceImpl>, TempDir) {
+-> (Arc<FlashQGrpcBroker>, Arc<dyn ClusterService>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
 
     // Create FlashQ core with memory storage for simplicity
@@ -75,7 +74,7 @@ async fn setup_broker_with_cluster_service()
     let broker = Arc::new(FlashQGrpcBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
-    let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
+    let cluster_service: Arc<dyn ClusterService> = Arc::new(flashq_cluster::service::ClusterServiceImpl::with_broker(
         metadata_store,
         BrokerId(1),
         broker.clone(),
@@ -324,11 +323,13 @@ async fn test_cluster_service_heartbeat_persistence() {
             store
         };
 
-        let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
-            metadata_store,
-            BrokerId(1),
-            broker.clone(),
-        ));
+        let cluster_service: Arc<dyn ClusterService> = Arc::new(
+            flashq_cluster::service::ClusterServiceImpl::with_broker(
+                metadata_store,
+                BrokerId(1),
+                broker.clone(),
+            )
+        );
 
         let request = HeartbeatRequest {
             broker_id: 1,
@@ -352,7 +353,9 @@ async fn test_cluster_service_heartbeat_persistence() {
     // Action: Create new service from same directory to verify persistence
     let metadata_store2 =
         Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
-    let cluster_service2 = Arc::new(ClusterServiceImpl::new(metadata_store2, BrokerId(1)));
+    let cluster_service2: Arc<dyn ClusterService> = Arc::new(
+        flashq_cluster::service::ClusterServiceImpl::new(metadata_store2, BrokerId(1))
+    );
 
     let describe_response = cluster_service2.describe_cluster().await.unwrap();
 

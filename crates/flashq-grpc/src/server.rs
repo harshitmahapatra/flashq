@@ -519,10 +519,10 @@ impl flashq_cluster::ClusterBroker for FlashQGrpcBroker {
 }
 
 /// Run a gRPC server with the FlashQ services on the given address.
-pub async fn serve(
+pub async fn serve<T: flashq_cluster::ClusterService + 'static>(
     addr: SocketAddr,
     core: Arc<flashq_cluster::FlashQ>,
-    cluster_server: flashq_cluster::ClusterServer<flashq_cluster::service::ClusterServiceImpl>,
+    cluster_server: flashq_cluster::ClusterServer<T>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let svc = FlashQGrpcBroker::new(core);
     tonic::transport::Server::builder()
