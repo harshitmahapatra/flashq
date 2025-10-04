@@ -1,0 +1,28 @@
+[package]
+name = "flashq-cluster"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+flashq = { path = "../flashq" }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tonic.workspace = true
+prost.workspace = true
+parking_lot.workspace = true
+log.workspace = true
+tracing.workspace = true
+futures-util.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+chrono.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

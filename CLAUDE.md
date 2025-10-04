@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with HTTP REST and gRPC API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with three crates:
+FlashQ is a Kafka-inspired record queue implementation with HTTP REST and gRPC API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with four crates:
 
 - **`flashq`** - Core library with storage backends and queue management
 - **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
 - **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
+- **`flashq-cluster`** - Cluster coordination and metadata management
 
-The project includes enhanced record structure with keys, headers, and offsets, consumer groups, Kafka-aligned segment architecture, and full integration test coverage.
+The project includes enhanced record structure with keys, headers, and offsets, snapshot-based consumer offset storage, Kafka-aligned segment architecture, cluster coordination protocols, and full integration test coverage.
 
 ## Development Commands
 
@@ -41,6 +42,7 @@ The project includes enhanced record structure with keys, headers, and offsets, 
 - `cargo test -p flashq --test storage_integration_tests` - Run storage tests
 - `cargo test -p flashq-http --test http_integration_tests` - Run HTTP tests
 - `cargo test -p flashq-grpc --test grpc_integration_tests` - Run gRPC tests
+- `cargo test -p flashq-cluster --test '*'` - Run cluster coordination tests
 - `cargo test <test_name>` - Run a specific test
 - `cargo clippy` - Run Rust linter for code quality checks
 - `cargo fmt` - Format code according to Rust style guidelines
@@ -71,6 +73,7 @@ Following Rust best practices with a workspace containing two library and binary
 - `crates/flashq/` - Core library crate with storage backends
 - `crates/flashq-http/` - HTTP broker, producer, consumer, and client crate
 - `crates/flashq-grpc/` - gRPC broker, producer, consumer, and client crate
+- `crates/flashq-cluster/` - Cluster coordination and metadata management crate
 
 ### Core Library Crate (`crates/flashq/`)
 - `src/lib.rs` - Library crate containing core record queue functionality
@@ -92,11 +95,26 @@ Following Rust best practices with a workspace containing two library and binary
 - `build.rs` - Protocol Buffer code generation with vendored protoc
 - `proto/flashq.proto` - Protocol Buffer schema definition
 - `src/lib.rs` - gRPC library exports and generated code
-- `src/bin/server.rs` - gRPC server implementation
+- `src/bin/server.rs` - gRPC server implementation with cluster integration
 - `src/bin/client.rs` - CLI client for gRPC operations
 - `src/server.rs` - Producer/Consumer/Admin service implementations
 - `src/client.rs` - gRPC client connection utilities
 - `tests/grpc/` - gRPC integration test suite
+- `tests/cluster/` - Cluster coordination integration tests
+
+### Cluster Crate (`crates/flashq-cluster/`)
+- `Cargo.toml` - Cluster dependencies (tonic, serde, serde_yaml)
+- `build.rs` - Protocol Buffer code generation for cluster protocol
+- `proto/cluster.proto` - Cluster coordination protocol definition
+- `src/lib.rs` - Cluster library exports and generated code
+- `src/service.rs` - ClusterServiceImpl implementation
+- `src/server.rs` - ClusterServer gRPC adapter
+- `src/client.rs` - ClusterClient gRPC adapter
+- `src/traits.rs` - ClusterService and ClusterBroker trait definitions
+- `src/metadata_store/` - Metadata storage implementations (memory/file)
+- `src/manifest/` - Manifest loading from YAML/JSON
+- `tests/` - Comprehensive cluster coordination test suite
+- `README.md` - Detailed cluster architecture documentation
 
 ### Core Library Components
 - `Record` struct - Record payload with optional key and headers
@@ -110,7 +128,7 @@ Following Rust best practices with a workspace containing two library and binary
 
 ### Storage Module (`src/storage/`)
 - `StorageBackend` enum - Pluggable storage backend selection (memory/file)
-- `TopicLog` and `ConsumerGroup` traits - Storage abstraction layer with batched operations
+- `TopicLog` and `ConsumerOffsetStore` traits - Storage abstraction layer with batched operations
 - `batching_heuristics` - Shared utilities for record size estimation and batch optimization
 - `FileTopicLog` - Kafka-aligned segment-based file storage with crash recovery
 - `SegmentManager` - Manages log segment lifecycle and rolling
@@ -119,7 +137,8 @@ Following Rust best practices with a workspace containing two library and binary
 - `FileIO` trait - Abstraction for file I/O operations (standard vs io_uring)
 - `StdFileIO` - Standard file I/O implementation using std::fs
 - `IoUringFileIO` - Linux io_uring implementation (experimental, currently slower)
-- `FileConsumerGroup` - Persistent consumer group offset management
+- `FileConsumerOffsetStore` - Snapshot-based consumer offset storage with monotonic updates
+- `InMemoryConsumerOffsetStore` - In-memory offset snapshot storage
 - Directory locking mechanism to prevent concurrent access
 - Comprehensive error handling and recovery capabilities
 
@@ -169,11 +188,19 @@ This provides an excellent way to understand the library API and test functional
 
 **Storage Integration Tests (`crates/flashq/tests/storage/`):**
 - Segment-based file storage testing with crash recovery
-- Directory locking and concurrent access prevention  
+- Directory locking and concurrent access prevention
 - Error simulation (disk full, permission errors)
-- Consumer group persistence across restarts
+- Consumer offset store testing with monotonic enforcement
 - Segment architecture validation and sparse indexing
 - Batching operations testing with performance validation
+
+**Cluster Integration Tests (`crates/flashq-cluster/tests/`):**
+- ClusterService implementation testing
+- Metadata store operations (memory and file backends)
+- Manifest loading and cluster initialization
+- Heartbeat protocol and epoch tracking
+- ClusterServer/ClusterClient communication
+- Broker coordination scenarios
 
 ## Architecture Notes
 
@@ -183,20 +210,25 @@ Current implementation features:
 - **Topic-based organization**: Records organized by topic strings with separate offset counters
 - **Pluggable storage**: In-memory and file-based storage backends with batched operations
 - **File storage**: Kafka-aligned segment-based architecture with rolling segments and sparse indexing
+- **Snapshot-based offsets**: ConsumerOffsetStore trait with monotonic updates (Phase 3)
+- **Cluster coordination**: Metadata management, heartbeat protocol, and leader election
 - **Directory locking**: Prevents concurrent access to file storage directories
 - **Error handling**: Comprehensive error types with structured logging
 - **Crash recovery**: File storage recovers state from segment files with automatic discovery
 - **Offset-based positioning**: Sequential offsets within topics starting from 0
 - **Non-destructive polling**: Records remain in queue after being read
 - **FIFO ordering**: Records returned in the order they were posted with offset guarantees
-- **Thread safety**: Safe concurrent access using DashMap and Arc<RwLock<>>
+- **Thread safety**: Safe concurrent access using DashMap and parking_lot RwLock
 - **ISO 8601 timestamps**: Human-readable timestamp format for record creation time
-- **Consumer groups**: Persistent consumer group offset management
+- **Consumer groups**: Persistent consumer group offset management with monotonic enforcement
 - **Replay functionality**: Seek to specific offsets with `from_offset` parameter
 - **Record size validation**: OpenAPI-compliant validation (key: 1024 chars, value: 1MB, headers: 1024 chars each)
 - **HTTP REST API**: Full REST endpoints for posting, polling, and consumer group operations
+- **gRPC API**: Protocol Buffer-based API with streaming subscriptions
+- **Cluster gRPC protocol**: Bidirectional heartbeat streaming and metadata queries
+- **Manifest-based bootstrap**: Initialize cluster state from YAML/JSON configuration
 - **JSON serialization**: All data structures support serde for API communication
-- **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP API and storage
+- **Comprehensive testing**: Unit tests for core logic + integration tests for HTTP/gRPC/cluster coordination
 
 ## Performance Characteristics
 

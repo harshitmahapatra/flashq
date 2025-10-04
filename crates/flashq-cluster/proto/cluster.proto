@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package flashq.cluster;
+
+// Inter-cluster gRPC services for metadata sharing and broker coordination
+
+// Local Empty message to avoid external well-known type include for now
+message Empty {}
+
+// Directives that can be sent to brokers
+enum BrokerDirective {
+  NONE = 0;
+  SHUTDOWN = 1;
+  DRAIN = 2;
+  RESYNC = 3;
+}
+
+// ===========================
+// Broker and Cluster Information
+// ===========================
+
+message BrokerStatus {
+  bool is_alive = 1;
+  string last_heartbeat = 2; // RFC3339 timestamp
+  bool is_draining = 3;
+}
+
+message BrokerInfo {
+  uint32 broker_id = 1;
+  string host = 2;
+  uint32 port = 3;
+  bool is_alive = 4;
+  string last_heartbeat = 5; // RFC3339 timestamp
+  BrokerStatus status = 6;
+}
+
+message PartitionInfo {
+  string topic = 1;
+  uint32 partition = 2;
+  uint32 leader = 3;
+  repeated uint32 replicas = 4;
+  repeated uint32 in_sync_replicas = 5;
+  uint64 epoch = 6;
+}
+
+message TopicAssignment {
+  string topic = 1;
+  repeated PartitionInfo partitions = 2;
+}
+
+// ===========================
+// DescribeCluster RPC
+// ===========================
+
+message DescribeClusterRequest {}
+
+message DescribeClusterResponse {
+  repeated BrokerInfo brokers = 1;
+  repeated TopicAssignment topics = 2;
+  uint32 controller_id = 3; // optional: which broker is the controller
+}
+
+// ===========================
+// Heartbeat RPC (Bidirectional Streaming)
+// ===========================
+
+message PartitionHeartbeat {
+  string topic = 1;
+  uint32 partition = 2;
+  uint64 high_water_mark = 3;
+  uint64 log_start_offset = 4;
+  bool is_leader = 5;
+  repeated uint32 current_in_sync_replicas = 6;
+  uint64 leader_epoch = 7;
+  optional uint32 leader_override = 8;
+}
+
+message HeartbeatRequest {
+  uint32 broker_id = 1;
+  repeated PartitionHeartbeat partitions = 2;
+  string timestamp = 3; // RFC3339
+}
+
+message PartitionEpochUpdate {
+  string topic = 1;
+  uint32 partition = 2;
+  uint64 new_epoch = 3;
+  uint32 new_leader = 4; // optional: if leadership changed
+}
+
+message HeartbeatResponse {
+  repeated PartitionEpochUpdate epoch_updates = 1;
+  string timestamp = 2; // RFC3339
+  repeated BrokerDirective directives = 3;
+}
+
+// ===========================
+// ReportPartitionStatus RPC
+// ===========================
+
+message ReportPartitionStatusRequest {
+  string topic = 1;
+  uint32 partition = 2;
+  uint32 leader = 3;
+  repeated uint32 replicas = 4;
+  repeated uint32 in_sync_replicas = 5;
+  uint64 high_water_mark = 6;
+  uint64 log_start_offset = 7;
+  string timestamp = 8; // RFC3339
+}
+
+message ReportPartitionStatusResponse {
+  bool accepted = 1;
+  string message = 2; // optional: reason if not accepted
+}
+
+// ===========================
+// Cluster Service Definition
+// ===========================
+
+service Cluster {
+  // Get current cluster state (brokers, topics, partitions)
+  rpc DescribeCluster(DescribeClusterRequest) returns (DescribeClusterResponse);
+
+  // Bidirectional streaming for broker heartbeats and epoch updates
+  rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+
+  // Report partition status changes (leadership, ISR updates)
+  rpc ReportPartitionStatus(ReportPartitionStatusRequest) returns (ReportPartitionStatusResponse);
+}

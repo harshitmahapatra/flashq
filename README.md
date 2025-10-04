@@ -1,21 +1,23 @@
 # ⚡ FlashQ
 
-A Kafka-inspired record queue system built in Rust with HTTP REST and gRPC APIs. The project consists of three crates in a Cargo workspace:
+A Kafka-inspired record queue system built in Rust with HTTP REST and gRPC APIs. The project consists of four crates in a Cargo workspace:
 
 - **`flashq`** - Core library with storage backends and queue management
 - **`flashq-http`** - HTTP broker, producer, consumer, and client implementations
 - **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
+- **`flashq-cluster`** - Cluster coordination and metadata management
 
 **Note: This is a hobby project for learning Rust - not for production use.**
 
 ## Features
 
 - Topic-based messaging with keys and headers
-- Partition-aware consumer groups with per-partition offset tracking
+- Partition-aware consumer groups with snapshot-based offset storage
 - Time-based polling for historical data queries
 - Configurable batch operations for high-throughput processing
 - HTTP REST API with JSON and gRPC API with Protocol Buffers
 - Real-time streaming subscriptions (gRPC)
+- Cluster coordination with metadata management and heartbeat protocol
 - Thread-safe concurrent access
 - Kafka-aligned segment-based file storage with crash recovery
 - Error handling with structured logging

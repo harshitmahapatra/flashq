@@ -108,12 +108,24 @@ pub trait TopicLog: Send + Sync {
 }
 
 pub trait ConsumerGroup: Send + Sync {
-    // New partition-aware methods (primary interface)
-    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64;
-    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64);
-    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64>;
+    fn offset_store(&self) -> &dyn ConsumerOffsetStore;
 
-    // Existing methods for backward compatibility (delegate to partition 0)
+    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64 {
+        self.offset_store()
+            .load_snapshot(topic, partition_id)
+            .unwrap_or(0)
+    }
+
+    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64) {
+        let _ = self
+            .offset_store()
+            .persist_snapshot(topic, partition_id, offset);
+    }
+
+    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64> {
+        self.offset_store().get_all_snapshots().unwrap_or_default()
+    }
+
     fn get_offset(&self, topic: &str) -> u64 {
         self.get_offset_partition(topic, PartitionId(0))
     }
@@ -135,5 +147,41 @@ pub trait ConsumerGroup: Send + Sync {
             .collect()
     }
 
+    fn group_id(&self) -> &str {
+        self.offset_store().group_id()
+    }
+}
+
+/// Snapshot-based consumer offset storage trait for Phase 3+
+///
+/// This trait replaces the mutable `ConsumerGroup` trait with an immutable
+/// snapshot-based approach that supports monotonic offset updates and
+/// cluster-wide coordination (Phase 4).
+///
+/// Key properties:
+/// - **Monotonic updates**: `persist_snapshot` only persists if new_offset >= current
+/// - **O(1) storage**: Single snapshot per (topic, partition, group)
+/// - **Thread-safe**: Implementations must be Send + Sync
+/// - **Cluster-ready**: Prepares for leader-follower snapshot replication
+pub trait ConsumerOffsetStore: Send + Sync {
+    /// Load the committed offset snapshot for a specific topic/partition/group.
+    /// Returns 0 if no snapshot exists.
+    fn load_snapshot(&self, topic: &str, partition_id: PartitionId) -> Result<u64, StorageError>;
+
+    /// Persist an offset snapshot with monotonic enforcement.
+    /// Only persists if new_offset >= current_offset to prevent regression.
+    /// Returns Ok(true) if persisted, Ok(false) if rejected as stale.
+    fn persist_snapshot(
+        &self,
+        topic: String,
+        partition_id: PartitionId,
+        offset: u64,
+    ) -> Result<bool, StorageError>;
+
+    /// Get all offset snapshots for this consumer group.
+    /// Returns map of (topic, partition) -> offset.
+    fn get_all_snapshots(&self) -> Result<HashMap<(String, PartitionId), u64>, StorageError>;
+
+    /// Get the consumer group ID.
     fn group_id(&self) -> &str;
 }

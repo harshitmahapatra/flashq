@@ -11,6 +11,7 @@ graph TD
     C[Interactive Demo] --> D[FlashQ Core Library]
     B --> D
     B2 --> D
+    B2 --> CS[ClusterService]
 
     subgraph "flashq-http crate"
         B
@@ -22,23 +23,36 @@ graph TD
         A2
     end
 
+    subgraph "flashq-cluster crate"
+        CS
+        CC[ClusterClient]
+        CSrv[ClusterServer]
+        MS[MetadataStore]
+        ML[ManifestLoader]
+    end
+
     subgraph "flashq crate"
         D
         E[DashMap Topics]
-        F[DashMap Consumer Groups]
+        F[DashMap Consumer Offset Stores]
     end
 
     D --> E
     D --> F
 
     E -->|"1:N"| G[Arc RwLock TopicLog]
-    F -->|"1:N"| H[Arc RwLock ConsumerGroup]
+    F -->|"1:N"| H[Arc ConsumerOffsetStore]
+
+    CS --> MS
+    CS --> B2
+    CSrv --> CS
+    ML --> MS
 
     subgraph "Storage Backends"
         I[InMemoryTopicLog]
         J[FileTopicLog]
-        K[InMemoryConsumerGroup]
-        L[FileConsumerGroup]
+        K[InMemoryConsumerOffsetStore]
+        L[FileConsumerOffsetStore]
     end
 
     subgraph "File Storage Hierarchy"
@@ -62,17 +76,24 @@ graph TD
 - `FlashQ`: Main queue with topic and consumer group management
 - `Record/RecordWithOffset`: Message structures with keys, headers, and offsets
 - `PartitionId`: Partition identification for topic organization
-- `TopicLog/ConsumerGroup` traits: Storage abstraction layer
+- `TopicLog/ConsumerOffsetStore` traits: Storage abstraction layer
 - `StorageBackend`: Pluggable backends (memory/file) with batching
 - `FileTopicLog`: File storage with partitions and segments
 - `InMemoryTopicLog`: Fast in-memory storage
 
+**Cluster Components:**
+- `ClusterService`: Interface for cluster coordination operations
+- `MetadataStore`: Persistent storage for broker and partition metadata
+- `ClusterServer/ClusterClient`: gRPC adapters for cluster communication
+- `ManifestLoader`: Bootstrap cluster state from configuration files
+
 **Key Features:**
 - Partition-aware storage infrastructure with per-partition offset tracking
-- Consumer groups with partition-aware offset management (defaults to partition 0)
+- Snapshot-based consumer offset management with monotonic updates
 - High-throughput batching with configurable batch sizes
 - Thread-safe concurrent access with DashMap and RwLocks
 - Kafka-style segment architecture with sparse indexing
+- Cluster coordination with heartbeat protocol and leader election
 - Crash recovery and directory locking for data safety
 - FIFO ordering with non-destructive polling
 
@@ -170,11 +191,20 @@ data/
 - **Kafka-aligned segments**: Rolling log files with sparse indexing
 - **Append-only logs**: Immutable history with FIFO ordering
 
-**Consumer Group Offset Tracking:**
-- Consumer groups track offsets per (topic, partition) pair
-- Internal ConsumerGroup trait supports partition-aware offset management
-- Backward compatible methods default to partition 0 for existing API compatibility
-- File-based consumer groups persist partition offsets to JSON files in `data/consumer_groups/`
+**Consumer Offset Management:**
+- **ConsumerOffsetStore trait**: Snapshot-based offset storage with monotonic updates
+- **Persistence**: File-based stores persist offsets to `data/consumer_groups/{group_id}.json`
+- **Format**: `{"group_id": "...", "offsets": {"topic--partition": offset}}`
+- **Monotonic enforcement**: `persist_snapshot` only updates if `new_offset >= current_offset`
+- **Thread-safe**: Implementations use parking_lot RwLock for concurrent access
+- **Backward compatibility**: Legacy ConsumerGroup trait still supported during transition
+
+**Cluster Coordination:**
+- **Metadata management**: Track brokers, topics, and partition assignments
+- **Heartbeat protocol**: Bidirectional streaming for broker liveness and state sync
+- **Epoch-based consistency**: Prevent split-brain scenarios during leadership changes
+- **Manifest loading**: Initialize cluster state from YAML/JSON configuration
+- **File-based persistence**: Cluster metadata stored in `metadata.json`
 
 **Current Limitation**: Multiple partitions are implemented at the storage layer but not yet exposed through the public API. All operations currently use partition 0.
 

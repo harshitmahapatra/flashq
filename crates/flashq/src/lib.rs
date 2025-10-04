@@ -1,7 +1,8 @@
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry::{Occupied, Vacant};
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use storage::{ConsumerGroup, TopicLog};
 
 pub mod demo;
@@ -10,8 +11,8 @@ pub mod storage;
 pub mod telemetry;
 
 pub use error::FlashQError;
+pub use storage::ConsumerOffsetStore;
 
-// Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};
 
 // =============================================================================
@@ -124,7 +125,7 @@ impl FlashQ {
                 .expect("Failed to create storage backend")
         });
 
-        let mut topic_log_locked = topic_log.value().write().unwrap();
+        let mut topic_log_locked = topic_log.value().write();
         let last = topic_log_locked
             .append_batch(records)
             .map_err(FlashQError::from)?;
@@ -153,7 +154,6 @@ impl FlashQ {
             Some(topic_log) => topic_log
                 .value()
                 .read()
-                .unwrap()
                 .get_records_from_offset(offset, count)
                 .map_err(FlashQError::from),
             None => Err(FlashQError::TopicNotFound {
@@ -174,7 +174,6 @@ impl FlashQ {
             Some(topic_log) => topic_log
                 .value()
                 .read()
-                .unwrap()
                 .get_records_from_timestamp(from_time, count)
                 .map_err(FlashQError::from),
             None => Err(FlashQError::TopicNotFound {
@@ -210,7 +209,7 @@ impl FlashQ {
         topic: &str,
     ) -> Result<u64, FlashQError> {
         match self.consumer_groups.get(group_id) {
-            Some(consumer_group) => Ok(consumer_group.value().read().unwrap().get_offset(topic)),
+            Some(consumer_group) => Ok(consumer_group.value().read().get_offset(topic)),
             None => Err(FlashQError::ConsumerGroupNotFound {
                 group_id: group_id.to_string(),
             }),
@@ -226,7 +225,7 @@ impl FlashQ {
         offset: u64,
     ) -> Result<(), FlashQError> {
         let topic_next_offset = match self.topics.get(&topic) {
-            Some(topic_log) => topic_log.value().write().unwrap().next_offset(),
+            Some(topic_log) => topic_log.value().write().next_offset(),
             None => {
                 return Err(FlashQError::TopicNotFound {
                     topic: topic.clone(),
@@ -244,11 +243,7 @@ impl FlashQ {
 
         match self.consumer_groups.get_mut(group_id) {
             Some(consumer_group) => {
-                consumer_group
-                    .value()
-                    .write()
-                    .unwrap()
-                    .set_offset(topic, offset);
+                consumer_group.value().write().set_offset(topic, offset);
                 Ok(())
             }
             None => Err(FlashQError::ConsumerGroupNotFound {
@@ -305,7 +300,7 @@ impl FlashQ {
 
     pub fn get_high_water_mark(&self, topic: &str) -> u64 {
         match self.topics.get(topic) {
-            Some(topic_log) => topic_log.value().read().unwrap().next_offset(),
+            Some(topic_log) => topic_log.value().read().next_offset(),
             None => 0,
         }
     }

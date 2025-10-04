@@ -2,10 +2,21 @@ use std::io::Read;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, Once};
+use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
+use tempfile::TempDir;
 use tokio::time::sleep;
+
+// Re-export cluster types for test convenience
+pub use flashq_cluster::{
+    Record,
+    metadata_store::FileMetadataStore,
+    service::ClusterServiceImpl,
+    storage::{StorageBackend, file::SyncMode},
+    types::*,
+};
+pub use flashq_grpc::server::FlashQGrpcBroker;
 
 static SERVER_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -30,7 +41,8 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        *SERVER_BINARY_PATH.lock().unwrap() = Some(PathBuf::from("target/debug/grpc-server"));
+        *SERVER_BINARY_PATH.lock().unwrap() =
+            Some(PathBuf::from("../../../target/debug/grpc-server"));
     });
     Ok(SERVER_BINARY_PATH
         .lock()
@@ -146,4 +158,54 @@ impl TestServer {
     pub fn data_dir(&self) -> Option<&Path> {
         self.data_dir.as_deref()
     }
+}
+
+/// Create a FlashQ broker with file storage and integrated cluster service for testing
+#[allow(dead_code)]
+pub fn create_test_broker_with_cluster_service(
+    temp_dir: &TempDir,
+    broker_id: BrokerId,
+) -> (Arc<FlashQGrpcBroker>, Arc<ClusterServiceImpl>) {
+    // Create FlashQ core with file storage backend (following server.rs pattern)
+    let storage_backend = StorageBackend::new_file_with_path(
+        SyncMode::None, // Use no sync for tests to avoid performance overhead
+        temp_dir.path().join("flashq_data"),
+    )
+    .expect("Failed to create file storage backend");
+
+    let core = Arc::new(flashq_cluster::FlashQ::with_storage_backend(
+        storage_backend,
+    ));
+
+    // Create file-based metadata store for cluster
+    let metadata_store = Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
+
+    // Create FlashQ gRPC service
+    let grpc_service = Arc::new(FlashQGrpcBroker::new(core));
+
+    // Create cluster service with FlashQ broker integration
+    let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
+        metadata_store,
+        broker_id,
+        grpc_service.clone(),
+    ));
+
+    (grpc_service, cluster_service)
+}
+
+/// Create a test topic with sample records for integration testing
+#[allow(dead_code)]
+pub fn create_test_topic_with_records(
+    grpc_service: &FlashQGrpcBroker,
+    topic: &str,
+    record_count: usize,
+) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+    let records: Vec<Record> = (0..record_count)
+        .map(|i| Record::new(None, format!("test-record-{i}"), None))
+        .collect();
+
+    grpc_service
+        .core
+        .post_records(topic.to_string(), records.clone())?;
+    Ok(records)
 }

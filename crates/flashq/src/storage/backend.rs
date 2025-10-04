@@ -1,13 +1,17 @@
 use crate::error::StorageError;
-use crate::storage::file::{FileConsumerGroup, FileTopicLog};
-use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
+use crate::storage::file::{FileConsumerGroup, FileConsumerOffsetStore, FileTopicLog};
+use crate::storage::{
+    ConsumerGroup, ConsumerOffsetStore, InMemoryConsumerGroup, InMemoryConsumerOffsetStore,
+    InMemoryTopicLog, TopicLog,
+};
 use crate::warn;
 use fs4::fs_std::FileExt;
 use log::debug;
+use parking_lot::RwLock;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use sysinfo::{ProcessesToUpdate, System};
 
 #[derive(Debug)]
@@ -159,6 +163,25 @@ impl StorageBackend {
             } => {
                 let consumer_group = FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
                 Ok(Arc::new(RwLock::new(consumer_group)))
+            }
+        }
+    }
+
+    pub fn create_consumer_offset_store(
+        &self,
+        group_id: &str,
+    ) -> Result<Arc<dyn ConsumerOffsetStore>, Box<dyn std::error::Error>> {
+        match self {
+            StorageBackend::Memory { .. } => Ok(Arc::new(InMemoryConsumerOffsetStore::new(
+                group_id.to_string(),
+            ))),
+            StorageBackend::File {
+                sync_mode,
+                data_dir,
+                ..
+            } => {
+                let offset_store = FileConsumerOffsetStore::new(group_id, *sync_mode, data_dir)?;
+                Ok(Arc::new(offset_store))
             }
         }
     }
@@ -368,15 +391,15 @@ mod tests {
         let backend = StorageBackend::new_memory();
         let storage = backend.create("test_topic").unwrap();
 
-        assert_eq!(storage.read().unwrap().len(), 0);
-        assert!(storage.read().unwrap().is_empty());
-        assert_eq!(storage.read().unwrap().next_offset(), 0);
+        assert_eq!(storage.read().len(), 0);
+        assert!(storage.read().is_empty());
+        assert_eq!(storage.read().next_offset(), 0);
 
         let record = Record::new(None, "test".to_string(), None);
-        let offset = storage.write().unwrap().append(record).unwrap();
+        let offset = storage.write().append(record).unwrap();
         assert_eq!(offset, 0);
-        assert_eq!(storage.read().unwrap().len(), 1);
-        assert_eq!(storage.read().unwrap().next_offset(), 1);
+        assert_eq!(storage.read().len(), 1);
+        assert_eq!(storage.read().next_offset(), 1);
     }
 
     #[test]

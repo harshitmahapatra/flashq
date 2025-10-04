@@ -16,22 +16,23 @@ name = "grpc-client"
 path = "src/bin/client.rs"
 
 [dependencies]
-flashq = { path = "../flashq" }
-tonic = { version = "0.12", features = ["transport"] }
-prost = "0.13"
-tokio = { version = "1.47.1", features = ["full"] }
-tokio-stream = "0.1"
+flashq-cluster = { path = "../flashq-cluster" }
+tonic.workspace = true
+prost.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-clap = { version = "4.5", features = ["derive"] }
+clap.workspace = true
 chrono.workspace = true
 tower-http.workspace = true
+async-trait.workspace = true
 
 [build-dependencies]
-tonic-build = "0.12"
-protoc-bin-vendored = "3"
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
 
 [dev-dependencies]
-uuid = { version = "1.18.0", features = ["v4"] }
-tempfile = "3.13"
-tokio = { version = "1.47.1", features = ["full"] }
+uuid.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
