@@ -1,7 +1,9 @@
-use super::{ConsumerGroup, PartitionId, TopicLog};
+use super::{ConsumerGroup, ConsumerOffsetStore, PartitionId, TopicLog};
 use crate::error::StorageError;
 use crate::{Record, RecordWithOffset};
+use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct InMemoryTopicLog {
@@ -319,33 +321,84 @@ mod tests {
 
 #[derive(Debug, Clone)]
 pub struct InMemoryConsumerGroup {
-    group_id: String,
-    partition_offsets: HashMap<(String, PartitionId), u64>,
+    offset_store: Arc<InMemoryConsumerOffsetStore>,
 }
 
 impl InMemoryConsumerGroup {
     pub fn new(group_id: String) -> Self {
         InMemoryConsumerGroup {
-            group_id,
-            partition_offsets: HashMap::new(),
+            offset_store: Arc::new(InMemoryConsumerOffsetStore::new(group_id)),
         }
+    }
+
+    pub fn with_offset_store(offset_store: Arc<InMemoryConsumerOffsetStore>) -> Self {
+        InMemoryConsumerGroup { offset_store }
     }
 }
 
 impl ConsumerGroup for InMemoryConsumerGroup {
-    fn get_offset_partition(&self, topic: &str, partition_id: PartitionId) -> u64 {
-        self.partition_offsets
+    fn offset_store(&self) -> &dyn ConsumerOffsetStore {
+        self.offset_store.as_ref()
+    }
+}
+
+#[derive(Debug)]
+pub struct InMemoryConsumerOffsetStore {
+    group_id: String,
+    snapshots: RwLock<HashMap<(String, PartitionId), u64>>,
+}
+
+impl InMemoryConsumerOffsetStore {
+    pub fn new(group_id: String) -> Self {
+        InMemoryConsumerOffsetStore {
+            group_id,
+            snapshots: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn get_current_offset(&self, topic: &str, partition_id: PartitionId) -> u64 {
+        self.snapshots
+            .read()
             .get(&(topic.to_string(), partition_id))
             .copied()
             .unwrap_or(0)
     }
 
-    fn set_offset_partition(&mut self, topic: String, partition_id: PartitionId, offset: u64) {
-        self.partition_offsets.insert((topic, partition_id), offset);
+    fn should_persist_offset(
+        &self,
+        topic: &str,
+        partition_id: PartitionId,
+        new_offset: u64,
+    ) -> bool {
+        new_offset >= self.get_current_offset(topic, partition_id)
     }
 
-    fn get_all_offsets_partitioned(&self) -> HashMap<(String, PartitionId), u64> {
-        self.partition_offsets.clone()
+    fn update_snapshot(&self, topic: String, partition_id: PartitionId, offset: u64) {
+        self.snapshots.write().insert((topic, partition_id), offset);
+    }
+}
+
+impl ConsumerOffsetStore for InMemoryConsumerOffsetStore {
+    fn load_snapshot(&self, topic: &str, partition_id: PartitionId) -> Result<u64, StorageError> {
+        Ok(self.get_current_offset(topic, partition_id))
+    }
+
+    fn persist_snapshot(
+        &self,
+        topic: String,
+        partition_id: PartitionId,
+        offset: u64,
+    ) -> Result<bool, StorageError> {
+        if self.should_persist_offset(&topic, partition_id, offset) {
+            self.update_snapshot(topic, partition_id, offset);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn get_all_snapshots(&self) -> Result<HashMap<(String, PartitionId), u64>, StorageError> {
+        Ok(self.snapshots.read().clone())
     }
 
     fn group_id(&self) -> &str {

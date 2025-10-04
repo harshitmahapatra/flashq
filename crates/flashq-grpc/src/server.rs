@@ -527,12 +527,8 @@ pub async fn serve<T: flashq_cluster::ClusterService + 'static>(
     let svc = FlashQGrpcBroker::new(core);
     tonic::transport::Server::builder()
         .layer(TraceLayer::new_for_http())
-        .add_service(producer_server::ProducerServer::new(
-            svc.clone(),
-        ))
-        .add_service(consumer_server::ConsumerServer::new(
-            svc.clone(),
-        ))
+        .add_service(producer_server::ProducerServer::new(svc.clone()))
+        .add_service(consumer_server::ConsumerServer::new(svc.clone()))
         .add_service(admin_server::AdminServer::new(svc))
         .add_service(crate::ClusterServer::new(cluster_server))
         .serve(addr)

@@ -114,5 +114,8 @@ pub trait MetadataStore: Send + Sync {
 
     /// Get all partitions assigned to a specific broker.
     /// Returns a list of (topic, partition_id) tuples for which this broker is a replica.
-    fn get_broker_partitions(&self, broker: BrokerId) -> Result<Vec<(String, PartitionId)>, ClusterError>;
+    fn get_broker_partitions(
+        &self,
+        broker: BrokerId,
+    ) -> Result<Vec<(String, PartitionId)>, ClusterError>;
 }

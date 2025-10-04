@@ -380,7 +380,10 @@ impl MetadataStore for InMemoryMetadataStore {
         Ok(())
     }
 
-    fn get_broker_partitions(&self, broker: BrokerId) -> Result<Vec<(String, PartitionId)>, ClusterError> {
+    fn get_broker_partitions(
+        &self,
+        broker: BrokerId,
+    ) -> Result<Vec<(String, PartitionId)>, ClusterError> {
         let state = self.state.read();
         let mut partitions = Vec::new();
 

@@ -18,7 +18,6 @@ pub use flashq::v1::*;
 pub mod client;
 pub mod server;
 
-// Re-export v1 API service clients/servers for ergonomics
 pub use flashq::v1::admin_client::AdminClient;
 pub use flashq::v1::admin_server::AdminServer;
 pub use flashq::v1::consumer_client::ConsumerClient;
@@ -26,6 +25,7 @@ pub use flashq::v1::consumer_server::ConsumerServer;
 pub use flashq::v1::producer_client::ProducerClient;
 pub use flashq::v1::producer_server::ProducerServer;
 
-// Re-export cluster API service clients/servers for ergonomics
 pub use flashq::cluster::cluster_client::ClusterClient;
 pub use flashq::cluster::cluster_server::ClusterServer;
+
+pub use flashq_cluster::storage::ConsumerOffsetStore;

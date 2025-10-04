@@ -74,11 +74,12 @@ async fn setup_broker_with_cluster_service()
     let broker = Arc::new(FlashQGrpcBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
-    let cluster_service: Arc<dyn ClusterService> = Arc::new(flashq_cluster::service::ClusterServiceImpl::with_broker(
-        metadata_store,
-        BrokerId(1),
-        broker.clone(),
-    ));
+    let cluster_service: Arc<dyn ClusterService> =
+        Arc::new(flashq_cluster::service::ClusterServiceImpl::with_broker(
+            metadata_store,
+            BrokerId(1),
+            broker.clone(),
+        ));
 
     (broker, cluster_service, temp_dir)
 }
@@ -323,13 +324,12 @@ async fn test_cluster_service_heartbeat_persistence() {
             store
         };
 
-        let cluster_service: Arc<dyn ClusterService> = Arc::new(
-            flashq_cluster::service::ClusterServiceImpl::with_broker(
+        let cluster_service: Arc<dyn ClusterService> =
+            Arc::new(flashq_cluster::service::ClusterServiceImpl::with_broker(
                 metadata_store,
                 BrokerId(1),
                 broker.clone(),
-            )
-        );
+            ));
 
         let request = HeartbeatRequest {
             broker_id: 1,
@@ -354,7 +354,7 @@ async fn test_cluster_service_heartbeat_persistence() {
     let metadata_store2 =
         Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
     let cluster_service2: Arc<dyn ClusterService> = Arc::new(
-        flashq_cluster::service::ClusterServiceImpl::new(metadata_store2, BrokerId(1))
+        flashq_cluster::service::ClusterServiceImpl::new(metadata_store2, BrokerId(1)),
     );
 
     let describe_response = cluster_service2.describe_cluster().await.unwrap();

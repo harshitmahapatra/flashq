@@ -11,8 +11,8 @@ pub mod storage;
 pub mod telemetry;
 
 pub use error::FlashQError;
+pub use storage::ConsumerOffsetStore;
 
-// Re-export logging macros for consistent usage across the crate
 pub use log::{debug, error, info, trace, warn};
 
 // =============================================================================

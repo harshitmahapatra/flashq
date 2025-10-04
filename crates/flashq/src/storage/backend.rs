@@ -1,6 +1,9 @@
 use crate::error::StorageError;
-use crate::storage::file::{FileConsumerGroup, FileTopicLog};
-use crate::storage::{ConsumerGroup, InMemoryConsumerGroup, InMemoryTopicLog, TopicLog};
+use crate::storage::file::{FileConsumerGroup, FileConsumerOffsetStore, FileTopicLog};
+use crate::storage::{
+    ConsumerGroup, ConsumerOffsetStore, InMemoryConsumerGroup, InMemoryConsumerOffsetStore,
+    InMemoryTopicLog, TopicLog,
+};
 use crate::warn;
 use fs4::fs_std::FileExt;
 use log::debug;
@@ -160,6 +163,25 @@ impl StorageBackend {
             } => {
                 let consumer_group = FileConsumerGroup::new(group_id, *sync_mode, data_dir)?;
                 Ok(Arc::new(RwLock::new(consumer_group)))
+            }
+        }
+    }
+
+    pub fn create_consumer_offset_store(
+        &self,
+        group_id: &str,
+    ) -> Result<Arc<dyn ConsumerOffsetStore>, Box<dyn std::error::Error>> {
+        match self {
+            StorageBackend::Memory { .. } => Ok(Arc::new(InMemoryConsumerOffsetStore::new(
+                group_id.to_string(),
+            ))),
+            StorageBackend::File {
+                sync_mode,
+                data_dir,
+                ..
+            } => {
+                let offset_store = FileConsumerOffsetStore::new(group_id, *sync_mode, data_dir)?;
+                Ok(Arc::new(offset_store))
             }
         }
     }

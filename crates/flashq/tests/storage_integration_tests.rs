@@ -4,6 +4,7 @@
 mod storage {
     pub mod batching_tests;
     pub mod consumer_group_tests;
+    pub mod consumer_offset_store_tests;
     pub mod directory_locking_tests;
     pub mod error_simulation_tests;
     pub mod file_io_integration_tests;
