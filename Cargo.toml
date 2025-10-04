@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/flashq",
-    "crates/flashq-http",
     "crates/flashq-grpc",
     "crates/flashq-cluster",
 ]

@@ -14,7 +14,6 @@ cargo build && cargo test  # Verify setup (workspace)
 ```bash
 cargo build                    # Debug build (workspace)
 cargo build --release          # Release build (target/release/)
-cargo build -p flashq-http --bin broker    # HTTP broker binary
 cargo build -p flashq-grpc --bin grpc-server # gRPC server binary
 cargo build -p flashq --bin flashq        # Demo binary
 ```
@@ -24,7 +23,6 @@ cargo build -p flashq --bin flashq        # Demo binary
 ### Test Types
 
 - **Unit** (`crates/*/src/lib.rs`): Core functionality and data structures
-- **HTTP Integration** (`crates/flashq-http/tests/http/`): REST API endpoints and client functionality
 - **gRPC Integration** (`crates/flashq-grpc/tests/grpc/`): gRPC services and streaming functionality
 - **Storage Integration** (`crates/flashq/tests/storage/`): File backend, persistence, and crash recovery
 - **Benchmarks** (`benches/`): Performance testing with memory profiling
@@ -35,10 +33,8 @@ cargo build -p flashq --bin flashq        # Demo binary
 ```bash
 cargo test                              # All tests (workspace)
 cargo test -p flashq --lib              # Core library unit tests
-cargo test -p flashq-http --lib         # HTTP library unit tests
 cargo test -p flashq-grpc --lib         # gRPC library unit tests
 cargo test --test '*'                   # All integration tests
-cargo test -p flashq-http --test http_integration_tests # HTTP integration tests
 cargo test -p flashq-grpc --test grpc_integration_tests # gRPC integration tests
 cargo test -p flashq --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
@@ -57,13 +53,12 @@ cargo bench --bench batching_baseline    # Batching performance benchmarks
 
 ### Test Coverage
 
-**HTTP Integration:** Record CRUD, FIFO ordering, consumer groups, validation, error handling
 **gRPC Integration:** Producer/Consumer/Admin services, streaming subscriptions, Protocol Buffer serialization
 **Storage Integration:** File persistence, crash recovery, directory locking, error simulation, partition tests
 **Partition Integration:** Multi-partition consumer groups, backward compatibility with partition 0
 **Batching Integration:** Batch operations, performance validation, memory efficiency
 **Client Integration:** CLI commands, batch operations, consumer group lifecycle
-**Validation:** Size limits, pattern validation, HTTP status codes, OpenAPI compliance
+**Validation:** Size limits, pattern validation
 
 ## Code Quality
 
@@ -77,15 +72,9 @@ cargo check                     # Fast compile check
 
 ```bash
 cargo run -p flashq --bin flashq                           # Interactive demo
-cargo run -p flashq-http --bin broker                      # HTTP broker (in-memory, TRACE logging)
 cargo run -p flashq-grpc --bin grpc-server                 # gRPC server (in-memory, TRACE logging)
-cargo run -p flashq-http --bin broker -- --storage=file    # File storage backend
 cargo run -p flashq-grpc --bin grpc-server -- --storage=file # gRPC file storage
-cargo run -p flashq-http --bin broker -- --batch-bytes=65536    # Custom batch size (64KB)
-cargo run -p flashq-http --bin broker 9090 -- --storage=file --data-dir=./test-data  # Custom config
-./target/release/broker 8080                               # Production HTTP (INFO logging)
 ./target/release/grpc-server                               # Production gRPC (INFO logging)
-cargo run -p flashq-http --bin client -- health            # HTTP CLI client
 cargo run -p flashq-grpc --bin grpc-client -- connect      # gRPC CLI client
 ```
 
@@ -95,7 +84,7 @@ cargo run -p flashq-grpc --bin grpc-client -- connect      # gRPC CLI client
 Cargo.toml              # Workspace configuration
 crates/
 ├── flashq/             # Core library crate
-│   ├── src/lib.rs      # Core FlashQ + Record types  
+│   ├── src/lib.rs      # Core FlashQ + Record types
 │   ├── src/main.rs     # Entry point for demo binary
 │   ├── src/demo.rs     # Interactive demo
 │   ├── src/error.rs    # Comprehensive error handling
@@ -115,16 +104,6 @@ crates/
 │   │       ├── index.rs # Sparse indexing for segments
 │   │       └── file_io.rs # File I/O operations
 │   └── tests/storage/  # Storage integration tests
-├── flashq-http/        # HTTP broker crate
-│   ├── src/lib.rs      # HTTP library exports
-│   ├── src/bin/server.rs # HTTP server binary
-│   ├── src/bin/client.rs # CLI client binary
-│   ├── src/http/       # HTTP components
-│   │   ├── mod.rs      # HTTP types and validation
-│   │   ├── broker/     # Server-side HTTP handlers
-│   │   ├── client.rs   # Client utilities
-│   │   └── common.rs   # Shared validation logic
-│   └── tests/http/     # HTTP integration tests
 └── flashq-grpc/        # gRPC broker crate
     ├── Cargo.toml      # gRPC dependencies (tonic, prost, protoc)
     ├── build.rs        # Protocol Buffer code generation
@@ -169,10 +148,10 @@ RUST_LOG=flashq::storage::file::consumer_group=debug cargo test partition_tests 
 
 ```bash
 # In-memory (default)
-cargo run -p flashq-http --bin broker
+cargo run -p flashq-grpc --bin grpc-server
 
 # File storage with custom configuration
-cargo run -p flashq-http --bin broker -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
+cargo run -p flashq-grpc --bin grpc-server -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
 ```
 
 ## Debugging

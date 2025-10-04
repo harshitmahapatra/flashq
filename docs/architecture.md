@@ -6,17 +6,10 @@ Internal architecture and design overview of FlashQ.
 
 ```mermaid
 graph TD
-    A[HTTP CLI Client] -->|HTTP| B[HTTP Broker]
     A2[gRPC CLI Client] -->|gRPC| B2[gRPC Server]
     C[Interactive Demo] --> D[FlashQ Core Library]
-    B --> D
     B2 --> D
     B2 --> CS[ClusterService]
-
-    subgraph "flashq-http crate"
-        B
-        A
-    end
 
     subgraph "flashq-grpc crate"
         B2
@@ -102,28 +95,28 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant B as Broker/Server
+    participant B as gRPC Server
     participant Q as FlashQ
     participant T as TopicLog
 
-    Note over C,T: Write Operation (HTTP/gRPC)
-    C->>B: POST /topic/news/record OR Producer.Produce()
+    Note over C,T: Write Operation
+    C->>B: Producer.Produce()
     B->>Q: post_records(Vec<Record>)
     Q->>T: append_batch(records)
     Note over T: Chunked by batch_bytes config
     T-->>Q: last_offset
     Q-->>B: success response
-    B-->>C: {"offset": N, "timestamp": "..."} OR ProduceResponse
+    B-->>C: ProduceResponse
 
     Note over C,T: Read Operation (Offset-Based)
-    C->>B: GET /consumer/.../offset OR Consumer.FetchByOffset()
+    C->>B: Consumer.FetchByOffset()
     B->>Q: poll_records_from_offset()
     Q->>T: get_records_from_offset()
     T-->>Q: Vec<RecordWithOffset>
     Q-->>B: records array
-    B-->>C: {"records": [...]} OR FetchResponse
+    B-->>C: FetchResponse
 
-    Note over C,T: Streaming Subscription (gRPC Only)
+    Note over C,T: Streaming Subscription
     C->>B: Consumer.Subscribe() → stream
     loop Real-time updates
         B->>Q: poll_records_from_offset()
