@@ -1,4 +1,4 @@
-use crate::error::{FlashQError, StorageError};
+use crate::error::StorageError;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -8,7 +8,7 @@ pub struct FileIo;
 
 impl FileIo {
     #[tracing::instrument(level = "debug", skip(path), fields(path = %path.display()))]
-    pub fn create_with_append_and_read_permissions(path: &Path) -> Result<File, FlashQError> {
+    pub fn create_with_append_and_read_permissions(path: &Path) -> Result<File, StorageError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_append_and_read_permissions
         OpenOptions::new()
             .create(true)
@@ -16,15 +16,15 @@ impl FileIo {
             .read(true)
             .open(path)
             .map_err(|e| {
-                FlashQError::Storage(StorageError::from_io_error(
+                StorageError::from_io_error(
                     e,
                     &format!("Failed to create file with append+read permissions: {path:?}"),
-                ))
+                )
             })
     }
 
     #[tracing::instrument(level = "debug", skip(path), fields(path = %path.display()))]
-    pub fn create_with_write_truncate_permissions(path: &Path) -> Result<File, FlashQError> {
+    pub fn create_with_write_truncate_permissions(path: &Path) -> Result<File, StorageError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::create_with_write_truncate_permissions
         OpenOptions::new()
             .create(true)
@@ -32,21 +32,21 @@ impl FileIo {
             .truncate(true)
             .open(path)
             .map_err(|e| {
-                FlashQError::Storage(StorageError::from_io_error(
+                StorageError::from_io_error(
                     e,
                     &format!("Failed to create file with write+truncate permissions: {path:?}"),
-                ))
+                )
             })
     }
 
     #[tracing::instrument(level = "debug", skip(path), fields(path = %path.display()))]
-    pub fn open_with_read_only_permissions(path: &Path) -> Result<File, FlashQError> {
+    pub fn open_with_read_only_permissions(path: &Path) -> Result<File, StorageError> {
         // Extract from async_io.rs UnifiedAsyncFileHandle::open_with_read_only_permissions
         File::open(path).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
+            StorageError::from_io_error(
                 e,
                 &format!("Failed to open file with read-only permissions: {path:?}"),
-            ))
+            )
         })
     }
 
@@ -55,18 +55,15 @@ impl FileIo {
         handle: &mut File,
         data: &[u8],
         offset: u64,
-    ) -> Result<(), FlashQError> {
+    ) -> Result<(), StorageError> {
         // Extract from async_io.rs write_at_offset_using_standard_io
         handle.seek(SeekFrom::Start(offset)).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                &format!("Failed to seek to offset {offset}"),
-            ))
+            StorageError::from_io_error(e, &format!("Failed to seek to offset {offset}"))
         })?;
 
-        handle.write_all(data).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(e, "Failed to write data"))
-        })
+        handle
+            .write_all(data)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to write data"))
     }
 
     #[tracing::instrument(level = "debug", skip(handle, buffer), fields(len = buffer.len(), offset))]
@@ -74,60 +71,45 @@ impl FileIo {
         handle: &mut File,
         buffer: &mut [u8],
         offset: u64,
-    ) -> Result<(), FlashQError> {
+    ) -> Result<(), StorageError> {
         // Extract from async_io.rs read_at_offset_using_standard_io + common.rs patterns
         handle.seek(SeekFrom::Start(offset)).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                &format!("Failed to seek to offset {offset}"),
-            ))
+            StorageError::from_io_error(e, &format!("Failed to seek to offset {offset}"))
         })?;
 
-        handle.read_exact(buffer).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(e, "Failed to read exact data"))
-        })
+        handle
+            .read_exact(buffer)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to read exact data"))
     }
 
     #[tracing::instrument(level = "debug", skip(handle, data), fields(len = data.len()))]
-    pub fn append_data_to_end(handle: &mut File, data: &[u8]) -> Result<u64, FlashQError> {
+    pub fn append_data_to_end(handle: &mut File, data: &[u8]) -> Result<u64, StorageError> {
         // Extract from async_io.rs append_data_using_standard_io
-        let current_position = handle.seek(SeekFrom::End(0)).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                "Failed to seek to end of file",
-            ))
-        })?;
+        let current_position = handle
+            .seek(SeekFrom::End(0))
+            .map_err(|e| StorageError::from_io_error(e, "Failed to seek to end of file"))?;
 
-        handle.write_all(data).map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                "Failed to append data to file",
-            ))
-        })?;
+        handle
+            .write_all(data)
+            .map_err(|e| StorageError::from_io_error(e, "Failed to append data to file"))?;
 
         Ok(current_position)
     }
 
     #[tracing::instrument(level = "debug", skip(handle))]
-    pub fn synchronize_to_disk(handle: &mut File) -> Result<(), FlashQError> {
+    pub fn synchronize_to_disk(handle: &mut File) -> Result<(), StorageError> {
         // Extract from async_io.rs sync_file_using_standard_io + common.rs sync_file_if_needed
-        handle.sync_all().map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                "Failed to sync file to disk",
-            ))
-        })
+        handle
+            .sync_all()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to sync file to disk"))
     }
 
     #[tracing::instrument(level = "debug", skip(handle))]
-    pub fn get_file_size(handle: &File) -> Result<u64, FlashQError> {
+    pub fn get_file_size(handle: &File) -> Result<u64, StorageError> {
         // Extract from async_io.rs get_current_file_size_in_bytes
-        let file_metadata = handle.metadata().map_err(|e| {
-            FlashQError::Storage(StorageError::from_io_error(
-                e,
-                "Failed to get file metadata",
-            ))
-        })?;
+        let file_metadata = handle
+            .metadata()
+            .map_err(|e| StorageError::from_io_error(e, "Failed to get file metadata"))?;
 
         Ok(file_metadata.len())
     }

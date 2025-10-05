@@ -2,12 +2,10 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use clap::{Parser, ValueEnum};
 use flashq_cluster::{
-    manifest::loader::ManifestLoader,
-    metadata_store::MetadataBackend,
-    service::ClusterServiceImpl,
-    storage::{StorageBackend, file::SyncMode},
-    types::BrokerId,
+    manifest::loader::ManifestLoader, metadata_store::MetadataBackend, service::ClusterServiceImpl,
+    storage::StorageBackend, types::BrokerId,
 };
+use flashq_storage::SyncMode;
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum StorageKind {

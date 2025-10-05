@@ -1,8 +1,7 @@
 use super::test_utilities::*;
 use flashq::Record;
-use flashq::error::StorageError;
-use flashq::storage::TopicLog;
-use flashq::storage::file::{FileTopicLog, SyncMode};
+use flashq_storage::file::{FileTopicLog, SyncMode};
+use flashq_storage::{StorageError, TopicLog};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;

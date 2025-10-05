@@ -12,36 +12,18 @@ name = "flashq"
 path = "src/main.rs"
 
 [dependencies]
+flashq-storage = { path = "../flashq-storage" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 dashmap.workspace = true
 parking_lot.workspace = true
-fs4.workspace = true
-sysinfo.workspace = true
 log.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-log.workspace = true
-libc = "0.2"
 
 [dev-dependencies]
 uuid.workspace = true
 tempfile.workspace = true
-divan = "0.1"
 test-log.workspace = true
-
-[[bench]]
-name = "memory_storage"
-harness = false
-path = "benches/memory_storage.rs"
-
-[[bench]]
-name = "file_storage"
-harness = false
-path = "benches/file_storage.rs"
-
-[[bench]]
-name = "batching_baseline"
-harness = false
-path = "benches/batching_baseline.rs"

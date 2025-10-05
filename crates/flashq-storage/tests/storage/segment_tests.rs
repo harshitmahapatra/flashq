@@ -1,6 +1,6 @@
 use super::test_utilities::*;
 use flashq::Record;
-use flashq::storage::file::{IndexingConfig, LogSegment, SyncMode};
+use flashq_storage::file::{IndexingConfig, LogSegment, SyncMode};
 use serde_json::json;
 use test_log::test;
 

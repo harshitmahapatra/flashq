@@ -1,4 +1,4 @@
-use flashq::storage::file::SyncMode;
+use flashq_storage::file::SyncMode;
 use std::path::PathBuf;
 use uuid::Uuid;
 

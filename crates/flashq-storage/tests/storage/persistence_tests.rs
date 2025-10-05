@@ -1,7 +1,7 @@
 use super::test_utilities::*;
-use flashq::storage::file::FileTopicLog;
-use flashq::storage::{StorageBackend, TopicLog};
 use flashq::{FlashQ, Record};
+use flashq_storage::file::FileTopicLog;
+use flashq_storage::{StorageBackend, TopicLog};
 use test_log::test;
 
 #[test]

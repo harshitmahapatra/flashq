@@ -24,8 +24,8 @@ cargo build -p flashq --bin flashq        # Demo binary
 
 - **Unit** (`crates/*/src/lib.rs`): Core functionality and data structures
 - **gRPC Integration** (`crates/flashq-grpc/tests/grpc/`): gRPC services and streaming functionality
-- **Storage Integration** (`crates/flashq/tests/storage/`): File backend, persistence, and crash recovery
-- **Benchmarks** (`benches/`): Performance testing with memory profiling
+- **Storage Integration** (`crates/flashq-storage/tests/storage/`): File backend, persistence, and crash recovery
+- **Benchmarks** (`crates/flashq-storage/benches/`): Performance testing with memory profiling
 - **Utilities** (`crates/*/tests/*/test_utilities.rs`): Shared test infrastructure
 
 ### Running Tests
@@ -33,10 +33,11 @@ cargo build -p flashq --bin flashq        # Demo binary
 ```bash
 cargo test                              # All tests (workspace)
 cargo test -p flashq --lib              # Core library unit tests
+cargo test -p flashq-storage --lib      # Storage library unit tests
 cargo test -p flashq-grpc --lib         # gRPC library unit tests
 cargo test --test '*'                   # All integration tests
 cargo test -p flashq-grpc --test grpc_integration_tests # gRPC integration tests
-cargo test -p flashq --test storage_integration_tests # Storage integration tests
+cargo test -p flashq-storage --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
 RUST_LOG=debug cargo test              # Tests with debug logging output
@@ -46,9 +47,9 @@ RUST_LOG=debug cargo test              # Tests with debug logging output
 
 ```bash
 cargo bench                              # Run all benchmarks
-cargo bench --bench memory_storage       # Memory storage benchmarks only
-cargo bench --bench file_storage_std     # File storage benchmarks only
-cargo bench --bench batching_baseline    # Batching performance benchmarks
+cargo bench -p flashq-storage --bench memory_storage       # Memory storage benchmarks only
+cargo bench -p flashq-storage --bench file_storage_std     # File storage benchmarks only
+cargo bench -p flashq-storage --bench batching_baseline    # Batching performance benchmarks
 ```
 
 ### Test Coverage
@@ -83,14 +84,12 @@ cargo run -p flashq-grpc --bin grpc-client -- connect      # gRPC CLI client
 ```
 Cargo.toml              # Workspace configuration
 crates/
-├── flashq/             # Core library crate
-│   ├── src/lib.rs      # Core FlashQ + Record types
-│   ├── src/main.rs     # Entry point for demo binary
-│   ├── src/demo.rs     # Interactive demo
-│   ├── src/error.rs    # Comprehensive error handling
+├── flashq-storage/     # Storage backend library crate
+│   ├── src/lib.rs      # Record types and storage exports
+│   ├── src/error.rs    # Storage error types
 │   ├── src/storage/    # Storage abstraction layer
 │   │   ├── mod.rs      # Public exports and documentation
-│   │   ├── trait.rs    # TopicLog and ConsumerGroup traits
+│   │   ├── trait.rs    # TopicLog and ConsumerOffsetStore traits
 │   │   ├── backend.rs  # StorageBackend factory with directory locking
 │   │   ├── batching_heuristics.rs # Shared batching utilities
 │   │   ├── memory.rs   # InMemoryTopicLog implementation
@@ -103,21 +102,27 @@ crates/
 │   │       ├── segment_manager.rs # Segment lifecycle management
 │   │       ├── index.rs # Sparse indexing for segments
 │   │       └── file_io.rs # File I/O operations
-│   └── tests/storage/  # Storage integration tests
-└── flashq-grpc/        # gRPC broker crate
-    ├── Cargo.toml      # gRPC dependencies (tonic, prost, protoc)
-    ├── build.rs        # Protocol Buffer code generation
-    ├── proto/flashq.proto # Protocol Buffer schema
-    ├── src/lib.rs      # gRPC library exports
-    ├── src/bin/server.rs # gRPC server binary
-    ├── src/bin/client.rs # gRPC CLI client binary
-    ├── src/server.rs   # Producer/Consumer/Admin service implementations
-    ├── src/client.rs   # gRPC client connection utilities
-    └── tests/grpc/     # gRPC integration tests
-benches/                # Performance benchmarks
-├── memory_storage.rs   # Memory backend benchmarks
-├── file_storage_std.rs # File backend benchmarks
-└── batching_baseline.rs # Batching performance benchmarks
+│   ├── tests/storage/  # Storage integration tests
+│   └── benches/        # Performance benchmarks
+├── flashq/             # Core queue library crate
+│   ├── src/lib.rs      # Core FlashQ implementation
+│   ├── src/main.rs     # Entry point for demo binary
+│   ├── src/demo.rs     # Interactive demo
+│   └── src/error.rs    # FlashQ error types
+├── flashq-grpc/        # gRPC broker crate
+│   ├── Cargo.toml      # gRPC dependencies (tonic, prost, protoc)
+│   ├── build.rs        # Protocol Buffer code generation
+│   ├── proto/flashq.proto # Protocol Buffer schema
+│   ├── src/lib.rs      # gRPC library exports
+│   ├── src/bin/server.rs # gRPC server binary
+│   ├── src/bin/client.rs # gRPC CLI client binary
+│   ├── src/server.rs   # Producer/Consumer/Admin service implementations
+│   ├── src/client.rs   # gRPC client connection utilities
+│   └── tests/grpc/     # gRPC integration tests
+└── flashq-cluster/     # Cluster coordination crate
+    ├── src/service.rs  # ClusterService implementation
+    ├── src/metadata_store/ # Metadata storage
+    └── tests/          # Cluster integration tests
 ```
 
 ## Contribution Guidelines
@@ -132,16 +137,16 @@ benches/                # Performance benchmarks
 
 ```bash
 # Test file storage with temporary directories
-cargo test -p flashq --test storage_integration_tests
+cargo test -p flashq-storage --test storage_integration_tests
 
 # Test specific storage components
-cargo test -p flashq --test storage_integration_tests::file_topic_log_tests
-cargo test -p flashq --test storage_integration_tests::error_simulation_tests
+cargo test -p flashq-storage --test storage_integration_tests::file_topic_log_tests
+cargo test -p flashq-storage --test storage_integration_tests::error_simulation_tests
 
 # Test partition functionality
-cargo test -p flashq --test storage_integration_tests::partition_tests
-cargo test -p flashq --test storage_integration_tests::partition_backward_compatibility_tests
-RUST_LOG=flashq::storage::file::consumer_group=debug cargo test partition_tests -- --nocapture
+cargo test -p flashq-storage --test storage_integration_tests::partition_tests
+cargo test -p flashq-storage --test storage_integration_tests::partition_backward_compatibility_tests
+RUST_LOG=flashq_storage::storage::file::consumer_group=debug cargo test partition_tests -- --nocapture
 ```
 
 ### Storage Backend Selection

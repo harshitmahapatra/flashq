@@ -1,11 +1,11 @@
-//! Partition Integration Tests
-//! Tests the partition-aware storage functionality and backward compatibility
+// Partition Integration Tests
+// Tests the partition-aware storage functionality and backward compatibility
 
-use crate::storage::test_utilities::TestConfig;
+use super::test_utilities::TestConfig;
 use flashq::Record;
-use flashq::storage::file::{FileConsumerGroup, FileTopicLog, SyncMode};
-use flashq::storage::memory::InMemoryConsumerGroup;
-use flashq::storage::r#trait::{ConsumerGroup, PartitionId, TopicLog};
+use flashq_storage::file::{FileConsumerGroup, FileTopicLog, SyncMode};
+use flashq_storage::memory::InMemoryConsumerGroup;
+use flashq_storage::{ConsumerGroup, PartitionId, TopicLog};
 use test_log::test;
 
 #[test]

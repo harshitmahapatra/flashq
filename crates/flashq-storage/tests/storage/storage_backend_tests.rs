@@ -1,7 +1,7 @@
 use super::test_utilities::*;
-use flashq::storage::StorageBackend;
-use flashq::storage::file::SyncMode;
 use flashq::{FlashQ, Record};
+use flashq_storage::StorageBackend;
+use flashq_storage::file::SyncMode;
 use test_log::test;
 
 #[test]

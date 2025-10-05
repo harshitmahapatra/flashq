@@ -1,5 +1,5 @@
-use flashq::error::StorageError;
-use flashq::storage::StorageBackend;
+use flashq_storage::StorageBackend;
+use flashq_storage::StorageError;
 use tempfile::tempdir;
 use test_log::test;
 
@@ -9,13 +9,13 @@ fn test_directory_locking() {
     let test_data_dir = temp_dir.path().join("test_data");
 
     let backend1 = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("First backend should acquire lock successfully");
 
     let backend2_result = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     );
 
@@ -32,7 +32,7 @@ fn test_directory_locking() {
     drop(backend1);
 
     let _backend2 = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("Second backend should acquire lock after first is dropped");
@@ -44,7 +44,7 @@ fn test_file_backend_creation() {
     let test_data_dir = temp_dir.path().join("test_data");
 
     let backend = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("Should be able to create file backend");
@@ -62,12 +62,14 @@ fn test_stale_lock_recovery() {
     let lock_file_path = test_data_dir.join(".flashq.lock");
     std::fs::write(
         &lock_file_path,
-        "PID: 999999\nTimestamp: 2023-01-01T00:00:00Z\n",
+        "PID: 999999
+Timestamp: 2023-01-01T00:00:00Z
+",
     )
     .unwrap();
 
     let _backend = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("Should recover from stale lock");
@@ -79,14 +81,14 @@ fn test_concurrent_access_prevention() {
     let test_data_dir = temp_dir.path().join("concurrent_test");
 
     let _backend1 = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("First backend should acquire lock");
 
     for i in 0..3 {
         let result = StorageBackend::new_file_with_path(
-            flashq::storage::file::SyncMode::Immediate,
+            flashq_storage::file::SyncMode::Immediate,
             &test_data_dir,
         );
 
@@ -106,7 +108,7 @@ fn test_lock_file_cleanup_on_drop() {
 
     // Create backend and verify lock file exists
     let backend = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         &test_data_dir,
     )
     .expect("Backend creation should succeed");

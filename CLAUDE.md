@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashQ is a Kafka-inspired record queue implementation with gRPC API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with three crates:
+FlashQ is a Kafka-inspired record queue implementation with gRPC API endpoints, segment-based file storage backend, configurable batching for high-throughput processing, comprehensive error handling, and production-ready features. The project is organized as a Cargo workspace with four crates:
 
-- **`flashq`** - Core library with storage backends and queue management
+- **`flashq-storage`** - Storage backend implementations (memory and file-based) with Record types
+- **`flashq`** - Core queue library with topic and consumer group management
 - **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
 - **`flashq-cluster`** - Cluster coordination and metadata management
 
@@ -31,7 +32,7 @@ The project includes enhanced record structure with keys, headers, and offsets, 
 ### Testing and Quality
 - `cargo test` - Run all tests (workspace: unit + integration)
 - `cargo test --test '*'` - Run only integration tests
-- `cargo test -p flashq --test storage_integration_tests` - Run storage tests
+- `cargo test -p flashq-storage --test storage_integration_tests` - Run storage tests
 - `cargo test -p flashq-grpc --test grpc_integration_tests` - Run gRPC tests
 - `cargo test -p flashq-cluster --test '*'` - Run cluster coordination tests
 - `cargo test <test_name>` - Run a specific test
@@ -42,9 +43,9 @@ The project includes enhanced record structure with keys, headers, and offsets, 
 ### Benchmarking
 ```bash
 cargo bench                              # Run all benchmarks
-cargo bench --bench memory_storage       # Memory storage benchmarks only
-cargo bench --bench file_storage_std     # Standard file I/O benchmarks
-cargo bench --bench batching_baseline    # Batching performance benchmarks
+cargo bench -p flashq-storage --bench memory_storage       # Memory storage benchmarks only
+cargo bench -p flashq-storage --bench file_storage_std     # Standard file I/O benchmarks
+cargo bench -p flashq-storage --bench batching_baseline    # Batching performance benchmarks
 ```
 
 
@@ -54,21 +55,27 @@ cargo bench --bench batching_baseline    # Batching performance benchmarks
 
 ## Project Structure
 
-Following Rust best practices with a workspace containing two library and binary crates:
+Following Rust best practices with a workspace containing library and binary crates:
 
 ### Workspace Structure
 - `Cargo.toml` - Workspace configuration using Rust 2024 edition
-- `crates/flashq/` - Core library crate with storage backends
+- `crates/flashq-storage/` - Storage backend implementations library crate
+- `crates/flashq/` - Core queue library crate
 - `crates/flashq-grpc/` - gRPC broker, producer, consumer, and client crate
 - `crates/flashq-cluster/` - Cluster coordination and metadata management crate
 
-### Core Library Crate (`crates/flashq/`)
-- `src/lib.rs` - Library crate containing core record queue functionality
-- `src/main.rs` - Lightweight binary entry point (delegates to demo module)
-- `src/demo.rs` - Interactive demo module with CLI functionality  
-- `src/error.rs` - Comprehensive error handling with structured error types
+### Storage Crate (`crates/flashq-storage/`)
+- `src/lib.rs` - Storage library with Record types and backend exports
+- `src/error.rs` - Storage-specific error types
 - `src/storage/` - Storage backend implementations (memory and file-based)
 - `tests/storage/` - Storage integration test suite
+- `benches/` - Performance benchmarks for storage backends
+
+### Core Library Crate (`crates/flashq/`)
+- `src/lib.rs` - Core FlashQ queue implementation
+- `src/main.rs` - Lightweight binary entry point (delegates to demo module)
+- `src/demo.rs` - Interactive demo module with CLI functionality
+- `src/error.rs` - FlashQ-specific error types
 
 ### gRPC Crate (`crates/flashq-grpc/`)
 - `Cargo.toml` - gRPC dependencies (tonic, prost, protoc-bin-vendored)
@@ -96,17 +103,9 @@ Following Rust best practices with a workspace containing two library and binary
 - `tests/` - Comprehensive cluster coordination test suite
 - `README.md` - Detailed cluster architecture documentation
 
-### Core Library Components
+### Storage Components (`flashq-storage`)
 - `Record` struct - Record payload with optional key and headers
 - `RecordWithOffset` struct - Record with offset and ISO 8601 timestamp
-- `FlashQ` struct - Main queue implementation with pluggable storage backends
-- Storage backend abstraction with memory and file implementations
-- Consumer group management with persistent offset tracking
-- `demo` module - Interactive CLI functionality (exposed publicly)
-- Thread-safe using `Arc<Mutex<>>` for concurrent access
-- Comprehensive unit tests for all data structures
-
-### Storage Module (`src/storage/`)
 - `StorageBackend` enum - Pluggable storage backend selection (memory/file)
 - `TopicLog` and `ConsumerOffsetStore` traits - Storage abstraction layer with batched operations
 - `batching_heuristics` - Shared utilities for record size estimation and batch optimization
@@ -121,6 +120,13 @@ Following Rust best practices with a workspace containing two library and binary
 - `InMemoryConsumerOffsetStore` - In-memory offset snapshot storage
 - Directory locking mechanism to prevent concurrent access
 - Comprehensive error handling and recovery capabilities
+
+### Core Queue Components (`flashq`)
+- `FlashQ` struct - Main queue implementation with pluggable storage backends
+- Consumer group management with persistent offset tracking
+- `demo` module - Interactive CLI functionality (exposed publicly)
+- Thread-safe using `Arc<Mutex<>>` for concurrent access
+- Re-exports storage types for backward compatibility
 
 ### Binary Crates
 - **`crates/flashq/src/main.rs`** - Lightweight entry point (2 lines) following Rust best practices
@@ -167,7 +173,7 @@ This provides an excellent way to understand the library API and test functional
 - FIFO ordering verification and replay functionality
 - Record size validation and error handling
 
-**Storage Integration Tests (`crates/flashq/tests/storage/`):**
+**Storage Integration Tests (`crates/flashq-storage/tests/storage/`):**
 - Segment-based file storage testing with crash recovery
 - Directory locking and concurrent access prevention
 - Error simulation (disk full, permission errors)

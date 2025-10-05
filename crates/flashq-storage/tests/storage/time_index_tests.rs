@@ -1,4 +1,4 @@
-use flashq::storage::file::time_index::{SparseTimeIndex, TimeIndexEntry};
+use flashq_storage::file::time_index::{SparseTimeIndex, TimeIndexEntry};
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;

@@ -1,6 +1,6 @@
 use divan::{AllocProfiler, Bencher, black_box};
-use flashq::storage::{StorageBackend, file::SyncMode};
 use flashq::{FlashQ, Record};
+use flashq_storage::{StorageBackend, file::SyncMode};
 use std::collections::HashMap;
 use tempfile::TempDir;
 

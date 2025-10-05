@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // Re-export PartitionId from flashq core
-pub use flashq::storage::PartitionId;
+pub use flashq::PartitionId;
 
 /// Unique identifier for a broker in the cluster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
