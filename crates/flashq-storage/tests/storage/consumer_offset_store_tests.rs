@@ -1,5 +1,5 @@
 use super::test_utilities::*;
-use flashq::storage::{PartitionId, StorageBackend};
+use flashq_storage::{PartitionId, StorageBackend};
 use test_log::test;
 
 #[test]

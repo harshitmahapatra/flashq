@@ -1,6 +1,6 @@
 use super::test_utilities::*;
 use flashq::FlashQ;
-use flashq::storage::StorageBackend;
+use flashq_storage::StorageBackend;
 use test_log::test;
 
 #[test]
@@ -161,7 +161,7 @@ fn test_empty_index_file_warning() {
     // Create a log file with properly serialized record data
     let log_path = partition_dir.join("00000000000000000000.log");
     let record = flashq::Record::new(None, "test_value".to_string(), None);
-    let serialized = flashq::storage::file::common::serialize_record(&record, 0).unwrap();
+    let serialized = flashq_storage::file::common::serialize_record(&record, 0).unwrap();
     fs::write(&log_path, serialized).unwrap();
 
     // Create empty index files (this should trigger the warning)

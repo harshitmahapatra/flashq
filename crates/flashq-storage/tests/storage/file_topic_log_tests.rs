@@ -1,7 +1,7 @@
 use super::test_utilities::*;
 use flashq::Record;
-use flashq::storage::TopicLog;
-use flashq::storage::file::FileTopicLog;
+use flashq_storage::TopicLog;
+use flashq_storage::file::FileTopicLog;
 use test_log::test;
 
 #[test]
@@ -205,7 +205,7 @@ fn test_segment_boundary_crossing() {
 #[test]
 fn test_flashq_large_file_benchmark_scenario() {
     use flashq::FlashQ;
-    use flashq::storage::{StorageBackend, file::SyncMode};
+    use flashq_storage::{StorageBackend, file::SyncMode};
     use std::collections::HashMap;
 
     // Setup: Create FlashQ with file storage and helper function

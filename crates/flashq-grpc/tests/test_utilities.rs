@@ -10,13 +10,11 @@ use tokio::time::sleep;
 
 // Re-export cluster types for test convenience
 pub use flashq_cluster::{
-    Record,
-    metadata_store::FileMetadataStore,
-    service::ClusterServiceImpl,
-    storage::{StorageBackend, file::SyncMode},
-    types::*,
+    Record, metadata_store::FileMetadataStore, service::ClusterServiceImpl,
+    storage::StorageBackend, types::*,
 };
 pub use flashq_grpc::server::FlashQGrpcBroker;
+pub use flashq_storage::file::SyncMode;
 
 static SERVER_INIT: Once = Once::new();
 static SERVER_BINARY_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);

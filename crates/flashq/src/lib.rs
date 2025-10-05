@@ -1,63 +1,19 @@
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry::{Occupied, Vacant};
 use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::sync::Arc;
-use storage::{ConsumerGroup, TopicLog};
 
 pub mod demo;
 pub mod error;
-pub mod storage;
 pub mod telemetry;
 
 pub use error::FlashQError;
-pub use storage::ConsumerOffsetStore;
+pub use flashq_storage::{
+    ConsumerGroup, ConsumerOffsetStore, PartitionId, Record, RecordWithOffset, StorageBackend,
+    TopicLog,
+};
 
 pub use log::{debug, error, info, trace, warn};
-
-// =============================================================================
-// CORE DATA STRUCTURES
-// =============================================================================
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Record {
-    pub key: Option<String>,
-    pub value: String,
-    pub headers: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct RecordWithOffset {
-    #[serde(flatten)]
-    pub record: Record,
-    pub offset: u64,
-    pub timestamp: String,
-}
-
-impl Record {
-    pub fn new(
-        key: Option<String>,
-        value: String,
-        headers: Option<HashMap<String, String>>,
-    ) -> Self {
-        Self {
-            key,
-            value,
-            headers,
-        }
-    }
-}
-
-impl RecordWithOffset {
-    pub fn from_record(record: Record, offset: u64) -> Self {
-        let timestamp = chrono::Utc::now().to_rfc3339();
-        Self {
-            record,
-            offset,
-            timestamp,
-        }
-    }
-}
 
 // =============================================================================
 // QUEUE COMPONENTS
@@ -66,7 +22,7 @@ impl RecordWithOffset {
 pub struct FlashQ {
     topics: Arc<DashMap<String, Arc<RwLock<dyn TopicLog>>>>,
     consumer_groups: Arc<DashMap<String, Arc<RwLock<dyn ConsumerGroup>>>>,
-    storage_backend: storage::StorageBackend,
+    storage_backend: StorageBackend,
 }
 
 impl Default for FlashQ {
@@ -79,12 +35,12 @@ impl FlashQ {
     #[tracing::instrument(level = "info")]
 
     pub fn new() -> Self {
-        Self::with_storage_backend(storage::StorageBackend::new_memory())
+        Self::with_storage_backend(StorageBackend::new_memory())
     }
 
     #[tracing::instrument(level = "info", skip(storage_backend))]
 
-    pub fn with_storage_backend(storage_backend: storage::StorageBackend) -> Self {
+    pub fn with_storage_backend(storage_backend: StorageBackend) -> Self {
         debug!(
             "Creating FlashQ with storage backend: {:?}",
             storage_backend
@@ -349,8 +305,8 @@ impl FlashQ {
 
         // Only recover for file storage backends
         let data_dir = match &self.storage_backend {
-            storage::StorageBackend::File { data_dir, .. } => data_dir.clone(),
-            storage::StorageBackend::Memory { .. } => return Ok(()), // No recovery needed for memory
+            StorageBackend::File { data_dir, .. } => data_dir.clone(),
+            StorageBackend::Memory { .. } => return Ok(()), // No recovery needed for memory
         };
 
         let consumer_groups_dir = data_dir.join("consumer_groups");

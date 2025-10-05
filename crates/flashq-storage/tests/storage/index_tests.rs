@@ -1,4 +1,4 @@
-use flashq::storage::file::index::{IndexEntry, SparseIndex};
+use flashq_storage::file::index::{IndexEntry, SparseIndex};
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;

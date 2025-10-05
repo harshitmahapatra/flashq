@@ -1,3 +1,4 @@
+use flashq_storage::StorageError;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,45 +22,6 @@ pub enum FlashQError {
         max_offset: u64,
     },
     Storage(StorageError),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StorageError {
-    ReadFailed {
-        context: String,
-        source: Box<StorageErrorSource>,
-    },
-    WriteFailed {
-        context: String,
-        source: Box<StorageErrorSource>,
-    },
-    InsufficientSpace {
-        context: String,
-    },
-    PermissionDenied {
-        context: String,
-    },
-    DataCorruption {
-        context: String,
-        details: String,
-    },
-    Unavailable {
-        context: String,
-    },
-    DirectoryLocked {
-        context: String,
-        pid: Option<u32>,
-    },
-    InvalidTopic(String),
-    LockAcquisitionFailed,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StorageErrorSource {
-    Io(String),
-    Serialization(String),
-    Network(String),
-    Custom(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,50 +59,6 @@ impl fmt::Display for FlashQError {
     }
 }
 
-impl fmt::Display for StorageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StorageError::ReadFailed { context, source } => {
-                write!(f, "Read failed in {context}: {source}")
-            }
-            StorageError::WriteFailed { context, source } => {
-                write!(f, "Write failed in {context}: {source}")
-            }
-            StorageError::InsufficientSpace { context } => {
-                write!(f, "Insufficient space in {context}")
-            }
-            StorageError::PermissionDenied { context } => {
-                write!(f, "Permission denied in {context}")
-            }
-            StorageError::DataCorruption { context, details } => {
-                write!(f, "Data corruption in {context}: {details}")
-            }
-            StorageError::Unavailable { context } => {
-                write!(f, "Storage unavailable in {context}")
-            }
-            StorageError::DirectoryLocked { context, pid } => match pid {
-                Some(pid) => write!(f, "Directory locked in {context} (PID: {pid})"),
-                None => write!(f, "Directory locked in {context}"),
-            },
-            StorageError::InvalidTopic(topic) => write!(f, "Invalid topic: {topic}"),
-            StorageError::LockAcquisitionFailed => {
-                write!(f, "Failed to acquire exclusive lock on file")
-            }
-        }
-    }
-}
-
-impl fmt::Display for StorageErrorSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StorageErrorSource::Io(msg) => write!(f, "IO error: {msg}"),
-            StorageErrorSource::Serialization(msg) => write!(f, "Serialization error: {msg}"),
-            StorageErrorSource::Network(msg) => write!(f, "Network error: {msg}"),
-            StorageErrorSource::Custom(msg) => write!(f, "Custom error: {msg}"),
-        }
-    }
-}
-
 impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -154,8 +72,6 @@ impl fmt::Display for HttpError {
 }
 
 impl std::error::Error for FlashQError {}
-impl std::error::Error for StorageError {}
-impl std::error::Error for StorageErrorSource {}
 impl std::error::Error for HttpError {}
 
 impl FlashQError {
@@ -186,30 +102,6 @@ impl From<StorageError> for FlashQError {
     }
 }
 
-impl StorageError {
-    pub fn from_io_error(e: std::io::Error, context: &str) -> Self {
-        match e.kind() {
-            std::io::ErrorKind::PermissionDenied => StorageError::PermissionDenied {
-                context: context.to_string(),
-            },
-            std::io::ErrorKind::OutOfMemory => StorageError::InsufficientSpace {
-                context: context.to_string(),
-            },
-            _ => StorageError::WriteFailed {
-                context: context.to_string(),
-                source: Box::new(StorageErrorSource::Io(e.to_string())),
-            },
-        }
-    }
-
-    pub fn from_serialization_error(e: impl std::fmt::Display, context: &str) -> Self {
-        StorageError::DataCorruption {
-            context: context.to_string(),
-            details: e.to_string(),
-        }
-    }
-}
-
 impl From<FlashQError> for HttpError {
     fn from(err: FlashQError) -> Self {
         HttpError::Domain(err)
@@ -221,20 +113,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_error_display() {
+    fn displays_flashq_error_correctly() {
         let error = FlashQError::TopicNotFound {
             topic: "test".to_string(),
         };
         assert_eq!(error.to_string(), "Topic 'test' not found");
-
-        let storage_error = StorageError::InsufficientSpace {
-            context: "disk".to_string(),
-        };
-        assert_eq!(storage_error.to_string(), "Insufficient space in disk");
     }
 
     #[test]
-    fn test_error_conversions() {
+    fn converts_storage_error_to_flashq_error() {
         let storage_error = StorageError::InsufficientSpace {
             context: "disk".to_string(),
         };
@@ -245,19 +132,6 @@ mod tests {
                 assert_eq!(context, "disk");
             }
             _ => panic!("Conversion failed"),
-        }
-    }
-
-    #[test]
-    fn test_io_error_conversion() {
-        let io_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
-        let storage_error = StorageError::from_io_error(io_error, "file write");
-
-        match storage_error {
-            StorageError::PermissionDenied { context } => {
-                assert_eq!(context, "file write");
-            }
-            _ => panic!("IO error conversion failed"),
         }
     }
 }

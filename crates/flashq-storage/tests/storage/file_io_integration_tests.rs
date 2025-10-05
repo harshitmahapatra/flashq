@@ -1,5 +1,5 @@
-use flashq::storage::StorageBackend;
-use flashq::storage::file::FileIo;
+use flashq_storage::StorageBackend;
+use flashq_storage::file::FileIo;
 use tempfile::tempdir;
 use test_log::test;
 
@@ -48,8 +48,10 @@ fn test_file_io_sequential_writes() {
 
     let mut file_handle = FileIo::create_with_append_and_read_permissions(&test_file_path).unwrap();
 
-    let data1 = b"First line\n";
-    let data2 = b"Second line\n";
+    let data1 = b"First line
+";
+    let data2 = b"Second line
+";
 
     let pos1 = FileIo::append_data_to_end(&mut file_handle, data1).unwrap();
     let pos2 = FileIo::append_data_to_end(&mut file_handle, data2).unwrap();
@@ -65,7 +67,7 @@ fn test_file_io_sequential_writes() {
 fn test_storage_backend_with_file_io() {
     let temp_dir = tempdir().unwrap();
     let backend = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         temp_dir.path(),
     )
     .unwrap();
@@ -90,7 +92,7 @@ fn test_storage_backend_with_file_io() {
 fn test_consumer_group_with_file_io() {
     let temp_dir = tempdir().unwrap();
     let backend = StorageBackend::new_file_with_path(
-        flashq::storage::file::SyncMode::Immediate,
+        flashq_storage::file::SyncMode::Immediate,
         temp_dir.path(),
     )
     .unwrap();

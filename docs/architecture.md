@@ -41,20 +41,22 @@ graph TD
     CSrv --> CS
     ML --> MS
 
-    subgraph "Storage Backends"
-        I[InMemoryTopicLog]
-        J[FileTopicLog]
-        K[InMemoryConsumerOffsetStore]
-        L[FileConsumerOffsetStore]
-    end
+    subgraph "flashq-storage crate"
+        subgraph "Storage Backends"
+            I[InMemoryTopicLog]
+            J[FileTopicLog]
+            K[InMemoryConsumerOffsetStore]
+            L[FileConsumerOffsetStore]
+        end
 
-    subgraph "File Storage Hierarchy"
-        J -->|"1:N"| JP["Partition(s)"]
-        JP -->|"1:1"| M["SegmentManager"]
-        M -->|"1:N"| N["LogSegment(s)"]
-        N -->|"1:1"| O["SparseIndex"]
-        N -->|"1:1"| Q["SparseTimeIndex"]
-        J --> P["Serialization Utils"]
+        subgraph "File Storage Hierarchy"
+            J -->|"1:N"| JP["Partition(s)"]
+            JP -->|"1:1"| M["SegmentManager"]
+            M -->|"1:N"| N["LogSegment(s)"]
+            N -->|"1:1"| O["SparseIndex"]
+            N -->|"1:1"| Q["SparseTimeIndex"]
+            J --> P["Serialization Utils"]
+        end
     end
 
     G --> I
@@ -65,8 +67,7 @@ graph TD
 
 ## Project Structure
 
-**Core Components:**
-- `FlashQ`: Main queue with topic and consumer group management
+**Storage Components (`flashq-storage` crate):**
 - `Record/RecordWithOffset`: Message structures with keys, headers, and offsets
 - `PartitionId`: Partition identification for topic organization
 - `TopicLog/ConsumerOffsetStore` traits: Storage abstraction layer
@@ -74,11 +75,20 @@ graph TD
 - `FileTopicLog`: File storage with partitions and segments
 - `InMemoryTopicLog`: Fast in-memory storage
 
-**Cluster Components:**
+**Core Components (`flashq` crate):**
+- `FlashQ`: Main queue with topic and consumer group management
+- Re-exports storage types for backward compatibility
+
+**Cluster Components (`flashq-cluster` crate):**
 - `ClusterService`: Interface for cluster coordination operations
 - `MetadataStore`: Persistent storage for broker and partition metadata
 - `ClusterServer/ClusterClient`: gRPC adapters for cluster communication
 - `ManifestLoader`: Bootstrap cluster state from configuration files
+
+**gRPC Components (`flashq-grpc` crate):**
+- `FlashQGrpcBroker`: Main server implementation
+- Producer/Consumer/Admin services
+- CLI client for testing and interaction
 
 **Key Features:**
 - Partition-aware storage infrastructure with per-partition offset tracking

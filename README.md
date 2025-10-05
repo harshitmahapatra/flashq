@@ -1,8 +1,9 @@
 # ⚡ FlashQ
 
-A Kafka-inspired record queue system built in Rust with gRPC API. The project consists of three crates in a Cargo workspace:
+A Kafka-inspired record queue system built in Rust with gRPC API. The project consists of four crates in a Cargo workspace:
 
-- **`flashq`** - Core library with storage backends and queue management
+- **`flashq-storage`** - Storage backend implementations (memory and file-based)
+- **`flashq`** - Core queue library and API
 - **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
 - **`flashq-cluster`** - Cluster coordination and metadata management
 
