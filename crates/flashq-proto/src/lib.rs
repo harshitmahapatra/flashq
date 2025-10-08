@@ -15,7 +15,9 @@ pub mod flashq {
 
 /// FlashQ cluster coordination protocol
 pub mod cluster {
-    tonic::include_proto!("flashq.cluster");
+    pub mod v1 {
+        tonic::include_proto!("flashq.cluster.v1");
+    }
 }
 
 // Re-export broker API types for convenience
@@ -30,5 +32,5 @@ pub use flashq::v1::producer_client::ProducerClient;
 pub use flashq::v1::producer_server::ProducerServer;
 
 // Re-export cluster protocol client and server
-pub use cluster::cluster_client::ClusterClient;
-pub use cluster::cluster_server::ClusterServer;
+pub use cluster::v1::cluster_client::ClusterClient;
+pub use cluster::v1::cluster_server::ClusterServer;

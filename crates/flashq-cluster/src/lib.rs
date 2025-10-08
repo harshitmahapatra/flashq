@@ -14,7 +14,9 @@ pub mod traits;
 pub mod types;
 
 // Re-export cluster protocol from flashq-proto
-pub use flashq_proto::cluster as proto;
+pub mod proto {
+    pub use flashq_proto::cluster::v1::*;
+}
 
 pub use error::ClusterError;
 

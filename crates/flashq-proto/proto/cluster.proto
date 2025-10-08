@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package flashq.cluster;
+package flashq.cluster.v1;
 
 // Inter-cluster gRPC services for metadata sharing and broker coordination
 
