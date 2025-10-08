@@ -13,9 +13,9 @@ pub mod service;
 pub mod traits;
 pub mod types;
 
-// Generated protobuf/gRPC modules
+// Re-export cluster protocol from flashq-proto
 pub mod proto {
-    tonic::include_proto!("flashq.cluster");
+    pub use flashq_proto::cluster::v1::*;
 }
 
 pub use error::ClusterError;
@@ -33,7 +33,7 @@ pub use server::ClusterServer;
 // Re-export cluster service implementation
 pub use service::ClusterServiceImpl;
 
-// Re-export core flashq types and services for flashq-grpc
+// Re-export core flashq types and services for flashq-broker
 pub use flashq::{FlashQ, Record, RecordWithOffset};
 pub mod storage {
     pub use flashq::*;

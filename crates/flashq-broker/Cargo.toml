@@ -1,5 +1,5 @@
 [package]
-name = "flashq-grpc"
+name = "flashq-broker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,16 +9,13 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "grpc-server"
-path = "src/bin/server.rs"
-
-[[bin]]
-name = "grpc-client"
-path = "src/bin/client.rs"
+path = "src/bin/broker.rs"
 
 [dependencies]
 flashq = { path = "../flashq" }
 flashq-storage = { path = "../flashq-storage" }
 flashq-cluster = { path = "../flashq-cluster" }
+flashq-proto = { path = "../flashq-proto" }
 tonic.workspace = true
 prost.workspace = true
 tokio.workspace = true
@@ -30,11 +27,8 @@ chrono.workspace = true
 tower-http.workspace = true
 async-trait.workspace = true
 
-[build-dependencies]
-tonic-build.workspace = true
-protoc-bin-vendored.workspace = true
-
 [dev-dependencies]
+flashq-client = { path = "../flashq-client" }
 uuid.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

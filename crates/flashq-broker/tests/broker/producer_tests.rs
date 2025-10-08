@@ -1,6 +1,5 @@
 use crate::test_utilities::TestServer;
-use flashq_grpc::flashq::v1 as proto;
-
+use flashq_broker::flashq::v1 as proto;
 #[tokio::test]
 async fn test_produce_and_fetch_offset() {
     let srv = TestServer::start().await.expect("start server");

@@ -5,6 +5,7 @@
 //! and error scenarios.
 
 use chrono::Utc;
+use flashq_broker::{ClusterServer, broker::FlashQBroker};
 use flashq_cluster::{
     client::ClusterClient,
     manifest::types::{BrokerSpec, ClusterManifest, PartitionAssignment, TopicAssignment},
@@ -13,7 +14,6 @@ use flashq_cluster::{
     service::ClusterServiceImpl,
     types::*,
 };
-use flashq_grpc::{ClusterServer, server::FlashQGrpcBroker};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -64,7 +64,7 @@ async fn setup_cluster_server() -> (String, TempDir, tokio::task::JoinHandle<()>
 
     // Create FlashQ core
     let core = Arc::new(flashq_cluster::FlashQ::new());
-    let grpc_service = Arc::new(FlashQGrpcBroker::new(core));
+    let grpc_service = Arc::new(FlashQBroker::new(core));
 
     // Create file-based metadata store
     let metadata_store: Arc<dyn MetadataStore> = {

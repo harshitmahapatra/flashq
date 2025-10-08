@@ -6,14 +6,23 @@ Internal architecture and design overview of FlashQ.
 
 ```mermaid
 graph TD
-    A2[gRPC CLI Client] -->|gRPC| B2[gRPC Server]
+    A2[CLI Client] -->|gRPC| B2[Broker Server]
     C[Interactive Demo] --> D[FlashQ Core Library]
     B2 --> D
     B2 --> CS[ClusterService]
 
-    subgraph "flashq-grpc crate"
-        B2
+    subgraph "flashq-client crate"
         A2
+        FC[FlashqClient Helper]
+    end
+
+    subgraph "flashq-broker crate"
+        B2
+    end
+
+    subgraph "flashq-proto crate"
+        PB[Protocol Buffers]
+        CB[Cluster Protocol]
     end
 
     subgraph "flashq-cluster crate"
@@ -29,6 +38,13 @@ graph TD
         E[DashMap Topics]
         F[DashMap Consumer Offset Stores]
     end
+
+    A2 --> FC
+    FC --> PB
+    B2 --> PB
+    CS --> CB
+    CC --> CB
+    CSrv --> CB
 
     D --> E
     D --> F
@@ -79,16 +95,25 @@ graph TD
 - `FlashQ`: Main queue with topic and consumer group management
 - Re-exports storage types for backward compatibility
 
+**Protocol Components (`flashq-proto` crate):**
+- Protocol Buffer definitions and generated code
+- Broker API protocol (flashq.v1)
+- Cluster coordination protocol (flashq.cluster.v1)
+- Shared type definitions
+
+**Client Components (`flashq-client` crate):**
+- `FlashqClient`: Convenience wrapper for broker services
+- CLI client for testing and interaction
+
+**Broker Components (`flashq-broker` crate):**
+- `FlashQGrpcBroker`: Main server implementation
+- Producer/Consumer/Admin service implementations
+
 **Cluster Components (`flashq-cluster` crate):**
 - `ClusterService`: Interface for cluster coordination operations
 - `MetadataStore`: Persistent storage for broker and partition metadata
 - `ClusterServer/ClusterClient`: gRPC adapters for cluster communication
 - `ManifestLoader`: Bootstrap cluster state from configuration files
-
-**gRPC Components (`flashq-grpc` crate):**
-- `FlashQGrpcBroker`: Main server implementation
-- Producer/Consumer/Admin services
-- CLI client for testing and interaction
 
 **Key Features:**
 - Partition-aware storage infrastructure with per-partition offset tracking
@@ -105,7 +130,7 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant B as gRPC Server
+    participant B as Broker Server
     participant Q as FlashQ
     participant T as TopicLog
 

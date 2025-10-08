@@ -10,12 +10,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("PROTOC_INCLUDE", include_path.as_os_str());
     }
 
-    // Compile the gRPC/protobuf definitions into Rust code using tonic/prost.
+    // Compile both flashq and cluster proto files
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
         .compile_protos(
-            &["proto/flashq.proto"],
+            &["proto/flashq.proto", "proto/cluster.proto"],
             &["proto", &include_path.to_string_lossy()],
         )?;
     Ok(())

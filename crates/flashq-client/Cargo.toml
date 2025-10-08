@@ -1,0 +1,23 @@
+[package]
+name = "flashq-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "flashq-client"
+path = "src/bin/flashq-client.rs"
+
+[dependencies]
+flashq-proto = { path = "../flashq-proto" }
+tonic.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

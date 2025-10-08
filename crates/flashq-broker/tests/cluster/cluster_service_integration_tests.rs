@@ -4,6 +4,7 @@
 //! file-based storage engine for log offsets, leadership checks, and replication acknowledgements.
 
 use chrono::Utc;
+use flashq_broker::broker::FlashQBroker;
 use flashq_cluster::{
     ClusterBroker, ClusterService, Record,
     manifest::types::{BrokerSpec, ClusterManifest, PartitionAssignment, TopicAssignment},
@@ -11,7 +12,6 @@ use flashq_cluster::{
     proto::{HeartbeatRequest, PartitionHeartbeat, ReportPartitionStatusRequest},
     types::*,
 };
-use flashq_grpc::server::FlashQGrpcBroker;
 use std::{collections::HashMap, sync::Arc};
 use tempfile::TempDir;
 
@@ -56,8 +56,8 @@ fn seeded_manifest() -> ClusterManifest {
 }
 
 /// Setup function that creates a FlashQ broker with file storage and cluster service
-async fn setup_broker_with_cluster_service()
--> (Arc<FlashQGrpcBroker>, Arc<dyn ClusterService>, TempDir) {
+async fn setup_broker_with_cluster_service() -> (Arc<FlashQBroker>, Arc<dyn ClusterService>, TempDir)
+{
     let temp_dir = TempDir::new().unwrap();
 
     // Create FlashQ core with memory storage for simplicity
@@ -71,7 +71,7 @@ async fn setup_broker_with_cluster_service()
     };
 
     // Create FlashQ gRPC broker
-    let broker = Arc::new(FlashQGrpcBroker::new(core));
+    let broker = Arc::new(FlashQBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
     let cluster_service: Arc<dyn ClusterService> =
@@ -307,7 +307,7 @@ async fn test_cluster_service_heartbeat_persistence() {
     // Create first service instance and process heartbeat
     let _cluster_service = {
         let core = Arc::new(flashq_cluster::FlashQ::new());
-        let broker = Arc::new(FlashQGrpcBroker::new(core));
+        let broker = Arc::new(FlashQBroker::new(core));
 
         // Post some records
         broker
