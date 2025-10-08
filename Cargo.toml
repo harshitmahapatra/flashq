@@ -1,8 +1,10 @@
 [workspace]
 members = [
     "crates/flashq",
+    "crates/flashq-proto",
     "crates/flashq-broker",
-    "crates/flashq-cluster", "crates/flashq-storage",
+    "crates/flashq-cluster",
+    "crates/flashq-storage",
 ]
 # Build only the core crate by default so `cargo build` remains lean
 default-members = ["crates/flashq"]

@@ -9,7 +9,7 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "grpc-server"
-path = "src/bin/server.rs"
+path = "src/bin/broker.rs"
 
 [[bin]]
 name = "grpc-client"
@@ -19,6 +19,7 @@ path = "src/bin/client.rs"
 flashq = { path = "../flashq" }
 flashq-storage = { path = "../flashq-storage" }
 flashq-cluster = { path = "../flashq-cluster" }
+flashq-proto = { path = "../flashq-proto" }
 tonic.workspace = true
 prost.workspace = true
 tokio.workspace = true
@@ -29,10 +30,6 @@ clap.workspace = true
 chrono.workspace = true
 tower-http.workspace = true
 async-trait.workspace = true
-
-[build-dependencies]
-tonic-build.workspace = true
-protoc-bin-vendored.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true

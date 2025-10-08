@@ -13,10 +13,8 @@ pub mod service;
 pub mod traits;
 pub mod types;
 
-// Generated protobuf/gRPC modules
-pub mod proto {
-    tonic::include_proto!("flashq.cluster");
-}
+// Re-export cluster protocol from flashq-proto
+pub use flashq_proto::cluster as proto;
 
 pub use error::ClusterError;
 

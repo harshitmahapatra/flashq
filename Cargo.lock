@@ -445,14 +445,13 @@ dependencies = [
  "clap",
  "flashq",
  "flashq-cluster",
+ "flashq-proto",
  "flashq-storage",
  "prost",
- "protoc-bin-vendored",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -466,11 +465,11 @@ dependencies = [
  "async-trait",
  "chrono",
  "flashq",
+ "flashq-proto",
  "futures-util",
  "log",
  "parking_lot",
  "prost",
- "protoc-bin-vendored",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -478,8 +477,17 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tracing",
+]
+
+[[package]]
+name = "flashq-proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
