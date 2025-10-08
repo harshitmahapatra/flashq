@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use clap::{Parser, ValueEnum};
+use flashq_broker::broker::FlashQBroker;
 use flashq_cluster::{
     manifest::loader::ManifestLoader, metadata_store::MetadataBackend, service::ClusterServiceImpl,
     storage::StorageBackend, types::BrokerId,
@@ -31,12 +32,7 @@ impl From<FileSyncMode> for SyncMode {
 }
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "flashq-grpc-server",
-    version,
-    author,
-    about = "FlashQ gRPC server"
-)]
+#[command(name = "flashq-broker", version, author, about = "FlashQ broker")]
 struct Args {
     /// Bind address (IP or hostname)
     #[arg(long, default_value = "0.0.0.0")]
@@ -109,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broker_id = BrokerId(args.broker_id);
 
     // Create FlashQBroker implementation from the gRPC service
-    let flashq_service = Arc::new(flashq_grpc::server::FlashQGrpcBroker::new(core.clone()));
+    let flashq_service = Arc::new(FlashQBroker::new(core.clone()));
 
     // Create cluster service with optional cluster client
     let cluster_service = if let Some(controller_endpoint) = args.cluster_controller {
@@ -149,6 +145,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(%addr, broker_id = %args.broker_id, "Starting FlashQ gRPC server with cluster support");
     let cluster_server = flashq_cluster::ClusterServer::new(cluster_service);
-    flashq_grpc::server::serve(addr, core, cluster_server).await?;
+    flashq_broker::broker::serve(addr, core, cluster_server).await?;
     Ok(())
 }

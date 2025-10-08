@@ -33,7 +33,7 @@ pub use server::ClusterServer;
 // Re-export cluster service implementation
 pub use service::ClusterServiceImpl;
 
-// Re-export core flashq types and services for flashq-grpc
+// Re-export core flashq types and services for flashq-broker
 pub use flashq::{FlashQ, Record, RecordWithOffset};
 pub mod storage {
     pub use flashq::*;

@@ -11,7 +11,7 @@ graph TD
     B2 --> D
     B2 --> CS[ClusterService]
 
-    subgraph "flashq-grpc crate"
+    subgraph "flashq-broker crate"
         B2
         A2
     end

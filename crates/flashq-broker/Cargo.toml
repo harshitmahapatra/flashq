@@ -1,5 +1,5 @@
 [package]
-name = "flashq-grpc"
+name = "flashq-broker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -14,7 +14,7 @@ cargo build && cargo test  # Verify setup (workspace)
 ```bash
 cargo build                    # Debug build (workspace)
 cargo build --release          # Release build (target/release/)
-cargo build -p flashq-grpc --bin grpc-server # gRPC server binary
+cargo build -p flashq-broker --bin grpc-server # gRPC server binary
 cargo build -p flashq --bin flashq        # Demo binary
 ```
 
@@ -34,9 +34,9 @@ cargo build -p flashq --bin flashq        # Demo binary
 cargo test                              # All tests (workspace)
 cargo test -p flashq --lib              # Core library unit tests
 cargo test -p flashq-storage --lib      # Storage library unit tests
-cargo test -p flashq-grpc --lib         # gRPC library unit tests
+cargo test -p flashq-broker --lib         # gRPC library unit tests
 cargo test --test '*'                   # All integration tests
-cargo test -p flashq-grpc --test grpc_integration_tests # gRPC integration tests
+cargo test -p flashq-broker --test grpc_integration_tests # gRPC integration tests
 cargo test -p flashq-storage --test storage_integration_tests # Storage integration tests
 cargo test test_name                     # Specific test
 cargo test -- --nocapture              # With output
@@ -73,10 +73,10 @@ cargo check                     # Fast compile check
 
 ```bash
 cargo run -p flashq --bin flashq                           # Interactive demo
-cargo run -p flashq-grpc --bin grpc-server                 # gRPC server (in-memory, TRACE logging)
-cargo run -p flashq-grpc --bin grpc-server -- --storage=file # gRPC file storage
+cargo run -p flashq-broker --bin grpc-server                 # gRPC server (in-memory, TRACE logging)
+cargo run -p flashq-broker --bin grpc-server -- --storage=file # gRPC file storage
 ./target/release/grpc-server                               # Production gRPC (INFO logging)
-cargo run -p flashq-grpc --bin grpc-client -- connect      # gRPC CLI client
+cargo run -p flashq-broker --bin grpc-client -- connect      # gRPC CLI client
 ```
 
 ## Project Structure
@@ -153,10 +153,10 @@ RUST_LOG=flashq_storage::storage::file::consumer_group=debug cargo test partitio
 
 ```bash
 # In-memory (default)
-cargo run -p flashq-grpc --bin grpc-server
+cargo run -p flashq-broker --bin grpc-server
 
 # File storage with custom configuration
-cargo run -p flashq-grpc --bin grpc-server -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
+cargo run -p flashq-broker --bin grpc-server -- --storage=file --data-dir=./dev-data --batch-bytes=262144  # 256KB batches
 ```
 
 ## Debugging

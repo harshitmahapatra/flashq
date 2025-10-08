@@ -1,12 +1,12 @@
 use tonic::transport::{Channel, Endpoint};
 
 /// Convenience wrapper that provides typed clients for all services using a shared channel.
-pub struct FlashqGrpcClients {
+pub struct FlashqClient {
     channel: Channel,
 }
 
-impl FlashqGrpcClients {
-    /// Connect to a FlashQ gRPC server at the given URI, e.g., "http://127.0.0.1:50051".
+impl FlashqClient {
+    /// Connect to a FlashQ broker at the given URI, e.g., "http://127.0.0.1:50051".
     pub async fn connect<D: TryInto<Endpoint>>(dst: D) -> Result<Self, Box<dyn std::error::Error>>
     where
         D::Error: Into<Box<dyn std::error::Error + Send + Sync>>,

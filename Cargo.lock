@@ -437,6 +437,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashq-broker"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "clap",
+ "flashq",
+ "flashq-cluster",
+ "flashq-storage",
+ "prost",
+ "protoc-bin-vendored",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "flashq-cluster"
 version = "0.1.0"
 dependencies = [
@@ -457,29 +480,6 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
-]
-
-[[package]]
-name = "flashq-grpc"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "clap",
- "flashq",
- "flashq-cluster",
- "flashq-storage",
- "prost",
- "protoc-bin-vendored",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-build",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

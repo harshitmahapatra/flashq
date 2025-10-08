@@ -38,24 +38,24 @@ cargo run -p flashq --bin flashq
 **Start gRPC server:**
 ```bash
 # In-memory storage (default)
-cargo run -p flashq-grpc --bin grpc-server           # Default port 50051
-cargo run -p flashq-grpc --bin grpc-server -- --port=50052
+cargo run -p flashq-broker --bin grpc-server           # Default port 50051
+cargo run -p flashq-broker --bin grpc-server -- --port=50052
 
 # File storage backend
-cargo run -p flashq-grpc --bin grpc-server -- --storage=file --data-dir=./data
+cargo run -p flashq-broker --bin grpc-server -- --storage=file --data-dir=./data
 ```
 
 **Basic gRPC client usage:**
 ```bash
 # Post records
-cargo run -p flashq-grpc --bin grpc-client -- produce --topic=news --value="Hello gRPC!"
+cargo run -p flashq-broker --bin grpc-client -- produce --topic=news --value="Hello gRPC!"
 
 # Create consumer group and fetch
-cargo run -p flashq-grpc --bin grpc-client -- create-group --group-id=my-group
-cargo run -p flashq-grpc --bin grpc-client -- fetch-offset --group-id=my-group --topic=news
+cargo run -p flashq-broker --bin grpc-client -- create-group --group-id=my-group
+cargo run -p flashq-broker --bin grpc-client -- fetch-offset --group-id=my-group --topic=news
 
 # Real-time streaming subscription
-cargo run -p flashq-grpc --bin grpc-client -- subscribe --group-id=my-group --topic=news
+cargo run -p flashq-broker --bin grpc-client -- subscribe --group-id=my-group --topic=news
 ```
 
 ## Development

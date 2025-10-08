@@ -15,8 +15,8 @@ pub mod flashq {
 
 pub use flashq::v1::*;
 
+pub mod broker;
 pub mod client;
-pub mod server;
 
 pub use flashq::v1::admin_client::AdminClient;
 pub use flashq::v1::admin_server::AdminServer;

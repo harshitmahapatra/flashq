@@ -9,11 +9,11 @@ use tempfile::TempDir;
 use tokio::time::sleep;
 
 // Re-export cluster types for test convenience
+pub use flashq_broker::broker::FlashQBroker;
 pub use flashq_cluster::{
     Record, metadata_store::FileMetadataStore, service::ClusterServiceImpl,
     storage::StorageBackend, types::*,
 };
-pub use flashq_grpc::server::FlashQGrpcBroker;
 pub use flashq_storage::file::SyncMode;
 
 static SERVER_INIT: Once = Once::new();
@@ -30,17 +30,17 @@ pub fn ensure_server_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
     SERVER_INIT.call_once(|| {
         let output = Command::new("cargo")
-            .args(["build", "-p", "flashq-grpc", "--bin", "grpc-server"])
+            .args(["build", "-p", "flashq-broker", "--bin", "broker-server"])
             .output()
-            .expect("Failed to build grpc-server binary");
+            .expect("Failed to build broker-server binary");
         if !output.status.success() {
             panic!(
-                "Failed to build grpc-server binary: {}",
+                "Failed to build broker-server binary: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
         *SERVER_BINARY_PATH.lock().unwrap() =
-            Some(PathBuf::from("../../../target/debug/grpc-server"));
+            Some(PathBuf::from("../../../target/debug/broker-server"));
     });
     Ok(SERVER_BINARY_PATH
         .lock()
@@ -79,14 +79,14 @@ impl TestServer {
                 if let Some(mut stderr) = process.stderr.take() {
                     let mut buf = String::new();
                     let _ = stderr.read_to_string(&mut buf);
-                    eprintln!("grpc-server exited early: {status}, stderr: {buf}");
+                    eprintln!("broker-server exited early: {status}, stderr: {buf}");
                 }
-                return Err("grpc-server exited".into());
+                return Err("broker-server exited".into());
             }
             if let Ok(mut c) =
-                flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
+                flashq_broker::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
             {
-                if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
+                if c.health(flashq_broker::flashq::v1::Empty {}).await.is_ok() {
                     return Ok(Self {
                         process,
                         port,
@@ -97,13 +97,13 @@ impl TestServer {
             sleep(Duration::from_millis(300)).await;
         }
         let _ = process.kill();
-        Err("grpc-server failed to start".into())
+        Err("broker-server failed to start".into())
     }
 
     pub async fn start_with_storage(storage: &str) -> Result<Self, Box<dyn std::error::Error>> {
         if storage == "file" {
             let temp_dir = tempfile::Builder::new()
-                .prefix("flashq_grpc_test_")
+                .prefix("flashq_broker_test_")
                 .tempdir()?;
             Self::start_with_data_dir(temp_dir.path()).await
         } else {
@@ -132,14 +132,14 @@ impl TestServer {
                 if let Some(mut stderr) = process.stderr.take() {
                     let mut buf = String::new();
                     let _ = stderr.read_to_string(&mut buf);
-                    eprintln!("grpc-server exited early: {status}, stderr: {buf}");
+                    eprintln!("broker-server exited early: {status}, stderr: {buf}");
                 }
-                return Err("grpc-server exited".into());
+                return Err("broker-server exited".into());
             }
             if let Ok(mut c) =
-                flashq_grpc::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
+                flashq_broker::flashq::v1::admin_client::AdminClient::connect(addr.clone()).await
             {
-                if c.health(flashq_grpc::flashq::v1::Empty {}).await.is_ok() {
+                if c.health(flashq_broker::flashq::v1::Empty {}).await.is_ok() {
                     return Ok(Self {
                         process,
                         port,
@@ -150,7 +150,7 @@ impl TestServer {
             sleep(Duration::from_millis(300)).await;
         }
         let _ = process.kill();
-        Err("grpc-server failed to start".into())
+        Err("broker-server failed to start".into())
     }
 
     pub fn data_dir(&self) -> Option<&Path> {
@@ -163,8 +163,8 @@ impl TestServer {
 pub fn create_test_broker_with_cluster_service(
     temp_dir: &TempDir,
     broker_id: BrokerId,
-) -> (Arc<FlashQGrpcBroker>, Arc<ClusterServiceImpl>) {
-    // Create FlashQ core with file storage backend (following server.rs pattern)
+) -> (Arc<FlashQBroker>, Arc<ClusterServiceImpl>) {
+    // Create FlashQ core with file storage backend (following broker pattern)
     let storage_backend = StorageBackend::new_file_with_path(
         SyncMode::None, // Use no sync for tests to avoid performance overhead
         temp_dir.path().join("flashq_data"),
@@ -179,7 +179,7 @@ pub fn create_test_broker_with_cluster_service(
     let metadata_store = Arc::new(FileMetadataStore::new(temp_dir.path().join("cluster")).unwrap());
 
     // Create FlashQ gRPC service
-    let grpc_service = Arc::new(FlashQGrpcBroker::new(core));
+    let grpc_service = Arc::new(FlashQBroker::new(core));
 
     // Create cluster service with FlashQ broker integration
     let cluster_service = Arc::new(ClusterServiceImpl::with_broker(
@@ -194,7 +194,7 @@ pub fn create_test_broker_with_cluster_service(
 /// Create a test topic with sample records for integration testing
 #[allow(dead_code)]
 pub fn create_test_topic_with_records(
-    grpc_service: &FlashQGrpcBroker,
+    grpc_service: &FlashQBroker,
     topic: &str,
     record_count: usize,
 ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {

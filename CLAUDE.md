@@ -288,8 +288,8 @@ After building with `cargo build --release`:
 ```bash
 # Install to ~/.cargo/bin (ensure it's in PATH)
 cargo install --path crates/flashq --bin flashq          # Interactive demo
-cargo install --path crates/flashq-grpc --bin grpc-server # gRPC server
-cargo install --path crates/flashq-grpc --bin grpc-client # gRPC client
+cargo install --path crates/flashq-broker --bin grpc-server # gRPC server
+cargo install --path crates/flashq-broker --bin grpc-client # gRPC client
 
 # Run from anywhere
 flashq                                    # Interactive demo

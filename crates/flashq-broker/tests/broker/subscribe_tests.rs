@@ -1,6 +1,5 @@
 use crate::test_utilities::TestServer;
-use flashq_grpc::flashq::v1 as proto;
-
+use flashq_broker::flashq::v1 as proto;
 #[tokio::test]
 async fn test_subscribe_receives_new_records() {
     let srv = TestServer::start().await.expect("start server");

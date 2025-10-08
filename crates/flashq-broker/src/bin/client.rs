@@ -1,14 +1,10 @@
 use clap::{Args, Parser, Subcommand};
-use flashq_grpc::flashq::v1 as proto;
+use flashq_broker::client::FlashqClient;
+use flashq_broker::flashq::v1 as proto;
 use std::collections::HashMap;
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "flashq-grpc-client",
-    version,
-    author,
-    about = "FlashQ gRPC client"
-)]
+#[command(name = "flashq-client", version, author, about = "FlashQ client")]
 struct Cli {
     /// Server address, e.g. http://127.0.0.1:50051
     #[arg(long, default_value = "http://127.0.0.1:50051")]
@@ -164,11 +160,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Connect => {
-            let _clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr).await?;
+            let _clients = FlashqClient::connect(cli.addr).await?;
             println!("connected");
         }
         Commands::Produce(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut producer = clients.producer();
             let headers = parse_headers(&args.headers);
             let mut records = Vec::with_capacity(args.value.len());
@@ -187,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("offset: {}\ntimestamp: {}", resp.offset, resp.timestamp);
         }
         Commands::CreateGroup(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::ConsumerGroupId {
                 group_id: args.group_id,
@@ -196,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("group_id: {}", resp.group_id);
         }
         Commands::DeleteGroup(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::ConsumerGroupId {
                 group_id: args.group_id,
@@ -205,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("deleted");
         }
         Commands::FetchOffset(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::FetchByOffsetRequest {
                 group_id: args.group_id,
@@ -224,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::FetchTime(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::FetchByTimeRequest {
                 group_id: args.group_id,
@@ -243,7 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::CommitOffset(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::CommitOffsetRequest {
                 group_id: args.group_id,
@@ -257,7 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::GetOffset(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::GetOffsetRequest {
                 group_id: args.group_id,
@@ -270,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::ListTopics => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut admin = clients.admin();
             let resp = admin.list_topics(proto::Empty {}).await?.into_inner();
             for t in resp.topics {
@@ -278,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::HighWaterMark(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut admin = clients.admin();
             let req = proto::HighWaterMarkRequest { topic: args.topic };
             let resp = admin.high_water_mark(req).await?.into_inner();
@@ -288,7 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Commands::Subscribe(args) => {
-            let clients = flashq_grpc::client::FlashqGrpcClients::connect(cli.addr.clone()).await?;
+            let clients = FlashqClient::connect(cli.addr.clone()).await?;
             let mut consumer = clients.consumer();
             let req = proto::FetchByOffsetRequest {
                 group_id: args.group_id,

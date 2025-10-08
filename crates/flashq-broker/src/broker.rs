@@ -55,11 +55,11 @@ mod validation {
 }
 
 #[derive(Clone)]
-pub struct FlashQGrpcBroker {
+pub struct FlashQBroker {
     pub core: Arc<flashq_cluster::FlashQ>,
 }
 
-impl FlashQGrpcBroker {
+impl FlashQBroker {
     pub fn new(core: Arc<flashq_cluster::FlashQ>) -> Self {
         Self { core }
     }
@@ -97,7 +97,7 @@ fn to_proto_rwo(
 }
 
 #[tonic::async_trait]
-impl Producer for FlashQGrpcBroker {
+impl Producer for FlashQBroker {
     async fn produce(
         &self,
         request: Request<ProduceRequest>,
@@ -181,7 +181,7 @@ impl Producer for FlashQGrpcBroker {
 }
 
 #[tonic::async_trait]
-impl Consumer for FlashQGrpcBroker {
+impl Consumer for FlashQBroker {
     async fn create_consumer_group(
         &self,
         request: Request<ConsumerGroupId>,
@@ -426,7 +426,7 @@ impl Consumer for FlashQGrpcBroker {
 }
 
 #[tonic::async_trait]
-impl Admin for FlashQGrpcBroker {
+impl Admin for FlashQBroker {
     async fn list_topics(
         &self,
         _request: Request<Empty>,
@@ -457,7 +457,7 @@ impl Admin for FlashQGrpcBroker {
 }
 // FlashQBroker trait implementation
 #[async_trait::async_trait]
-impl flashq_cluster::ClusterBroker for FlashQGrpcBroker {
+impl flashq_cluster::ClusterBroker for FlashQBroker {
     async fn get_high_water_mark(
         &self,
         topic: &str,
@@ -524,7 +524,7 @@ pub async fn serve<T: flashq_cluster::ClusterService + 'static>(
     core: Arc<flashq_cluster::FlashQ>,
     cluster_server: flashq_cluster::ClusterServer<T>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let svc = FlashQGrpcBroker::new(core);
+    let svc = FlashQBroker::new(core);
     tonic::transport::Server::builder()
         .layer(TraceLayer::new_for_http())
         .add_service(producer_server::ProducerServer::new(svc.clone()))
@@ -540,9 +540,9 @@ pub async fn serve<T: flashq_cluster::ClusterService + 'static>(
 mod tests {
     use super::*;
 
-    fn service() -> FlashQGrpcBroker {
+    fn service() -> FlashQBroker {
         let core = Arc::new(flashq_cluster::FlashQ::new()); // defaults to in-memory storage
-        FlashQGrpcBroker::new(core)
+        FlashQBroker::new(core)
     }
 
     #[tokio::test]

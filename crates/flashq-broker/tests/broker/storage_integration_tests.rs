@@ -1,5 +1,5 @@
 use crate::test_utilities::TestServer;
-use flashq_grpc::flashq::v1 as proto;
+use flashq_broker::flashq::v1 as proto;
 use uuid::Uuid;
 
 fn unique_group() -> String {
@@ -276,17 +276,14 @@ async fn test_consumer_group_persistence_across_restarts() {
         .unwrap()
         .into_inner();
     assert_eq!(got2.offset, 2);
-    let hwm = flashq_grpc::flashq::v1::admin_client::AdminClient::connect(format!(
-        "http://127.0.0.1:{}",
-        srv2.port
-    ))
-    .await
-    .unwrap()
-    .high_water_mark(proto::HighWaterMarkRequest { topic })
-    .await
-    .unwrap()
-    .into_inner()
-    .high_water_mark;
+    let hwm = proto::admin_client::AdminClient::connect(format!("http://127.0.0.1:{}", srv2.port))
+        .await
+        .unwrap()
+        .high_water_mark(proto::HighWaterMarkRequest { topic })
+        .await
+        .unwrap()
+        .into_inner()
+        .high_water_mark;
     assert_eq!(hwm, 3);
 }
 
