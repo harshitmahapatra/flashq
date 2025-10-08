@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
-use flashq_broker::client::FlashqClient;
-use flashq_broker::flashq::v1 as proto;
+use flashq_client::FlashqClient;
+use flashq_proto::flashq::v1 as proto;
 use std::collections::HashMap;
 
 #[derive(Parser, Debug)]

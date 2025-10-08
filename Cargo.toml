@@ -2,6 +2,7 @@
 members = [
     "crates/flashq",
     "crates/flashq-proto",
+    "crates/flashq-client",
     "crates/flashq-broker",
     "crates/flashq-cluster",
     "crates/flashq-storage",

@@ -4,7 +4,6 @@
 //! client requests and interact with the FlashQ core.
 
 pub mod broker;
-pub mod client;
 
 // Re-export protocol buffer types from flashq-proto
 pub use flashq_proto::flashq;

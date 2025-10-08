@@ -11,10 +11,6 @@ path = "src/lib.rs"
 name = "grpc-server"
 path = "src/bin/broker.rs"
 
-[[bin]]
-name = "grpc-client"
-path = "src/bin/client.rs"
-
 [dependencies]
 flashq = { path = "../flashq" }
 flashq-storage = { path = "../flashq-storage" }
@@ -32,6 +28,7 @@ tower-http.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
+flashq-client = { path = "../flashq-client" }
 uuid.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

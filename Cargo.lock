@@ -444,6 +444,7 @@ dependencies = [
  "chrono",
  "clap",
  "flashq",
+ "flashq-client",
  "flashq-cluster",
  "flashq-proto",
  "flashq-storage",
@@ -456,6 +457,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "flashq-client"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "flashq-proto",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing-subscriber",
 ]
 
 [[package]]
