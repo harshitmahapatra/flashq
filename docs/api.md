@@ -58,45 +58,45 @@ Consumer groups track offsets per partition within topics. Current implementatio
 ### Producer Operations
 ```bash
 # Single record
-cargo run -p flashq-broker --bin grpc-client -- produce --topic=news --value="Hello gRPC!"
+cargo run -p flashq-client --bin flashq-client -- produce --topic=news --value="Hello gRPC!"
 
 # With key and headers
-cargo run -p flashq-broker --bin grpc-client -- produce --topic=news --value="Important news" --key=breaking --header="priority=high"
+cargo run -p flashq-client --bin flashq-client -- produce --topic=news --value="Important news" --key=breaking --header="priority=high"
 
 # Multiple records
-cargo run -p flashq-broker --bin grpc-client -- produce --topic=news --value="News 1" --value="News 2" --value="News 3"
+cargo run -p flashq-client --bin flashq-client -- produce --topic=news --value="News 1" --value="News 2" --value="News 3"
 ```
 
 ### Consumer Operations
 ```bash
 # Consumer group lifecycle
-cargo run -p flashq-broker --bin grpc-client -- create-group --group-id=analytics
-cargo run -p flashq-broker --bin grpc-client -- delete-group --group-id=analytics
+cargo run -p flashq-client --bin flashq-client -- create-group --group-id=analytics
+cargo run -p flashq-client --bin flashq-client -- delete-group --group-id=analytics
 
 # Fetch by offset
-cargo run -p flashq-broker --bin grpc-client -- fetch-offset --group-id=analytics --topic=news --max-records=10
+cargo run -p flashq-client --bin flashq-client -- fetch-offset --group-id=analytics --topic=news --max-records=10
 
 # Fetch by time
-cargo run -p flashq-broker --bin grpc-client -- fetch-time --group-id=analytics --topic=news --from-time="2025-01-01T00:00:00Z"
+cargo run -p flashq-client --bin flashq-client -- fetch-time --group-id=analytics --topic=news --from-time="2025-01-01T00:00:00Z"
 
 # Offset management
-cargo run -p flashq-broker --bin grpc-client -- commit-offset --group-id=analytics --topic=news --offset=42
-cargo run -p flashq-broker --bin grpc-client -- get-offset --group-id=analytics --topic=news
+cargo run -p flashq-client --bin flashq-client -- commit-offset --group-id=analytics --topic=news --offset=42
+cargo run -p flashq-client --bin flashq-client -- get-offset --group-id=analytics --topic=news
 
 # Real-time streaming (Ctrl+C to stop)
-cargo run -p flashq-broker --bin grpc-client -- subscribe --group-id=analytics --topic=news
+cargo run -p flashq-client --bin flashq-client -- subscribe --group-id=analytics --topic=news
 ```
 
 ### Admin Operations
 ```bash
 # List topics
-cargo run -p flashq-broker --bin grpc-client -- list-topics
+cargo run -p flashq-client --bin flashq-client -- list-topics
 
 # Topic high water mark
-cargo run -p flashq-broker --bin grpc-client -- high-water-mark --topic=news
+cargo run -p flashq-client --bin flashq-client -- high-water-mark --topic=news
 
 # Health check
-cargo run -p flashq-broker --bin grpc-client -- connect
+cargo run -p flashq-client --bin flashq-client -- connect
 ```
 
 ## Protocol Buffer Schema
@@ -129,4 +129,4 @@ message FetchResponse {
 }
 ```
 
-Full schema available in `crates/flashq-grpc/proto/flashq.proto`.
+Full schema available in `crates/flashq-proto/proto/flashq.proto`.

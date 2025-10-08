@@ -1,10 +1,12 @@
 # ⚡ FlashQ
 
-A Kafka-inspired record queue system built in Rust with gRPC API. The project consists of four crates in a Cargo workspace:
+A Kafka-inspired record queue system built in Rust with gRPC API. The project consists of six crates in a Cargo workspace:
 
 - **`flashq-storage`** - Storage backend implementations (memory and file-based)
 - **`flashq`** - Core queue library and API
-- **`flashq-grpc`** - gRPC broker, producer, consumer, and client implementations
+- **`flashq-proto`** - Protocol Buffer definitions and generated code
+- **`flashq-client`** - Client library and CLI tool
+- **`flashq-broker`** - gRPC broker server
 - **`flashq-cluster`** - Cluster coordination and metadata management
 
 **Note: This is a hobby project for learning Rust - not for production use.**
@@ -38,24 +40,24 @@ cargo run -p flashq --bin flashq
 **Start gRPC server:**
 ```bash
 # In-memory storage (default)
-cargo run -p flashq-broker --bin grpc-server           # Default port 50051
-cargo run -p flashq-broker --bin grpc-server -- --port=50052
+cargo run -p flashq-broker --bin broker           # Default port 50051
+cargo run -p flashq-broker --bin broker -- --port=50052
 
 # File storage backend
-cargo run -p flashq-broker --bin grpc-server -- --storage=file --data-dir=./data
+cargo run -p flashq-broker --bin broker -- --storage=file --data-dir=./data
 ```
 
 **Basic gRPC client usage:**
 ```bash
 # Post records
-cargo run -p flashq-broker --bin grpc-client -- produce --topic=news --value="Hello gRPC!"
+cargo run -p flashq-client --bin flashq-client -- produce --topic=news --value="Hello gRPC!"
 
 # Create consumer group and fetch
-cargo run -p flashq-broker --bin grpc-client -- create-group --group-id=my-group
-cargo run -p flashq-broker --bin grpc-client -- fetch-offset --group-id=my-group --topic=news
+cargo run -p flashq-client --bin flashq-client -- create-group --group-id=my-group
+cargo run -p flashq-client --bin flashq-client -- fetch-offset --group-id=my-group --topic=news
 
 # Real-time streaming subscription
-cargo run -p flashq-broker --bin grpc-client -- subscribe --group-id=my-group --topic=news
+cargo run -p flashq-client --bin flashq-client -- subscribe --group-id=my-group --topic=news
 ```
 
 ## Development
